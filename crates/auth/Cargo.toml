@@ -1,0 +1,29 @@
+[package]
+name = "auth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+app-core.workspace = true
+argon2.workspace = true
+base64.workspace = true
+bcrypt.workspace = true
+database.workspace = true
+image.workspace = true
+jsonwebtoken.workspace = true
+qrcode.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+totp-rs.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

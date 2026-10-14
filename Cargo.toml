@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/app-core",
+    "crates/database",
+    "crates/auth",
+    "crates/audit",
+    "crates/api-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+app-core = { path = "crates/app-core" }
+database = { path = "crates/database" }
+auth = { path = "crates/auth" }
+audit = { path = "crates/audit" }
+api-server = { path = "crates/api-server" }
+
+anyhow = "1"
+argon2 = "0.5"
+axum = "0.8"
+base64 = "0.22"
+bcrypt = "0.17"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+getrandom = "0.2"
+http-body-util = "0.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+jsonwebtoken = "9"
+qrcode = { version = "0.14", default-features = false, features = ["image"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs"] }
+toml = "0.8"
+totp-rs = { version = "5", features = ["gen_secret"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "set-header"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+print_stdout = "warn"
+unwrap_used = "warn"
+float_arithmetic = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1

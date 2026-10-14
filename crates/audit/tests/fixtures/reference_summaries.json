@@ -1,0 +1,1115 @@
+{
+ "summaries": [
+  [
+   "POST",
+   "/api/users",
+   "Created an user"
+  ],
+  [
+   "POST",
+   "/api/users/abc",
+   "Created an user"
+  ],
+  [
+   "POST",
+   "/api/users/abc/reset-password",
+   "Reset a user's password"
+  ],
+  [
+   "POST",
+   "/api/users/abc/reset-2fa",
+   "Reset a user's 2FA"
+  ],
+  [
+   "POST",
+   "/api/roles",
+   "Created a role"
+  ],
+  [
+   "POST",
+   "/api/roles/abc",
+   "Created a role"
+  ],
+  [
+   "POST",
+   "/api/settings",
+   "Updated company settings"
+  ],
+  [
+   "POST",
+   "/api/settings?x=1",
+   "Updated company settings"
+  ],
+  [
+   "POST",
+   "/api/accounts",
+   "Created an account"
+  ],
+  [
+   "POST",
+   "/api/accounts/seed",
+   "Seeded accounts"
+  ],
+  [
+   "POST",
+   "/api/accounts/abc",
+   "Created an account"
+  ],
+  [
+   "POST",
+   "/api/ledger/entries",
+   "Created a ledger entry"
+  ],
+  [
+   "POST",
+   "/api/ledger/entries/abc/reverse",
+   "Reversed a ledger entry"
+  ],
+  [
+   "POST",
+   "/api/invoices",
+   "Created an invoice"
+  ],
+  [
+   "POST",
+   "/api/invoices/abc",
+   "Created an invoice"
+  ],
+  [
+   "POST",
+   "/api/invoices/abc/post",
+   "Posted an invoice"
+  ],
+  [
+   "POST",
+   "/api/invoices/abc/void",
+   "Voided an invoice"
+  ],
+  [
+   "POST",
+   "/api/invoices/abc/unpost",
+   "Created an invoice"
+  ],
+  [
+   "POST",
+   "/api/invoices/abc/duplicate",
+   "Created an invoice"
+  ],
+  [
+   "POST",
+   "/api/invoices/abc/status",
+   "Created an invoice"
+  ],
+  [
+   "POST",
+   "/api/bills",
+   "Created a bill"
+  ],
+  [
+   "POST",
+   "/api/bills/abc/post",
+   "Posted a bill"
+  ],
+  [
+   "POST",
+   "/api/expenses/abc/void",
+   "Voided an expense"
+  ],
+  [
+   "POST",
+   "/api/payments",
+   "Created a payment"
+  ],
+  [
+   "POST",
+   "/api/banking",
+   "Created a bank account"
+  ],
+  [
+   "POST",
+   "/api/banking/abc",
+   "Created a bank account"
+  ],
+  [
+   "POST",
+   "/api/customers",
+   "Created a customer"
+  ],
+  [
+   "POST",
+   "/api/vendors/abc",
+   "Created a vendor"
+  ],
+  [
+   "POST",
+   "/api/employees",
+   "Created an employee"
+  ],
+  [
+   "POST",
+   "/api/employees/abc",
+   "Created an employee"
+  ],
+  [
+   "POST",
+   "/api/employees/abc/photo",
+   "Updated an employee's photo"
+  ],
+  [
+   "POST",
+   "/api/employees/abc/documents",
+   "Uploaded an employee document"
+  ],
+  [
+   "POST",
+   "/api/employees/abc/documents/d1",
+   "Uploaded an employee document"
+  ],
+  [
+   "POST",
+   "/api/employees/abc/documents/d1/replace",
+   "Uploaded a new version of an employee document"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs",
+   "Created a payroll run"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1",
+   "Created a payroll run"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1/lines",
+   "Added an employee to a payroll run"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1/lines/l1",
+   "Added an employee to a payroll run"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1/post",
+   "Posted a payroll"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1/pay",
+   "Paid a payroll run"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1/remit",
+   "Recorded a statutory remittance (EPF/ETF/PAYE)"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1/void",
+   "Voided a payroll"
+  ],
+  [
+   "POST",
+   "/api/payroll/runs/r1/slips-filed",
+   "Filed salary slips into employees' documents"
+  ],
+  [
+   "POST",
+   "/api/payroll/rates",
+   "Updated payroll rates"
+  ],
+  [
+   "POST",
+   "/api/payroll/company",
+   "Updated payroll company details"
+  ],
+  [
+   "POST",
+   "/api/payroll/employees/e1/bank",
+   "Updated an employee's bank details"
+  ],
+  [
+   "POST",
+   "/api/payroll/employees/e1/salaries",
+   "Added a salary / increment"
+  ],
+  [
+   "POST",
+   "/api/payroll/employees/e1/salaries/s1",
+   "Added a salary / increment"
+  ],
+  [
+   "POST",
+   "/api/unknown-thing",
+   "Created an unknown-thing"
+  ],
+  [
+   "POST",
+   "/api/",
+   "Created a "
+  ],
+  [
+   "POST",
+   "/api/users/",
+   "Created an user"
+  ],
+  [
+   "POST",
+   "api/users",
+   "Created an user"
+  ],
+  [
+   "PATCH",
+   "/api/users",
+   "Updated an user"
+  ],
+  [
+   "PATCH",
+   "/api/users/abc",
+   "Updated an user"
+  ],
+  [
+   "PATCH",
+   "/api/users/abc/reset-password",
+   "Reset a user's password"
+  ],
+  [
+   "PATCH",
+   "/api/users/abc/reset-2fa",
+   "Reset a user's 2FA"
+  ],
+  [
+   "PATCH",
+   "/api/roles",
+   "Updated a role"
+  ],
+  [
+   "PATCH",
+   "/api/roles/abc",
+   "Updated a role"
+  ],
+  [
+   "PATCH",
+   "/api/settings",
+   "Updated company settings"
+  ],
+  [
+   "PATCH",
+   "/api/settings?x=1",
+   "Updated company settings"
+  ],
+  [
+   "PATCH",
+   "/api/accounts",
+   "Updated an account"
+  ],
+  [
+   "PATCH",
+   "/api/accounts/seed",
+   "Seeded accounts"
+  ],
+  [
+   "PATCH",
+   "/api/accounts/abc",
+   "Updated an account"
+  ],
+  [
+   "PATCH",
+   "/api/ledger/entries",
+   "Updated a ledger entry"
+  ],
+  [
+   "PATCH",
+   "/api/ledger/entries/abc/reverse",
+   "Reversed a ledger entry"
+  ],
+  [
+   "PATCH",
+   "/api/invoices",
+   "Updated an invoice"
+  ],
+  [
+   "PATCH",
+   "/api/invoices/abc",
+   "Updated an invoice"
+  ],
+  [
+   "PATCH",
+   "/api/invoices/abc/post",
+   "Posted an invoice"
+  ],
+  [
+   "PATCH",
+   "/api/invoices/abc/void",
+   "Voided an invoice"
+  ],
+  [
+   "PATCH",
+   "/api/invoices/abc/unpost",
+   "Updated an invoice"
+  ],
+  [
+   "PATCH",
+   "/api/invoices/abc/duplicate",
+   "Updated an invoice"
+  ],
+  [
+   "PATCH",
+   "/api/invoices/abc/status",
+   "Updated an invoice"
+  ],
+  [
+   "PATCH",
+   "/api/bills",
+   "Updated a bill"
+  ],
+  [
+   "PATCH",
+   "/api/bills/abc/post",
+   "Posted a bill"
+  ],
+  [
+   "PATCH",
+   "/api/expenses/abc/void",
+   "Voided an expense"
+  ],
+  [
+   "PATCH",
+   "/api/payments",
+   "Updated a payment"
+  ],
+  [
+   "PATCH",
+   "/api/banking",
+   "Updated a bank account"
+  ],
+  [
+   "PATCH",
+   "/api/banking/abc",
+   "Updated a bank account"
+  ],
+  [
+   "PATCH",
+   "/api/customers",
+   "Updated a customer"
+  ],
+  [
+   "PATCH",
+   "/api/vendors/abc",
+   "Updated a vendor"
+  ],
+  [
+   "PATCH",
+   "/api/employees",
+   "Updated an employee"
+  ],
+  [
+   "PATCH",
+   "/api/employees/abc",
+   "Updated an employee"
+  ],
+  [
+   "PATCH",
+   "/api/employees/abc/photo",
+   "Updated an employee's photo"
+  ],
+  [
+   "PATCH",
+   "/api/employees/abc/documents",
+   "Updated an employee document"
+  ],
+  [
+   "PATCH",
+   "/api/employees/abc/documents/d1",
+   "Updated an employee document"
+  ],
+  [
+   "PATCH",
+   "/api/employees/abc/documents/d1/replace",
+   "Uploaded a new version of an employee document"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs",
+   "Updated a payroll"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1",
+   "Updated a payroll"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1/lines",
+   "Edited an employee's payroll line"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1/lines/l1",
+   "Edited an employee's payroll line"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1/post",
+   "Posted a payroll"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1/pay",
+   "Paid a payroll run"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1/remit",
+   "Recorded a statutory remittance (EPF/ETF/PAYE)"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1/void",
+   "Voided a payroll"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/runs/r1/slips-filed",
+   "Filed salary slips into employees' documents"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/rates",
+   "Updated payroll rates"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/company",
+   "Updated payroll company details"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/employees/e1/bank",
+   "Updated an employee's bank details"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/employees/e1/salaries",
+   "Updated a salary record"
+  ],
+  [
+   "PATCH",
+   "/api/payroll/employees/e1/salaries/s1",
+   "Updated a salary record"
+  ],
+  [
+   "PATCH",
+   "/api/unknown-thing",
+   "Updated an unknown-thing"
+  ],
+  [
+   "PATCH",
+   "/api/",
+   "Updated a "
+  ],
+  [
+   "PATCH",
+   "/api/users/",
+   "Updated an user"
+  ],
+  [
+   "PATCH",
+   "api/users",
+   "Updated an user"
+  ],
+  [
+   "PUT",
+   "/api/users",
+   "Updated an user"
+  ],
+  [
+   "PUT",
+   "/api/users/abc",
+   "Updated an user"
+  ],
+  [
+   "PUT",
+   "/api/users/abc/reset-password",
+   "Reset a user's password"
+  ],
+  [
+   "PUT",
+   "/api/users/abc/reset-2fa",
+   "Reset a user's 2FA"
+  ],
+  [
+   "PUT",
+   "/api/roles",
+   "Updated a role"
+  ],
+  [
+   "PUT",
+   "/api/roles/abc",
+   "Updated a role"
+  ],
+  [
+   "PUT",
+   "/api/settings",
+   "Updated company settings"
+  ],
+  [
+   "PUT",
+   "/api/settings?x=1",
+   "Updated company settings"
+  ],
+  [
+   "PUT",
+   "/api/accounts",
+   "Updated an account"
+  ],
+  [
+   "PUT",
+   "/api/accounts/seed",
+   "Seeded accounts"
+  ],
+  [
+   "PUT",
+   "/api/accounts/abc",
+   "Updated an account"
+  ],
+  [
+   "PUT",
+   "/api/ledger/entries",
+   "Updated a ledger entry"
+  ],
+  [
+   "PUT",
+   "/api/ledger/entries/abc/reverse",
+   "Reversed a ledger entry"
+  ],
+  [
+   "PUT",
+   "/api/invoices",
+   "Updated an invoice"
+  ],
+  [
+   "PUT",
+   "/api/invoices/abc",
+   "Updated an invoice"
+  ],
+  [
+   "PUT",
+   "/api/invoices/abc/post",
+   "Posted an invoice"
+  ],
+  [
+   "PUT",
+   "/api/invoices/abc/void",
+   "Voided an invoice"
+  ],
+  [
+   "PUT",
+   "/api/invoices/abc/unpost",
+   "Updated an invoice"
+  ],
+  [
+   "PUT",
+   "/api/invoices/abc/duplicate",
+   "Updated an invoice"
+  ],
+  [
+   "PUT",
+   "/api/invoices/abc/status",
+   "Updated an invoice"
+  ],
+  [
+   "PUT",
+   "/api/bills",
+   "Updated a bill"
+  ],
+  [
+   "PUT",
+   "/api/bills/abc/post",
+   "Posted a bill"
+  ],
+  [
+   "PUT",
+   "/api/expenses/abc/void",
+   "Voided an expense"
+  ],
+  [
+   "PUT",
+   "/api/payments",
+   "Updated a payment"
+  ],
+  [
+   "PUT",
+   "/api/banking",
+   "Updated a bank account"
+  ],
+  [
+   "PUT",
+   "/api/banking/abc",
+   "Updated a bank account"
+  ],
+  [
+   "PUT",
+   "/api/customers",
+   "Updated a customer"
+  ],
+  [
+   "PUT",
+   "/api/vendors/abc",
+   "Updated a vendor"
+  ],
+  [
+   "PUT",
+   "/api/employees",
+   "Updated an employee"
+  ],
+  [
+   "PUT",
+   "/api/employees/abc",
+   "Updated an employee"
+  ],
+  [
+   "PUT",
+   "/api/employees/abc/photo",
+   "Updated an employee's photo"
+  ],
+  [
+   "PUT",
+   "/api/employees/abc/documents",
+   "Updated an employee document"
+  ],
+  [
+   "PUT",
+   "/api/employees/abc/documents/d1",
+   "Updated an employee document"
+  ],
+  [
+   "PUT",
+   "/api/employees/abc/documents/d1/replace",
+   "Uploaded a new version of an employee document"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs",
+   "Updated a payroll"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1",
+   "Updated a payroll"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1/lines",
+   "Edited an employee's payroll line"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1/lines/l1",
+   "Edited an employee's payroll line"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1/post",
+   "Posted a payroll"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1/pay",
+   "Paid a payroll run"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1/remit",
+   "Recorded a statutory remittance (EPF/ETF/PAYE)"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1/void",
+   "Voided a payroll"
+  ],
+  [
+   "PUT",
+   "/api/payroll/runs/r1/slips-filed",
+   "Filed salary slips into employees' documents"
+  ],
+  [
+   "PUT",
+   "/api/payroll/rates",
+   "Updated payroll rates"
+  ],
+  [
+   "PUT",
+   "/api/payroll/company",
+   "Updated payroll company details"
+  ],
+  [
+   "PUT",
+   "/api/payroll/employees/e1/bank",
+   "Updated an employee's bank details"
+  ],
+  [
+   "PUT",
+   "/api/payroll/employees/e1/salaries",
+   "Updated a salary record"
+  ],
+  [
+   "PUT",
+   "/api/payroll/employees/e1/salaries/s1",
+   "Updated a salary record"
+  ],
+  [
+   "PUT",
+   "/api/unknown-thing",
+   "Updated an unknown-thing"
+  ],
+  [
+   "PUT",
+   "/api/",
+   "Updated a "
+  ],
+  [
+   "PUT",
+   "/api/users/",
+   "Updated an user"
+  ],
+  [
+   "PUT",
+   "api/users",
+   "Updated an user"
+  ],
+  [
+   "DELETE",
+   "/api/users",
+   "Deleted an user"
+  ],
+  [
+   "DELETE",
+   "/api/users/abc",
+   "Deleted an user"
+  ],
+  [
+   "DELETE",
+   "/api/users/abc/reset-password",
+   "Reset a user's password"
+  ],
+  [
+   "DELETE",
+   "/api/users/abc/reset-2fa",
+   "Reset a user's 2FA"
+  ],
+  [
+   "DELETE",
+   "/api/roles",
+   "Deleted a role"
+  ],
+  [
+   "DELETE",
+   "/api/roles/abc",
+   "Deleted a role"
+  ],
+  [
+   "DELETE",
+   "/api/settings",
+   "Updated company settings"
+  ],
+  [
+   "DELETE",
+   "/api/settings?x=1",
+   "Updated company settings"
+  ],
+  [
+   "DELETE",
+   "/api/accounts",
+   "Deleted an account"
+  ],
+  [
+   "DELETE",
+   "/api/accounts/seed",
+   "Seeded accounts"
+  ],
+  [
+   "DELETE",
+   "/api/accounts/abc",
+   "Deleted an account"
+  ],
+  [
+   "DELETE",
+   "/api/ledger/entries",
+   "Deleted a ledger entry"
+  ],
+  [
+   "DELETE",
+   "/api/ledger/entries/abc/reverse",
+   "Reversed a ledger entry"
+  ],
+  [
+   "DELETE",
+   "/api/invoices",
+   "Deleted an invoice"
+  ],
+  [
+   "DELETE",
+   "/api/invoices/abc",
+   "Deleted an invoice"
+  ],
+  [
+   "DELETE",
+   "/api/invoices/abc/post",
+   "Posted an invoice"
+  ],
+  [
+   "DELETE",
+   "/api/invoices/abc/void",
+   "Voided an invoice"
+  ],
+  [
+   "DELETE",
+   "/api/invoices/abc/unpost",
+   "Deleted an invoice"
+  ],
+  [
+   "DELETE",
+   "/api/invoices/abc/duplicate",
+   "Deleted an invoice"
+  ],
+  [
+   "DELETE",
+   "/api/invoices/abc/status",
+   "Deleted an invoice"
+  ],
+  [
+   "DELETE",
+   "/api/bills",
+   "Deleted a bill"
+  ],
+  [
+   "DELETE",
+   "/api/bills/abc/post",
+   "Posted a bill"
+  ],
+  [
+   "DELETE",
+   "/api/expenses/abc/void",
+   "Voided an expense"
+  ],
+  [
+   "DELETE",
+   "/api/payments",
+   "Deleted a payment"
+  ],
+  [
+   "DELETE",
+   "/api/banking",
+   "Deleted a bank account"
+  ],
+  [
+   "DELETE",
+   "/api/banking/abc",
+   "Deleted a bank account"
+  ],
+  [
+   "DELETE",
+   "/api/customers",
+   "Deleted a customer"
+  ],
+  [
+   "DELETE",
+   "/api/vendors/abc",
+   "Deleted a vendor"
+  ],
+  [
+   "DELETE",
+   "/api/employees",
+   "Deleted an employee"
+  ],
+  [
+   "DELETE",
+   "/api/employees/abc",
+   "Deleted an employee"
+  ],
+  [
+   "DELETE",
+   "/api/employees/abc/photo",
+   "Removed an employee's photo"
+  ],
+  [
+   "DELETE",
+   "/api/employees/abc/documents",
+   "Deleted an employee document"
+  ],
+  [
+   "DELETE",
+   "/api/employees/abc/documents/d1",
+   "Deleted an employee document"
+  ],
+  [
+   "DELETE",
+   "/api/employees/abc/documents/d1/replace",
+   "Uploaded a new version of an employee document"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs",
+   "Deleted a draft payroll run"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1",
+   "Deleted a draft payroll run"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1/lines",
+   "Removed an employee from a payroll run"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1/lines/l1",
+   "Removed an employee from a payroll run"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1/post",
+   "Posted a payroll"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1/pay",
+   "Paid a payroll run"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1/remit",
+   "Recorded a statutory remittance (EPF/ETF/PAYE)"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1/void",
+   "Voided a payroll"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/runs/r1/slips-filed",
+   "Filed salary slips into employees' documents"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/rates",
+   "Updated payroll rates"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/company",
+   "Updated payroll company details"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/employees/e1/bank",
+   "Updated an employee's bank details"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/employees/e1/salaries",
+   "Deleted a salary record"
+  ],
+  [
+   "DELETE",
+   "/api/payroll/employees/e1/salaries/s1",
+   "Deleted a salary record"
+  ],
+  [
+   "DELETE",
+   "/api/unknown-thing",
+   "Deleted an unknown-thing"
+  ],
+  [
+   "DELETE",
+   "/api/",
+   "Deleted a "
+  ],
+  [
+   "DELETE",
+   "/api/users/",
+   "Deleted an user"
+  ],
+  [
+   "DELETE",
+   "api/users",
+   "Deleted an user"
+  ]
+ ],
+ "details": [
+  [
+   {
+    "invoiceNumber": "INV-9000",
+    "name": "x"
+   },
+   "INV-9000"
+  ],
+  [
+   {
+    "billNumber": "BILL-1"
+   },
+   "BILL-1"
+  ],
+  [
+   {
+    "title": "Doc"
+   },
+   "Doc"
+  ],
+  [
+   {
+    "name": "Clerk"
+   },
+   "Clerk"
+  ],
+  [
+   {
+    "code": "1000"
+   },
+   "1000"
+  ],
+  [
+   {
+    "invoiceNumber": "",
+    "name": "n"
+   },
+   "n"
+  ],
+  [
+   {
+    "name": 0,
+    "code": "c"
+   },
+   "c"
+  ],
+  [
+   {},
+   null
+  ],
+  [
+   null,
+   null
+  ],
+  [
+   "text",
+   null
+  ],
+  [
+   [
+    "a"
+   ],
+   null
+  ],
+  [
+   {
+    "code": 5
+   },
+   5
+  ]
+ ]
+}
