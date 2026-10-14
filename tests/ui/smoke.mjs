@@ -7,7 +7,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
-import { mkdirSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, writeFileSync, mkdtempSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -241,6 +241,158 @@ try {
     const text = await pageText();
     if (!/1,000\.50/.test(text)) throw new Error('amount 1,000.50 not shown');
     await shot('11-trial-balance');
+  });
+
+  // ── W2 screens ───────────────────────────────────────────────────────────
+  // Row actions report failures with alert() and ask with confirm(); both would block CDP.
+  const quietDialogs = () => evaluate(`window.confirm = () => true; window.__alerts = []; window.alert = (m) => window.__alerts.push(String(m)); true`);
+  /** Picks, in the nth <select> of the open form, the option whose text contains `text`. */
+  const pick = (n, text) => evaluate(`(() => {
+    const sel = document.querySelectorAll('form select')[${n}];
+    const o = [...sel.options].find((x) => x.textContent.includes(${JSON.stringify(text)}));
+    if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
+    sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const api = (method, path, body) => evaluate(`(async () => {
+    const r = await fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)}, headers: { 'content-type': 'application/json',
+      authorization: 'Bearer ' + localStorage.getItem('accessToken') }, body: ${body ? JSON.stringify(JSON.stringify(body)) : 'undefined'} });
+    const t = await r.text(); return { status: r.status, body: t ? JSON.parse(t) : null };
+  })()`);
+  /** Sets every empty required date input of the open form (React needs the native setter). */
+  const fillDates = (value, all = false) => evaluate(`(() => {
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    for (const el of document.querySelectorAll('form input[type=date]')) {
+      if ((${all} || el.required) && !el.value) { set.call(el, ${JSON.stringify(value)}); el.dispatchEvent(new Event('input', { bubbles: true })); }
+    }
+    return true; })()`);
+  const rowAction = (rowText, label) => evaluate(`(() => {
+    const row = [...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes(${JSON.stringify(rowText)}));
+    if (!row) throw new Error('no row ' + ${JSON.stringify(rowText)});
+    const b = [...row.querySelectorAll('button')].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
+    if (!b) throw new Error('no button ' + ${JSON.stringify(label)}); b.click(); return true; })()`);
+
+  await check('Seeding adds the missing default accounts (D10)', async () => {
+    const r = await api('POST', '/api/accounts/seed');
+    if (r.status !== 204) throw new Error('seed returned ' + r.status);
+    const list = await api('GET', '/api/accounts');
+    const codes = list.body.map((a) => a.code);
+    for (const c of ['1100', '2000', '4000', '6000']) if (!codes.includes(c)) throw new Error('missing ' + c);
+    if (list.body.filter((a) => a.code === '1000').length !== 1) throw new Error('existing 1000 must not be duplicated');
+  });
+
+  await check('Customers and Vendors pages create records through their forms', async () => {
+    await go('/customers');
+    await clickText('+ New Customer');
+    await type('input[placeholder="Full Name"]', 'Acme Ltd');
+    await type('input[placeholder="Email"]', 'ap@acme.lk');
+    await clickText('Save');
+    await waitFor(`document.body.innerText.includes('Acme Ltd')`, 'customer row');
+    await go('/vendors');
+    await clickText('+ New Vendor');
+    await type('input[placeholder="Vendor Name"]', 'Paper Co');
+    // The reference rejects an empty email (IsEmail on ""), so the form needs one.
+    await type('input[placeholder="Email"]', 'billing@paper.lk');
+    await clickText('Save');
+    await waitFor(`document.body.innerText.includes('Paper Co')`, 'vendor row');
+    await shot('12-vendors');
+  });
+
+  await check('Invoices page posts an invoice and downloads its PDF', async () => {
+    const accounts = (await api('GET', '/api/accounts')).body;
+    const rev = accounts.find((a) => a.code === '4000').id;
+    const cust = (await api('GET', '/api/customers')).body.find((c) => c.name === 'Acme Ltd').id;
+    const r = await api('POST', '/api/invoices', { customerId: cust, date: '2026-04-01', paymentTerms: 'NET_30',
+      lines: [{ description: 'Design work', quantity: 2.5, unitPrice: 1000.25, accountId: rev }] });
+    if (r.status !== 201) throw new Error('create returned ' + r.status);
+    await go('/invoices');
+    await quietDialogs();
+    await waitFor(`document.body.innerText.includes('INV-9000')`, 'invoice row');
+    await evaluate(`(() => {
+      const sel = [...document.querySelectorAll('select')].find((x) => x.title.startsWith('Change the status'));
+      sel.value = 'POSTED'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`(async () => (await fetch('/api/invoices', { headers: { authorization: 'Bearer ' + localStorage.getItem('accessToken') } }).then((x) => x.json())).data[0].status === 'POSTED')()`, 'invoice posted');
+    const dl = join(SHOTS, 'downloads');
+    mkdirSync(dl, { recursive: true });
+    await send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dl });
+    await go('/invoices');
+    await evaluate(`(() => { const row = [...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes('INV-9000'));
+      const b = [...row.querySelectorAll('button')].find((x) => x.textContent.includes('⋮') || x.getAttribute('aria-label'));
+      b.click(); return true; })()`);
+    await waitFor(`[...document.querySelectorAll('button,[role=menuitem]')].some((x) => x.textContent.trim() === 'Download')`, 'action menu');
+    await evaluate(`[...document.querySelectorAll('button,[role=menuitem]')].find((x) => x.textContent.trim() === 'Download').click()`);
+    const end = Date.now() + 20000;
+    let pdf;
+    while (Date.now() < end && !pdf) {
+      pdf = readdirSync(dl).find((f) => f.endsWith('.pdf'));
+      await sleep(250);
+    }
+    if (!pdf) throw new Error('no PDF downloaded');
+    await sleep(500);
+    const bytes = readFileSync(join(dl, pdf));
+    if (statSync(join(dl, pdf)).size < 2000 || bytes.subarray(0, 5).toString() !== '%PDF-') throw new Error('PDF looks empty');
+    await shot('13-invoices');
+  });
+
+  await check('Payments page records a customer payment and the invoice becomes PAID', async () => {
+    await go('/payments');
+    await quietDialogs();
+    await clickText('+ Record Payment');
+    await waitFor(`[...(document.querySelectorAll('form select')[1]?.options ?? [])].some((o) => o.textContent.includes('INV-9000'))`, 'invoice option');
+    await pick(1, 'INV-9000');
+    await type('input[placeholder="Amount"]', '2500.63');
+    await pick(3, '1000');
+    await fillDates('2026-04-25');
+    await clickText('Record Payment');
+    await waitFor(`document.body.innerText.includes('PAY-000001')`, 'payment row');
+    const inv = (await api('GET', '/api/invoices')).body.data[0];
+    if (inv.status !== 'PAID' || inv.amountPaid !== '2500.63') throw new Error('invoice is ' + inv.status + ' / ' + inv.amountPaid);
+    await shot('14-payments');
+  });
+
+  await check('Bills page enters and posts a vendor bill', async () => {
+    await go('/bills');
+    await quietDialogs();
+    await clickText('+ New Bill');
+    await waitFor(`[...(document.querySelectorAll('form select')[0]?.options ?? [])].some((o) => o.textContent.includes('Paper Co'))`, 'vendor option');
+    await pick(0, 'Paper Co');
+    await type('input[placeholder="Item description"]', 'Printer paper');
+    await evaluate(`(() => { const nums = document.querySelectorAll('form input[type=number]'); nums[0].focus(); nums[0].select(); return true; })()`);
+    await send('Input.insertText', { text: '3' });
+    await evaluate(`(() => { const nums = document.querySelectorAll('form input[type=number]'); nums[1].focus(); return true; })()`);
+    await send('Input.insertText', { text: '12.5' });
+    await pick(1, '6000');
+    // The reference rejects an empty due date (IsDateFormat on ""), so the form needs one too.
+    await fillDates('2026-04-03', true);
+    await clickText('Save Bill');
+    await waitFor(`document.body.innerText.includes('BILL-000001')`, 'bill row');
+    await rowAction('BILL-000001', 'Post');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('BILL-000001') && tr.innerText.includes('POSTED'))`, 'bill posted');
+    await shot('15-bills');
+  });
+
+  await check('Expenses page records and posts an expense', async () => {
+    await go('/expenses');
+    await quietDialogs();
+    await clickText('+ New Expense');
+    await type('input[placeholder="Description"]', 'Taxi');
+    await type('input[placeholder="Amount"]', '1500.75');
+    await pick(0, '6000');
+    await pick(1, '1000');
+    await fillDates('2026-04-08');
+    await clickText('Save');
+    await waitFor(`document.body.innerText.includes('EXP-000001')`, 'expense row');
+    await rowAction('EXP-000001', 'Post');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('EXP-000001') && tr.innerText.includes('POSTED'))`, 'expense posted');
+  });
+
+  await check('Trial balance still balances after the day\'s work', async () => {
+    const tb = (await api('GET', '/api/ledger/trial-balance')).body;
+    const cents = (k) => tb.reduce((sum, r) => sum + Math.round(r[k] * 100), 0);
+    if (cents('debit') !== cents('credit')) throw new Error(`debits ${cents('debit')} != credits ${cents('credit')}`);
+    const cash = tb.find((r) => r.account.code === '1000');
+    // 1000.50 opening + 2500.63 received - 1500.75 taxi
+    if (cash.balance !== 2000.38) throw new Error('cash balance ' + cash.balance);
+    await go('/reports/trial-balance');
+    await shot('16-trial-balance-w2');
   });
 
   await check('second login goes through 2FA verify', async () => {

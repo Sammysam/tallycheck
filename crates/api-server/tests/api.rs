@@ -202,8 +202,8 @@ async fn failed_logins_are_audited_and_throttled() -> TestResult {
 #[tokio::test]
 async fn unknown_routes_and_methods_are_nest_404s_before_auth() -> TestResult {
     let app = App::new().await?;
-    let r = app.call(Method::GET, "/api/invoices?page=2", None, None).await?;
-    assert_nest_error(&r, 404, json!("Cannot GET /api/invoices?page=2"), "/api/invoices?page=2");
+    let r = app.call(Method::GET, "/api/payroll/runs?page=2", None, None).await?;
+    assert_nest_error(&r, 404, json!("Cannot GET /api/payroll/runs?page=2"), "/api/payroll/runs?page=2");
     let r = app.call(Method::DELETE, "/api/users", None, None).await?;
     assert_nest_error(&r, 404, json!("Cannot DELETE /api/users"), "/api/users");
     let r = app.call(Method::GET, "/nothing-here", None, None).await?;
@@ -466,8 +466,8 @@ async fn frontend_is_served_with_spa_fallback() -> TestResult {
     let asset = app.call(Method::GET, "/assets/app.js", None, None).await?;
     assert_eq!(asset.body, json!("console.log(1)"));
     assert_eq!(asset.headers.get("cache-control").and_then(|v| v.to_str().ok()), Some("no-cache"));
-    let api = app.call(Method::GET, "/api/bills", None, None).await?;
-    assert_nest_error(&api, 404, json!("Cannot GET /api/bills"), "/api/bills");
+    let api = app.call(Method::GET, "/api/payroll/rates", None, None).await?;
+    assert_nest_error(&api, 404, json!("Cannot GET /api/payroll/rates"), "/api/payroll/rates");
     Ok(())
 }
 
@@ -626,5 +626,175 @@ async fn account_and_ledger_permissions_match_reference() -> TestResult {
 
     let seeded = app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
     assert_eq!(seeded.status, StatusCode::NO_CONTENT);
+    Ok(())
+}
+
+// ── W2: operational accounting ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn invoice_to_payment_flow_with_bills_and_expenses() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let seeded = app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    assert_eq!(seeded.status, StatusCode::NO_CONTENT);
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (cash, revenue, expense) = (id_of("1000")?, id_of("4000")?, id_of("6000")?);
+
+    let cust = app
+        .call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme", "email": "a@acme.lk"})))
+        .await?;
+    let cust_id = cust.body["id"].as_str().ok_or("cust")?.to_string();
+    let bad = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "X", "email": ""}))).await?;
+    assert_nest_error(&bad, 400, json!(["email must be an email"]), "/api/customers");
+
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({
+            "customerId": cust_id, "date": "2026-04-01", "paymentTerms": "NET_30",
+            "lines": [{"description": "Design", "quantity": 2.5, "unitPrice": 1000.25, "accountId": revenue}]})),
+        )
+        .await?;
+    assert_eq!(inv.status, StatusCode::CREATED);
+    assert_eq!(inv.body["invoiceNumber"], "INV-9000");
+    assert_eq!(inv.body["dueDate"], "2026-05-01");
+    assert_eq!(inv.body["lines"][0]["amount"], json!(2500.63));
+    assert!(inv.body.get("customer").is_none());
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+
+    let posted = app
+        .call(Method::PATCH, &format!("/api/invoices/{inv_id}/status"), Some(&admin), Some(json!({"status": "POSTED"})))
+        .await?;
+    assert_eq!(posted.body["status"], "POSTED");
+    assert_eq!(posted.body["customer"]["name"], "Acme");
+    let pay = app
+        .call(
+            Method::POST,
+            "/api/payments",
+            Some(&admin),
+            Some(json!({
+            "type": "AR", "invoiceId": inv_id, "date": "2026-04-25", "amount": 2500.63,
+            "paymentMethod": "BANK_TRANSFER", "paymentAccountId": cash})),
+        )
+        .await?;
+    assert_eq!(pay.status, StatusCode::CREATED);
+    assert_eq!(pay.body["amount"], json!(2500.63));
+    let after = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    assert_eq!((after.body["status"].as_str(), after.body["amountPaid"].as_str()), (Some("PAID"), Some("2500.63")));
+
+    let vendor = app.call(Method::POST, "/api/vendors", Some(&admin), Some(json!({"name": "Paper Co"}))).await?;
+    let bill = app
+        .call(
+            Method::POST,
+            "/api/bills",
+            Some(&admin),
+            Some(json!({
+            "vendorId": vendor.body["id"], "date": "2026-04-03",
+            "lines": [{"description": "Paper", "quantity": 3, "unitPrice": 12.5, "accountId": expense}]})),
+        )
+        .await?;
+    let bill_id = bill.body["id"].as_str().ok_or("bill")?.to_string();
+    let bill_post = app.call(Method::POST, &format!("/api/bills/{bill_id}/post"), Some(&admin), None).await?;
+    assert_eq!(bill_post.body["status"], "POSTED");
+    let exp = app
+        .call(
+            Method::POST,
+            "/api/expenses",
+            Some(&admin),
+            Some(json!({
+            "date": "2026-04-08", "description": "Taxi", "amount": 15.25,
+            "expenseAccountId": expense, "paymentAccountId": cash})),
+        )
+        .await?;
+    let exp_id = exp.body["id"].as_str().ok_or("exp")?.to_string();
+    app.call(Method::POST, &format!("/api/expenses/{exp_id}/post"), Some(&admin), None).await?;
+
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    let rows = tb.body.as_array().ok_or("tb")?;
+    let bal = |code: &str| rows.iter().find(|r| r["account"]["code"] == code).map(|r| r["balance"].clone());
+    assert_eq!(bal("1000"), Some(json!(2485.38)));
+    assert_eq!(bal("1100"), Some(json!(0)));
+    assert_eq!(bal("2000"), Some(json!(37.5)));
+    assert_eq!(bal("6000"), Some(json!(52.75)));
+    Ok(())
+}
+
+#[tokio::test]
+async fn invoice_scope_and_operation_permissions() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    let role = app
+        .call(Method::POST, "/api/roles", Some(&admin), Some(json!({"name": "Sales", "permissions": ["invoices"]})))
+        .await?;
+    let role_id = role.body["id"].as_str().ok_or("role")?.to_string();
+    let u = app
+        .call(
+            Method::POST,
+            "/api/users",
+            Some(&admin),
+            Some(json!({"username": "sales1", "password": "salespass1", "roleId": role_id})),
+        )
+        .await?;
+    assert_eq!(u.status, StatusCode::CREATED);
+    // Sign sales1 in (users created over the API still enrol 2FA at first login).
+    let login = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "sales1", "password": "salespass1"})))
+        .await?;
+    let temp = login.body["tempToken"].as_str().ok_or("temp")?.to_string();
+    let secret = app.call(Method::GET, "/api/auth/2fa/setup", Some(&temp), None).await?.body["secret"]
+        .as_str()
+        .ok_or("secret")?
+        .to_string();
+    let code = auth::totp::current_code(&secret).ok_or("code")?;
+    let sales = app.call(Method::POST, "/api/auth/2fa/enable", Some(&temp), Some(json!({"code": code}))).await?.body
+        ["accessToken"]
+        .as_str()
+        .ok_or("token")?
+        .to_string();
+
+    let theirs = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"billToName": "A", "date": "2026-04-01", "lines": [{"description": "x"}]})),
+        )
+        .await?;
+    let theirs_id = theirs.body["id"].as_str().ok_or("id")?.to_string();
+    app.call(
+        Method::POST,
+        "/api/invoices",
+        Some(&sales),
+        Some(json!({"billToName": "B", "date": "2026-04-02", "lines": [{"description": "y"}]})),
+    )
+    .await?;
+
+    let own = app.call(Method::GET, "/api/invoices", Some(&sales), None).await?;
+    assert_eq!(own.body["total"], json!(1));
+    let hidden = app.call(Method::GET, &format!("/api/invoices/{theirs_id}"), Some(&sales), None).await?;
+    assert_nest_error(
+        &hidden,
+        404,
+        json!(format!("Invoice {theirs_id} not found")),
+        &format!("/api/invoices/{theirs_id}"),
+    );
+    let all = app.call(Method::GET, "/api/invoices", Some(&admin), None).await?;
+    assert_eq!(all.body["total"], json!(2));
+
+    let pay = app.call(Method::GET, "/api/payments", Some(&sales), None).await?;
+    assert_eq!(pay.status, StatusCode::FORBIDDEN);
+    let cust = app.call(Method::GET, "/api/customers", Some(&viewer), None).await?;
+    assert_eq!(cust.status, StatusCode::OK, "reading customers is open to every signed-in user");
+    let vend = app.call(Method::GET, "/api/vendors", Some(&viewer), None).await?;
+    assert_eq!(vend.status, StatusCode::FORBIDDEN);
     Ok(())
 }

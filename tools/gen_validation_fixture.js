@@ -74,6 +74,57 @@ const cases = {
   LedgerFilterDto: [dto('modules/ledger/dto/ledger-filter.dto.ts', 'LedgerFilterDto'), [
     {}, { dateFrom: '2026-04-01', dateTo: '2026-04-30', sourceType: 'MANUAL' }, { dateFrom: 'x' }, { dateTo: '2026-13-01', sourceType: ['a', 'b'] }, { junk: '1' },
   ]],
+  CreateCustomerDto: [dto('modules/customers/dto/create-customer.dto.ts', 'CreateCustomerDto'), [
+    {}, { name: '' }, { name: 'Acme', email: 'not-an-email' }, { name: 'Acme', email: 'a@b.co', phone: '011', address: 'x', taxId: 'T', junk: 1 },
+    { name: 5, email: 5, phone: 5, address: 5, taxId: 5 }, { name: 'Acme', email: null, phone: null }, { name: 'Acme', email: '' },
+  ]],
+  UpdateCustomerDto: [dto('modules/customers/dto/update-customer.dto.ts', 'UpdateCustomerDto'), [
+    {}, { name: '' }, { email: 'x@y' }, { name: 'New', isActive: false },
+  ]],
+  CreateVendorDto: [dto('modules/vendors/dto/create-vendor.dto.ts', 'CreateVendorDto'), [
+    {}, { name: 'Supplier', email: 'billing@supplier.lk' }, { name: 'S', email: 'bad@' },
+  ]],
+  CreateBankAccountDto: [dto('modules/banking/dto/create-bank-account.dto.ts', 'CreateBankAccountDto'), [
+    {}, { name: 'BOC', accountId: 'x' }, { name: 'BOC', bankName: 'Bank of Ceylon', accountNumber: '123', accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', currentBalance: 5 },
+  ]],
+  UpdateBankAccountDto: [dto('modules/banking/dto/update-bank-account.dto.ts', 'UpdateBankAccountDto'), [
+    {}, { name: '' }, { accountId: 'x', bankName: 5 },
+  ]],
+  CreateInvoiceDto: [dto('modules/invoices/dto/create-invoice.dto.ts', 'CreateInvoiceDto'), [
+    {}, { date: '2026-04-01', lines: [] }, { date: '2026-04-01', lines: [{}] },
+    { date: '2026-04-01', lines: [{ description: 'Work', quantity: 0, unitPrice: -1, accountId: 'x' }] },
+    { date: '2026-04-01', lines: [{ description: 'Work', quantity: 1.005, unitPrice: 10.001 }] },
+    { customerId: 'x', date: 'bad', dueDate: 'bad', paymentTerms: 'NET_90', poNumber: 5, notes: 5, billToName: 'x'.repeat(161), billToAddress: 'y'.repeat(501), paymentOptions: 'cash', signatoryName: 'z'.repeat(121), signatoryTitle: 5, lines: [{ description: 'a' }] },
+    { date: '2026-04-01', paymentOptions: ['Bank', 5, 'w'.repeat(301)], lines: [{ description: 'a' }] },
+    { customerId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-04-01', dueDate: '2026-05-01', paymentTerms: 'NET_30', poNumber: 'PO1', notes: 'n', billToName: 'B', billToAddress: 'A', paymentOptions: ['Bank', 'Cash'], signatoryName: 'S', signatoryTitle: 'T', junk: 1, lines: [{ description: 'Design', quantity: 2.5, unitPrice: 1000.25, accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', junk: 2 }, { description: 'Free' }] },
+    { date: '2026-04-01', lines: 'x' }, { date: '2026-04-01', lines: [null] },
+  ]],
+  UpdateInvoiceDto: [dto('modules/invoices/dto/update-invoice.dto.ts', 'UpdateInvoiceDto'), [
+    {}, { poNumber: 'PO-9' }, { lines: [] }, { lines: [{ description: '' }] }, { paymentTerms: null, dueDate: null, customerId: null }, { status: 'PAID' },
+  ]],
+  ChangeInvoiceStatusDto: [dto('modules/invoices/dto/change-status.dto.ts', 'ChangeInvoiceStatusDto'), [
+    {}, { status: 'POSTED' }, { status: 'posted' },
+  ]],
+  CreateBillDto: [dto('modules/bills/dto/create-bill.dto.ts', 'CreateBillDto'), [
+    {}, { vendorId: 'x', date: '2026-04-01', lines: [] },
+    { vendorId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-04-01', lines: [{ description: 'Paper' }] },
+    { vendorId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-04-01', dueDate: '2026-05-01', notes: 'n', lines: [{ description: 'Paper', quantity: 3, unitPrice: 12.5, accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7' }] },
+    { vendorId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-04-01', lines: [{ description: 'P', quantity: 0.0001, unitPrice: 1, accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7' }] },
+  ]],
+  CreateExpenseDto: [dto('modules/expenses/dto/create-expense.dto.ts', 'CreateExpenseDto'), [
+    {}, { date: '2026-04-01', description: 'Taxi', amount: 0, expenseAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7' },
+    { date: '2026-04-01', description: 'Taxi', amount: 1500.75, expenseAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', receiptUrl: 'r', junk: 1 },
+    { date: '2026-04-01', description: 'Taxi', amount: '15', expenseAccountId: 'x', paymentAccountId: 'y', receiptUrl: 5 },
+  ]],
+  CreatePaymentDto: [dto('modules/payments/dto/create-payment.dto.ts', 'CreatePaymentDto'), [
+    {}, { type: 'AR', date: '2026-04-01', amount: 0.001, paymentMethod: 'CARD', paymentAccountId: 'x' },
+    { type: 'AR', invoiceId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', customerId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-04-01', amount: 100, paymentMethod: 'BANK_TRANSFER', paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', notes: 'n', junk: 1 },
+    { type: 'AP', billId: 'x', vendorId: 'y', date: '2026-04-01', amount: 1, paymentMethod: 'CASH', paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7' },
+  ]],
+  QueryInvoicesDto: [dto('modules/invoices/dto/query-invoices.dto.ts', 'QueryInvoicesDto'), [
+    {}, { q: ' INV ', status: 'POSTED', customerId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', dateFrom: '2026-04-01', dateTo: '2026-04-30', page: '2', limit: '10' },
+    { q: 'x'.repeat(121), status: 'OPEN', customerId: 'x', dateFrom: 'x' }, { page: '0' }, { status: 'OPEN', limit: '500', page: 'x' },
+  ]],
   PaginationDto: [dto('common/dto/pagination.dto.ts', 'PaginationDto'), [
     {}, { page: '2', limit: '50' }, { page: '0' }, { limit: '101' }, { page: 'abc' }, { page: '1.5' }, { page: '' }, { limit: '0' },
     { page: ['1', '2'] }, { page: '-1', limit: 'x' }, { other: 'y' }, { page: ' 3 ' }, { page: '1e1' },
@@ -85,7 +136,7 @@ const cases = {
   for (const [name, [cls, inputs]] of Object.entries(cases)) {
     out[name] = [];
     for (const input of inputs) {
-      const type = ['PaginationDto', 'LedgerFilterDto'].includes(name) ? 'query' : 'body';
+      const type = ['PaginationDto', 'LedgerFilterDto', 'QueryInvoicesDto'].includes(name) ? 'query' : 'body';
       try {
         const value = await pipe.transform(JSON.parse(JSON.stringify(input)), { type, metatype: cls });
         out[name].push({ input, ok: JSON.parse(JSON.stringify(value)) });

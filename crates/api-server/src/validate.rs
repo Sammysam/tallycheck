@@ -11,6 +11,9 @@
 //! * properties without decorators are stripped (whitelist);
 //! * query values are converted with JavaScript `Number()` (`@Type(() => Number)`).
 
+pub mod email;
+pub mod ops;
+
 use app_core::ids::is_uuid;
 use app_core::permissions;
 use app_core::AppError;
@@ -37,6 +40,14 @@ pub enum Rule {
     IsMoneyNumber,
     /// `@Min(0)` on a number.
     MinZero,
+    /// `@Min(x)` on a number; the text is how JavaScript prints x (e.g. "0.001").
+    MinNum(f64, &'static str),
+    /// `@IsEmail()` (validator.js defaults).
+    IsEmail,
+    /// `@IsString({ each: true })`.
+    IsStringEach,
+    /// `@MaxLength(n, { each: true })`.
+    MaxLengthEach(usize),
 }
 
 /// validator.js `isLength`: surrogate pairs count once, variation selectors not at all.
@@ -60,6 +71,19 @@ impl Rule {
             Rule::IsDateFormat => v.as_str().is_some_and(app_core::time::is_date_format),
             Rule::IsMoneyNumber => app_core::money::Money::from_json(v).is_some(),
             Rule::MinZero => v.as_number().is_some_and(|n| n.as_f64().is_some_and(|x| x >= 0.0)),
+            Rule::MinNum(min, _) => v.as_number().is_some_and(|n| n.as_f64().is_some_and(|x| x >= *min)),
+            Rule::IsEmail => v.as_str().is_some_and(email::is_email),
+            Rule::IsStringEach => match v {
+                Value::Array(items) => items.iter().all(Value::is_string),
+                other => other.is_string(),
+            },
+            Rule::MaxLengthEach(n) => {
+                let ok = |x: &Value| x.as_str().is_some_and(|s| js_length(s) <= *n);
+                match v {
+                    Value::Array(items) => items.iter().all(ok),
+                    other => ok(other),
+                }
+            }
             Rule::IsInEach(list) => {
                 let allowed = list();
                 let ok = |x: &Value| x.as_str().is_some_and(|s| allowed.contains(&s));
@@ -86,6 +110,10 @@ impl Rule {
             Rule::IsDateFormat => format!("{prop} must be a valid date in YYYY-MM-DD format"),
             Rule::IsMoneyNumber => format!("{prop} must be a number conforming to the specified constraints"),
             Rule::MinZero => format!("{prop} must not be less than 0"),
+            Rule::MinNum(_, text) => format!("{prop} must not be less than {text}"),
+            Rule::IsEmail => format!("{prop} must be an email"),
+            Rule::IsStringEach => format!("each value in {prop} must be a string"),
+            Rule::MaxLengthEach(n) => format!("each value in {prop} must be shorter than or equal to {n} characters"),
             Rule::IsInEach(list) => {
                 format!("each value in {prop} must be one of the following values: {}", list().join(", "))
             }
@@ -94,7 +122,7 @@ impl Rule {
 }
 
 pub struct Validator {
-    input: Map<String, Value>,
+    pub(crate) input: Map<String, Value>,
     output: Map<String, Value>,
     errors: Vec<String>,
     /// Nest prefixes nested errors with their path, e.g. `lines.0.`.
@@ -266,7 +294,7 @@ fn permission_keys() -> Vec<&'static str> {
     permissions::keys().collect()
 }
 
-fn opt_string(map: &Map<String, Value>, key: &str) -> Option<String> {
+pub(crate) fn opt_string(map: &Map<String, Value>, key: &str) -> Option<String> {
     map.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
@@ -389,7 +417,7 @@ pub struct AccountDto {
     pub parent_id: Option<Option<String>>,
 }
 
-fn nullable(m: &Map<String, Value>, key: &str) -> Option<Option<String>> {
+pub(crate) fn nullable(m: &Map<String, Value>, key: &str) -> Option<Option<String>> {
     m.get(key).map(|v| v.as_str().map(str::to_string))
 }
 
@@ -432,7 +460,56 @@ pub struct JournalEntryDto {
     pub lines: Vec<JournalLineDto>,
 }
 
-const NESTED_MESSAGE: &str = "each value in nested property lines must be either object or array";
+/// Validates one element of a nested array; returns its errors and whitelisted fields.
+pub(crate) type ElementRules = fn(&Value, String) -> (Vec<String>, Map<String, Value>);
+
+/// `@ValidateNested({ each: true }) @ArrayMinSize(min) @Type(...)` on `prop`, with Nest's
+/// flattening: when any element has errors only the element errors are reported, prefixed
+/// with their path (`lines.0.`); otherwise the property's own errors are. The whitelisted
+/// elements are stored on the validator's output.
+pub(crate) fn nested_array(v: &mut Validator, prop: &str, optional: bool, min: usize, element: ElementRules) {
+    let value = v.input.get(prop).cloned();
+    if optional && value.as_ref().is_none_or(Value::is_null) {
+        if let Some(Value::Null) = value {
+            v.put(prop, Value::Null);
+        }
+        return;
+    }
+    let nested_message = format!("each value in nested property {prop} must be either object or array");
+    let mut own = Vec::new();
+    if !value.as_ref().and_then(Value::as_array).is_some_and(|a| a.len() >= min) {
+        own.push(format!("{prop} must contain at least {min} elements"));
+    }
+    let mut children = Vec::new();
+    let mut clean = Vec::new();
+    match &value {
+        None => {}
+        Some(Value::Array(items)) => {
+            for (i, item) in items.iter().enumerate() {
+                if item.is_object() || item.is_array() {
+                    let (errs, c) = element(item, format!("{prop}.{i}."));
+                    children.extend(errs);
+                    clean.push(Value::Object(c));
+                } else {
+                    children.push(format!("{prop}.{nested_message}"));
+                }
+            }
+        }
+        Some(obj @ Value::Object(_)) => {
+            let (errs, _) = element(obj, format!("{prop}."));
+            children.extend(errs);
+        }
+        Some(_) => own.push(nested_message),
+    }
+    if children.is_empty() {
+        v.push_errors(own);
+    } else {
+        v.push_errors(children);
+    }
+    if value.is_some() {
+        v.put(prop, Value::Array(clean));
+    }
+}
 
 fn line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>) {
     let mut v = Validator::nested(item.as_object().cloned().unwrap_or_default(), prefix);
@@ -446,7 +523,6 @@ fn line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>)
 /// `CreateJournalEntryDto` with `@ValidateNested({ each: true }) @ArrayMinSize(2)` lines, and
 /// Nest's flattening: when any nested line has errors only the nested errors are reported.
 pub fn create_journal_entry(body: Map<String, Value>) -> Result<JournalEntryDto, AppError> {
-    let lines_value = body.get("lines").cloned();
     let mut v = Validator::new(body);
     v.field("date", false, &[Rule::IsDateFormat])
         .field("description", false, &[Rule::IsString, Rule::IsNotEmpty])
@@ -454,37 +530,7 @@ pub fn create_journal_entry(body: Map<String, Value>) -> Result<JournalEntryDto,
         .field("sourceType", true, &[Rule::IsString])
         .field("sourceId", true, &[Rule::IsString]);
 
-    let mut own = Vec::new();
-    if !lines_value.as_ref().and_then(Value::as_array).is_some_and(|a| a.len() >= 2) {
-        own.push("lines must contain at least 2 elements".to_string());
-    }
-    let mut children = Vec::new();
-    let mut clean_lines = Vec::new();
-    match &lines_value {
-        None => {}
-        Some(Value::Array(items)) => {
-            for (i, item) in items.iter().enumerate() {
-                if item.is_object() || item.is_array() {
-                    let (errs, clean) = line_rules(item, format!("lines.{i}."));
-                    children.extend(errs);
-                    clean_lines.push(Value::Object(clean));
-                } else {
-                    children.push(format!("lines.{NESTED_MESSAGE}"));
-                }
-            }
-        }
-        Some(obj @ Value::Object(_)) => {
-            let (errs, _) = line_rules(obj, "lines.".to_string());
-            children.extend(errs);
-        }
-        Some(_) => own.push(NESTED_MESSAGE.to_string()),
-    }
-    if children.is_empty() {
-        v.push_errors(own);
-    } else {
-        v.push_errors(children);
-    }
-    v.put("lines", Value::Array(clean_lines));
+    nested_array(&mut v, "lines", false, 2, line_rules);
     let m = v.finish()?;
 
     let lines = m

@@ -10,8 +10,9 @@ deviations from the reference app and the wave approval gates.
 | Wave | Scope | State |
 |---|---|---|
 | W0 | Foundation: shell, server, schema, auth + 2FA, users, roles, audit, settings | done (approved) |
-| W1 | Ledger: chart of accounts, journal entries, reversals, trial balance, account balances | done, awaiting approval |
-| W2–W6 | Operations, reports, employees, payroll, production readiness | not started |
+| W1 | Ledger: chart of accounts, journal entries, reversals, trial balance, account balances | done (approved) |
+| W2 | Customers, vendors, bank accounts, invoices, bills, expenses, payments | done, awaiting approval |
+| W3–W6 | Reports, employees, payroll, production readiness | not started |
 
 Screens that depend on later waves (dashboard figures, invoices, payroll, …) load but show no
 data: their API routes answer 404 until their wave is implemented.
@@ -24,6 +25,7 @@ crates/database     SQLite pools, pragmas, migrations, settings repository
 crates/auth         passwords (Argon2id, legacy bcrypt), JWT, TOTP, throttle, users, roles
 crates/audit        activity log and the reference's action summariser
 crates/ledger       chart of accounts, journal posting and reversal, balances, trial balance
+crates/operations   customers, vendors, bank accounts, invoices, bills, expenses, payments
 crates/api-server   Axum routes, validation, middleware, static frontend, accounting-server binary
 src-tauri           desktop shell (window on the embedded server)
 frontend            the reference React app, copied unchanged

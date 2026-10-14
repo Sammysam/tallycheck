@@ -297,8 +297,10 @@ async fn account_rules_match_reference() -> AppResult<()> {
     let gone = accounts::remove(&b.db, &b.ids["2000"]).await;
     assert!(matches!(gone, Err(AppError::NotFound(_))));
 
-    // Seeding only runs on an empty chart — and the migration already added 11 accounts.
-    assert!(!accounts::seed(&b.db).await?);
+    // D10: seeding adds only the missing default codes: 1200, 2000 (deleted above), 2100 and 5000
+    // (1000/1100/3000/4000/6000 exist; 6100 comes from the payroll migration).
+    assert_eq!(accounts::seed(&b.db).await?, 4);
+    assert_eq!(accounts::seed(&b.db).await?, 0);
     Ok(())
 }
 
@@ -307,10 +309,10 @@ async fn seed_fills_an_empty_chart() -> AppResult<()> {
     let dir = tempfile::tempdir().map_err(AppError::internal)?;
     let db = Db::open(&dir.path().join("t.db")).await?;
     sqlx::query(r#"DELETE FROM "accounts""#).execute(db.write()).await?;
-    assert!(accounts::seed(&db).await?);
+    assert_eq!(accounts::seed(&db).await?, 10);
     let all = accounts::find_all(&db).await?;
     assert_eq!(all.len(), 10);
     assert_eq!(all[0].code, "1000");
-    assert!(!accounts::seed(&db).await?);
+    assert_eq!(accounts::seed(&db).await?, 0);
     Ok(())
 }

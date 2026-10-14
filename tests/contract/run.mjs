@@ -168,7 +168,6 @@ async function scenario(base) {
   // ── W1: chart of accounts ──────────────────────────────────────────────────
   r = await step('accounts.list.initial', 'GET', '/api/accounts', { token: s.admin });
   s.acct = Object.fromEntries((Array.isArray(r.body) ? r.body : []).map((a) => [a.code, a.id]));
-  await step('accounts.seed', 'POST', '/api/accounts/seed', { token: s.admin });
   await step('accounts.create.empty', 'POST', '/api/accounts', { token: s.admin, body: {} });
   await step('accounts.create.bad-type', 'POST', '/api/accounts', { token: s.admin, body: { code: '1000', name: 'Cash', type: 'INCOME' } });
   const mk = async (label, body) => {
@@ -229,16 +228,181 @@ async function scenario(base) {
   await step('viewer.accounts.create', 'POST', '/api/accounts', { token: s.viewer, body: { code: '7000', name: 'X', type: 'EXPENSE' } });
   await step('viewer.ledger.entries', 'GET', '/api/ledger/entries?sourceType=NONE', { token: s.viewer });
 
+  // ── W2: customers, vendors, banking ────────────────────────────────────────
+  const A = (body) => ({ token: s.admin, body });
+  await mk('accounts.create.ap', { code: '2000', name: 'Accounts Payable', type: 'LIABILITY', subtype: 'current_liability' });
+  await step('customers.create.empty', 'POST', '/api/customers', A({}));
+  await step('customers.create.bad-email', 'POST', '/api/customers', A({ name: 'Acme', email: 'not-an-email' }));
+  r = await step('customers.create.acme', 'POST', '/api/customers', A({ name: 'Acme Ltd', email: 'ap@acme.lk', phone: '011', address: '1 Main St', taxId: 'VAT1', junk: 1 }));
+  s.acme = r.body?.id;
+  r = await step('customers.create.beta', 'POST', '/api/customers', A({ name: 'Beta Traders' }));
+  s.beta = r.body?.id;
+  await step('customers.list', 'GET', '/api/customers', { token: s.admin });
+  await step('customers.get', 'GET', `/api/customers/${s.acme}`, { token: s.admin });
+  await step('customers.get.unknown', 'GET', `/api/customers/${FIXED_UUID}`, { token: s.admin });
+  await step('customers.update', 'PATCH', `/api/customers/${s.beta}`, A({ phone: '077', isActive: false }));
+  await step('customers.delete.unused', 'DELETE', `/api/customers/${s.beta}`, { token: s.admin });
+  await step('viewer.customers', 'GET', '/api/customers', { token: s.viewer });
+  await step('viewer.customers.create', 'POST', '/api/customers', { token: s.viewer, body: { name: 'X' } });
+
+  await step('vendors.create.empty', 'POST', '/api/vendors', A({}));
+  r = await step('vendors.create', 'POST', '/api/vendors', A({ name: 'Paper Co', email: 'billing@paper.lk' }));
+  s.vendor = r.body?.id;
+  await step('vendors.list', 'GET', '/api/vendors', { token: s.admin });
+  await step('vendors.get', 'GET', `/api/vendors/${s.vendor}`, { token: s.admin });
+  await step('vendors.update', 'PATCH', `/api/vendors/${s.vendor}`, A({ address: 'Colombo' }));
+  await step('viewer.vendors', 'GET', '/api/vendors', { token: s.viewer });
+
+  await step('banking.create.invalid', 'POST', '/api/banking', A({ name: 'BOC', accountId: 'x' }));
+  r = await step('banking.create', 'POST', '/api/banking', A({ name: 'BOC Current', bankName: 'Bank of Ceylon', accountNumber: '0071234', accountId: s.acct['1000'] }));
+  s.bank = r.body?.id;
+  r = await step('banking.create.second', 'POST', '/api/banking', A({ name: 'Petty', accountId: s.acct['1000'] }));
+  s.bank2 = r.body?.id;
+  await step('banking.get', 'GET', `/api/banking/${s.bank}`, { token: s.admin });
+  await step('banking.update', 'PATCH', `/api/banking/${s.bank}`, A({ accountNumber: '0079999' }));
+  await step('banking.deactivate', 'DELETE', `/api/banking/${s.bank2}`, { token: s.admin });
+  await step('banking.list', 'GET', '/api/banking', { token: s.admin });
+  await step('banking.get.unknown', 'GET', `/api/banking/${FIXED_UUID}`, { token: s.admin });
+
+  // ── W2: invoices ───────────────────────────────────────────────────────────
+  const rev = s.acct['4000'];
+  await step('invoices.create.empty', 'POST', '/api/invoices', A({}));
+  await step('invoices.create.no-billto', 'POST', '/api/invoices', A({ date: '2026-04-01', lines: [{ description: 'x' }] }));
+  r = await step('invoices.create.acme', 'POST', '/api/invoices', A({
+    customerId: s.acme, date: '2026-04-01', paymentTerms: 'NET_30', poNumber: 'PO-77', notes: 'Thanks',
+    paymentOptions: [' Bank transfer ', '', 'Cash'], signatoryName: '  ', junk: 1,
+    lines: [{ description: 'Design', quantity: 2.5, unitPrice: 1000.25, accountId: rev }, { description: 'Free consult' }],
+  }));
+  s.inv1 = r.body?.id;
+  r = await step('invoices.create.walkin', 'POST', '/api/invoices', A({
+    billToName: 'Walk-in Client', billToAddress: 'Galle', date: '2026-04-05', dueDate: '2026-04-20',
+    lines: [{ description: 'Consult', quantity: 1, unitPrice: 500, accountId: rev }],
+  }));
+  s.inv2 = r.body?.id;
+  await step('invoices.get', 'GET', `/api/invoices/${s.inv1}`, { token: s.admin });
+  await step('invoices.get.unknown', 'GET', `/api/invoices/${FIXED_UUID}`, { token: s.admin });
+  await step('invoices.list', 'GET', '/api/invoices', { token: s.admin });
+  await step('invoices.list.search', 'GET', '/api/invoices?q=walk', { token: s.admin });
+  await step('invoices.list.search-customer', 'GET', '/api/invoices?q=ACME', { token: s.admin });
+  await step('invoices.list.filters', 'GET', `/api/invoices?status=DRAFT&customerId=${s.acme}&dateFrom=2026-04-01&dateTo=2026-04-03&limit=5`, { token: s.admin });
+  await step('invoices.list.bad-query', 'GET', '/api/invoices?status=OPEN&limit=500', { token: s.admin });
+  await step('invoices.update.draft', 'PATCH', `/api/invoices/${s.inv1}`, A({ paymentTerms: 'NET_15', notes: 'Updated', lines: [{ description: 'Design', quantity: 2.5, unitPrice: 1000.25, accountId: rev }, { description: 'Free consult' }, { description: 'Hosting', quantity: 12, unitPrice: 15.5, accountId: rev }] }));
+  await step('invoices.post.blank-account', 'POST', `/api/invoices/${s.inv1}/post`, { token: s.admin });
+  await step('invoices.update.accounts', 'PATCH', `/api/invoices/${s.inv1}`, A({ lines: [{ description: 'Design', quantity: 2.5, unitPrice: 1000.25, accountId: rev }, { description: 'Hosting', quantity: 12, unitPrice: 15.5, accountId: rev }] }));
+  await step('invoices.post', 'POST', `/api/invoices/${s.inv1}/post`, { token: s.admin });
+  await step('invoices.post.again', 'POST', `/api/invoices/${s.inv1}/post`, { token: s.admin });
+  await step('invoices.update.posted-money', 'PATCH', `/api/invoices/${s.inv1}`, A({ notes: 'no' }));
+  await step('invoices.update.posted-po', 'PATCH', `/api/invoices/${s.inv1}`, A({ poNumber: ' PO-78 ' }));
+  await step('invoices.delete.posted', 'DELETE', `/api/invoices/${s.inv1}`, { token: s.admin });
+  await step('invoices.post.walkin', 'POST', `/api/invoices/${s.inv2}/post`, { token: s.admin });
+  await step('invoices.unpost', 'POST', `/api/invoices/${s.inv2}/unpost`, { token: s.admin });
+  await step('invoices.unpost.draft', 'POST', `/api/invoices/${s.inv2}/unpost`, { token: s.admin });
+  await step('invoices.status.posted', 'PATCH', `/api/invoices/${s.inv2}/status`, A({ status: 'POSTED' }));
+  await step('invoices.status.paid', 'PATCH', `/api/invoices/${s.inv2}/status`, A({ status: 'PAID' }));
+  await step('invoices.status.invalid', 'PATCH', `/api/invoices/${s.inv2}/status`, A({ status: 'OPEN' }));
+  await step('invoices.status.void', 'PATCH', `/api/invoices/${s.inv2}/status`, A({ status: 'VOID' }));
+  await step('invoices.status.from-void', 'PATCH', `/api/invoices/${s.inv2}/status`, A({ status: 'DRAFT' }));
+  await step('invoices.void.again', 'POST', `/api/invoices/${s.inv2}/void`, { token: s.admin });
+  await step('invoices.delete.void', 'DELETE', `/api/invoices/${s.inv2}`, { token: s.admin });
+  await step('invoices.update.void', 'PATCH', `/api/invoices/${s.inv2}`, A({ poNumber: 'x' }));
+  r = await step('invoices.duplicate', 'POST', `/api/invoices/${s.inv2}/duplicate`, { token: s.admin });
+  s.dup = r.body?.id;
+
+  // ── W2: payments against invoices ──────────────────────────────────────────
+  const cash = s.acct['1000'];
+  const pay = (body) => ({ token: s.admin, body: { paymentMethod: 'BANK_TRANSFER', paymentAccountId: cash, date: '2026-04-25', ...body } });
+  await step('payments.ar.no-invoice', 'POST', '/api/payments', pay({ type: 'AR', amount: 10 }));
+  await step('payments.ar.draft', 'POST', '/api/payments', pay({ type: 'AR', invoiceId: s.dup, amount: 10 }));
+  await step('payments.ar.void', 'POST', '/api/payments', pay({ type: 'AR', invoiceId: s.inv2, amount: 10 }));
+  await step('payments.ar.partial', 'POST', '/api/payments', pay({ type: 'AR', invoiceId: s.inv1, customerId: s.acme, amount: 1000, notes: 'part' }));
+  await step('invoices.get.part-paid', 'GET', `/api/invoices/${s.inv1}`, { token: s.admin });
+  await step('payments.ar.too-much', 'POST', '/api/payments', pay({ type: 'AR', invoiceId: s.inv1, amount: 99999 }));
+  await step('invoices.void.part-paid', 'POST', `/api/invoices/${s.inv1}/void`, { token: s.admin });
+  await step('invoices.unpost.part-paid', 'POST', `/api/invoices/${s.inv1}/unpost`, { token: s.admin });
+  await step('payments.ar.rest', 'POST', '/api/payments', pay({ type: 'AR', invoiceId: s.inv1, amount: 1686.63, paymentMethod: 'CHECK' }));
+  await step('invoices.get.paid', 'GET', `/api/invoices/${s.inv1}`, { token: s.admin });
+  await step('payments.ar.already-paid', 'POST', '/api/payments', pay({ type: 'AR', invoiceId: s.inv1, amount: 1 }));
+  await step('invoices.void.paid', 'POST', `/api/invoices/${s.inv1}/void`, { token: s.admin });
+  await step('invoices.status.from-paid', 'PATCH', `/api/invoices/${s.inv1}/status`, A({ status: 'VOID' }));
+  await step('invoices.delete.draft', 'DELETE', `/api/invoices/${s.dup}`, { token: s.admin });
+
+  // ── W2: bills and AP payments ──────────────────────────────────────────────
+  const exp = s.acct['6000'];
+  await step('bills.create.empty', 'POST', '/api/bills', A({}));
+  r = await step('bills.create', 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-03', dueDate: '2026-05-03', notes: 'April paper', lines: [{ description: 'Paper', quantity: 3, unitPrice: 12.5, accountId: exp }, { description: 'Ink', quantity: 1, unitPrice: 20, accountId: exp }] }));
+  s.bill1 = r.body?.id;
+  await step('bills.get', 'GET', `/api/bills/${s.bill1}`, { token: s.admin });
+  await step('bills.get.unknown', 'GET', `/api/bills/${FIXED_UUID}`, { token: s.admin });
+  await step('bills.post', 'POST', `/api/bills/${s.bill1}/post`, { token: s.admin });
+  await step('bills.post.again', 'POST', `/api/bills/${s.bill1}/post`, { token: s.admin });
+  await step('payments.ap.no-bill', 'POST', '/api/payments', pay({ type: 'AP', amount: 10 }));
+  await step('payments.ap.partial', 'POST', '/api/payments', pay({ type: 'AP', billId: s.bill1, vendorId: s.vendor, amount: 10 }));
+  await step('bills.get.after-partial', 'GET', `/api/bills/${s.bill1}`, { token: s.admin });
+  await step('payments.ap.full', 'POST', '/api/payments', pay({ type: 'AP', billId: s.bill1, amount: 57.5 }));
+  await step('bills.void.paid', 'POST', `/api/bills/${s.bill1}/void`, { token: s.admin });
+  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-04', lines: [{ description: 'Draft only', quantity: 1, unitPrice: 5, accountId: exp }] }));
+  await step('bills.void.draft', 'POST', `/api/bills/${r.body?.id}/void`, { token: s.admin });
+  await step('payments.ap.void-bill', 'POST', '/api/payments', pay({ type: 'AP', billId: r.body?.id, amount: 5 }));
+  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-06', lines: [{ description: 'Toner', quantity: 2, unitPrice: 40, accountId: exp }] }));
+  await call(base, 'POST', `/api/bills/${r.body?.id}/post`, { token: s.admin });
+  await step('bills.void.posted', 'POST', `/api/bills/${r.body?.id}/void`, { token: s.admin });
+  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-07', lines: [{ description: 'Unposted', quantity: 1, unitPrice: 9, accountId: exp }] }));
+  await step('payments.ap.draft-bill', 'POST', '/api/payments', pay({ type: 'AP', billId: r.body?.id, amount: 9 }));
+  await step('bills.get.draft-paid', 'GET', `/api/bills/${r.body?.id}`, { token: s.admin });
+  await step('bills.list', 'GET', '/api/bills?limit=50', { token: s.admin });
+
+  // ── W2: expenses ───────────────────────────────────────────────────────────
+  await step('expenses.create.empty', 'POST', '/api/expenses', A({}));
+  r = await step('expenses.create', 'POST', '/api/expenses', A({ date: '2026-04-08', description: 'Taxi', amount: 1500.75, expenseAccountId: exp, paymentAccountId: cash, receiptUrl: 'receipt-1' }));
+  s.exp1 = r.body?.id;
+  await step('expenses.get', 'GET', `/api/expenses/${s.exp1}`, { token: s.admin });
+  await step('expenses.post', 'POST', `/api/expenses/${s.exp1}/post`, { token: s.admin });
+  await step('expenses.post.again', 'POST', `/api/expenses/${s.exp1}/post`, { token: s.admin });
+  await step('expenses.void', 'POST', `/api/expenses/${s.exp1}/void`, { token: s.admin });
+  await step('expenses.void.again', 'POST', `/api/expenses/${s.exp1}/void`, { token: s.admin });
+  r = await call(base, 'POST', '/api/expenses', A({ date: '2026-04-09', description: 'Lunch', amount: 20, expenseAccountId: exp, paymentAccountId: cash }));
+  await step('expenses.void.draft', 'POST', `/api/expenses/${r.body?.id}/void`, { token: s.admin });
+  await step('expenses.list', 'GET', '/api/expenses', { token: s.admin });
+  await step('expenses.get.unknown', 'GET', `/api/expenses/${FIXED_UUID}`, { token: s.admin });
+
+  await step('payments.list', 'GET', '/api/payments?limit=50', { token: s.admin });
+  await step('payments.get.unknown', 'GET', `/api/payments/${FIXED_UUID}`, { token: s.admin });
+  await step('customers.delete.used', 'DELETE', `/api/customers/${s.acme}`, { token: s.admin });
+  await step('ledger.trial-balance.after-w2', 'GET', '/api/ledger/trial-balance', { token: s.admin });
+  await step('ledger.entries.invoices', 'GET', '/api/ledger/entries?sourceType=INVOICE', { token: s.admin });
+
+  // ── W2: own-invoices-only scope ────────────────────────────────────────────
+  r = await call(base, 'POST', '/api/roles', A({ name: 'Sales', permissions: ['invoices'] }));
+  await call(base, 'POST', '/api/users', A({ username: 'sales1', password: 'salespass1', roleId: r.body?.id }));
+  r = await call(base, 'POST', '/api/auth/login', { body: { username: 'sales1', password: 'salespass1' } });
+  const st = r.body.tempToken;
+  const ss = (await call(base, 'GET', '/api/auth/2fa/setup', { token: st })).body.secret;
+  s.sales = (await call(base, 'POST', '/api/auth/2fa/enable', { token: st, body: { code: totp(ss) } })).body.accessToken;
+  r = await step('scope.create', 'POST', '/api/invoices', { token: s.sales, body: { billToName: 'Sales Lead', date: '2026-04-10', lines: [{ description: 'Quote', unitPrice: 75, accountId: rev }] } });
+  await step('scope.list.own', 'GET', '/api/invoices', { token: s.sales });
+  await step('scope.get.other', 'GET', `/api/invoices/${s.inv1}`, { token: s.sales });
+  await step('scope.post.other', 'POST', `/api/invoices/${s.inv1}/post`, { token: s.sales });
+  await step('scope.list.admin', 'GET', '/api/invoices?limit=100', { token: s.admin });
+  await step('scope.payments', 'GET', '/api/payments', { token: s.sales });
+
+  // D4 in isolation: 0.29 x 0.50 is 0.15 exactly; the reference's float toFixed gives 0.14.
+  r = await step('invoices.create.rounding', 'POST', '/api/invoices', A({ billToName: 'Rounding', date: '2026-04-11', lines: [{ description: 'Edge', quantity: 0.29, unitPrice: 0.5 }] }));
+  await step('invoices.delete.rounding', 'DELETE', `/api/invoices/${r.body?.id}`, { token: s.admin });
+
   // Deactivated viewer
   await call(base, 'PATCH', `/api/users/${s.viewerId}`, { token: s.admin, body: { isActive: false } });
   await step('inactive.users', 'GET', '/api/users', { token: s.viewer });
   await step('inactive.me', 'GET', '/api/auth/me', { token: s.viewer });
   await step('inactive.login', 'POST', '/api/auth/login', { body: { username: 'viewer', password: 'viewerpass1' } });
 
+
   // Audit trail last, so it covers everything above.
   await step('audit.list', 'GET', '/api/audit-logs?limit=100', { token: s.admin });
   await step('audit.invalid-pagination', 'GET', '/api/audit-logs?page=abc&limit=101', { token: s.admin });
   await step('audit.users', 'GET', '/api/audit-logs/users', { token: s.admin });
+  // D10 last: its extra accounts would shift the UUID numbering of everything after it.
+  await step('accounts.seed', 'POST', '/api/accounts/seed', { token: s.admin });
+  await step('accounts.list.after-seed', 'GET', '/api/accounts', { token: s.admin });
   return out;
 }
 
@@ -287,6 +451,10 @@ const EXPECTED = {
   'ledger.trial-balance': 'D1: the reversed expense and its reversal both count (reference: cash +250 too high, expense -250)',
   'ledger.balance.cash': 'D1: reversed entry and reversal cancel (correct cash 1100.80; reference 1350.80)',
   'ledger.balance.range': 'D1: April shows the expense; its reversal is dated in October, outside the range',
+  'ledger.trial-balance.after-w2': 'D1: reversed invoice/bill/expense entries and their reversals both count',
+  'invoices.create.rounding': 'D4: 0.29 x 0.50 = 0.145 rounds half-up to 0.15; the reference float toFixed gives 0.14',
+  'bills.void.paid': 'The reference source file garbles the dash in this message (â€”); the intended text is sent',
+  'accounts.list.after-seed': 'D10: seeding adds the missing default accounts (1200, 2100, 5000)',
   'audit.users': 'D2: failed logins are audited (adds rows for known users)',
 };
 
