@@ -483,6 +483,436 @@
    }
   }
  ],
+ "CreateAccountDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "code should not be empty",
+    "code must be a string",
+    "name should not be empty",
+    "name must be a string",
+    "type must be one of the following values: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE"
+   ]
+  },
+  {
+   "input": {
+    "code": "",
+    "name": "",
+    "type": "INCOME"
+   },
+   "status": 400,
+   "message": [
+    "code should not be empty",
+    "name should not be empty",
+    "type must be one of the following values: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE"
+   ]
+  },
+  {
+   "input": {
+    "code": 1000,
+    "name": 5,
+    "type": "ASSET"
+   },
+   "status": 400,
+   "message": [
+    "code must be a string",
+    "name must be a string"
+   ]
+  },
+  {
+   "input": {
+    "code": "1000",
+    "name": "Cash",
+    "type": "ASSET"
+   },
+   "ok": {
+    "code": "1000",
+    "name": "Cash",
+    "type": "ASSET"
+   }
+  },
+  {
+   "input": {
+    "code": "1000",
+    "name": "Cash",
+    "type": "ASSET",
+    "subtype": "current_asset",
+    "description": "Petty",
+    "parentId": "nope",
+    "extra": 1
+   },
+   "status": 400,
+   "message": [
+    "parentId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "code": "1000",
+    "name": "Cash",
+    "type": "asset"
+   },
+   "status": 400,
+   "message": [
+    "type must be one of the following values: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE"
+   ]
+  },
+  {
+   "input": {
+    "code": "1000",
+    "name": "Cash",
+    "type": "ASSET",
+    "subtype": null,
+    "description": null,
+    "parentId": null
+   },
+   "ok": {
+    "code": "1000",
+    "name": "Cash",
+    "type": "ASSET",
+    "subtype": null,
+    "description": null,
+    "parentId": null
+   }
+  },
+  {
+   "input": {
+    "code": "1000",
+    "name": "Cash",
+    "type": "ASSET",
+    "subtype": 5,
+    "parentId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+   },
+   "status": 400,
+   "message": [
+    "subtype must be a string"
+   ]
+  }
+ ],
+ "UpdateAccountDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "name": ""
+   },
+   "status": 400,
+   "message": [
+    "name should not be empty"
+   ]
+  },
+  {
+   "input": {
+    "type": "X"
+   },
+   "status": 400,
+   "message": [
+    "type must be one of the following values: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE"
+   ]
+  },
+  {
+   "input": {
+    "name": "Bank",
+    "isActive": false
+   },
+   "ok": {
+    "name": "Bank"
+   }
+  },
+  {
+   "input": {
+    "code": null
+   },
+   "ok": {
+    "code": null
+   }
+  },
+  {
+   "input": {
+    "code": "1001",
+    "parentId": "x"
+   },
+   "status": 400,
+   "message": [
+    "parentId must be a UUID"
+   ]
+  }
+ ],
+ "CreateJournalEntryDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "date must be a valid date in YYYY-MM-DD format",
+    "description should not be empty",
+    "description must be a string",
+    "lines must contain at least 2 elements"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-02-30",
+    "description": "",
+    "lines": []
+   },
+   "status": 400,
+   "message": [
+    "date must be a valid date in YYYY-MM-DD format",
+    "description should not be empty",
+    "lines must contain at least 2 elements"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "lines": "nope"
+   },
+   "status": 400,
+   "message": [
+    "lines must contain at least 2 elements",
+    "each value in nested property lines must be either object or array"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "lines": [
+     1,
+     2
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.each value in nested property lines must be either object or array",
+    "lines.each value in nested property lines must be either object or array"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "lines": [
+     {}
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.accountId must be a UUID",
+    "lines.0.debit must not be less than 0",
+    "lines.0.debit must be a number conforming to the specified constraints",
+    "lines.0.credit must not be less than 0",
+    "lines.0.credit must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "lines": [
+     {},
+     {}
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.accountId must be a UUID",
+    "lines.0.debit must not be less than 0",
+    "lines.0.debit must be a number conforming to the specified constraints",
+    "lines.0.credit must not be less than 0",
+    "lines.0.credit must be a number conforming to the specified constraints",
+    "lines.1.accountId must be a UUID",
+    "lines.1.debit must not be less than 0",
+    "lines.1.debit must be a number conforming to the specified constraints",
+    "lines.1.credit must not be less than 0",
+    "lines.1.credit must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "lines": [
+     {
+      "accountId": "bad",
+      "debit": "10",
+      "credit": -1
+     },
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": 1.005,
+      "credit": 0,
+      "description": 5
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.accountId must be a UUID",
+    "lines.0.debit must not be less than 0",
+    "lines.0.debit must be a number conforming to the specified constraints",
+    "lines.0.credit must not be less than 0",
+    "lines.1.debit must be a number conforming to the specified constraints",
+    "lines.1.description must be a string"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "reference": 5,
+    "sourceType": null,
+    "lines": [
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": 10.5,
+      "credit": 0,
+      "junk": 1
+     },
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": 0,
+      "credit": 10.5
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "reference must be a string"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "ok",
+    "reference": "R",
+    "sourceType": "MANUAL",
+    "sourceId": "S",
+    "extra": true,
+    "lines": [
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": 100,
+      "credit": 0,
+      "description": "d"
+     },
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": 0,
+      "credit": 100
+     }
+    ]
+   },
+   "ok": {
+    "date": "2026-04-01",
+    "description": "ok",
+    "reference": "R",
+    "sourceType": "MANUAL",
+    "sourceId": "S",
+    "lines": [
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": 100,
+      "credit": 0,
+      "description": "d"
+     },
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": 0,
+      "credit": 100
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "lines": [
+     {
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "debit": null,
+      "credit": 0
+     },
+     null
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.debit must not be less than 0",
+    "lines.0.debit must be a number conforming to the specified constraints",
+    "lines.each value in nested property lines must be either object or array"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "x",
+    "lines": {
+     "a": 1
+    }
+   },
+   "status": 400,
+   "message": [
+    "lines.accountId must be a UUID",
+    "lines.debit must not be less than 0",
+    "lines.debit must be a number conforming to the specified constraints",
+    "lines.credit must not be less than 0",
+    "lines.credit must be a number conforming to the specified constraints"
+   ]
+  }
+ ],
+ "LedgerFilterDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "dateFrom": "2026-04-01",
+    "dateTo": "2026-04-30",
+    "sourceType": "MANUAL"
+   },
+   "ok": {
+    "dateFrom": "2026-04-01",
+    "dateTo": "2026-04-30",
+    "sourceType": "MANUAL"
+   }
+  },
+  {
+   "input": {
+    "dateFrom": "x"
+   },
+   "status": 400,
+   "message": [
+    "dateFrom must be a valid date in YYYY-MM-DD format"
+   ]
+  },
+  {
+   "input": {
+    "dateTo": "2026-13-01",
+    "sourceType": [
+     "a",
+     "b"
+    ]
+   },
+   "status": 400,
+   "message": [
+    "dateTo must be a valid date in YYYY-MM-DD format",
+    "sourceType must be a string"
+   ]
+  },
+  {
+   "input": {
+    "junk": "1"
+   },
+   "ok": {}
+  }
+ ],
  "PaginationDto": [
   {
    "input": {},

@@ -89,4 +89,6 @@ pub mod perm {
     permission!(Users, "users");
     permission!(Audit, "audit");
     permission!(Settings, "settings");
+    permission!(Accounts, "accounts");
+    permission!(Ledger, "ledger");
 }

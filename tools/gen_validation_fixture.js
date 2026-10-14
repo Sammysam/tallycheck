@@ -50,6 +50,30 @@ const cases = {
     {}, { signatoryName: 'x'.repeat(121) }, { signatoryName: 5, signatoryTitle: 'T' }, { signatoryName: 'Ok', junk: 1 },
     { signatoryName: null }, { signatoryTitle: 'x'.repeat(120) },
   ]],
+  CreateAccountDto: [dto('modules/accounts/dto/create-account.dto.ts', 'CreateAccountDto'), [
+    {}, { code: '', name: '', type: 'INCOME' }, { code: 1000, name: 5, type: 'ASSET' }, { code: '1000', name: 'Cash', type: 'ASSET' },
+    { code: '1000', name: 'Cash', type: 'ASSET', subtype: 'current_asset', description: 'Petty', parentId: 'nope', extra: 1 },
+    { code: '1000', name: 'Cash', type: 'asset' }, { code: '1000', name: 'Cash', type: 'ASSET', subtype: null, description: null, parentId: null },
+    { code: '1000', name: 'Cash', type: 'ASSET', subtype: 5, parentId: '7c9e6679-7425-40de-944b-e07fc1f90ae7' },
+  ]],
+  UpdateAccountDto: [dto('modules/accounts/dto/update-account.dto.ts', 'UpdateAccountDto'), [
+    {}, { name: '' }, { type: 'X' }, { name: 'Bank', isActive: false }, { code: null }, { code: '1001', parentId: 'x' },
+  ]],
+  CreateJournalEntryDto: [dto('modules/ledger/dto/create-journal-entry.dto.ts', 'CreateJournalEntryDto'), [
+    {}, { date: '2026-02-30', description: '', lines: [] },
+    { date: '2026-04-01', description: 'x', lines: 'nope' },
+    { date: '2026-04-01', description: 'x', lines: [1, 2] },
+    { date: '2026-04-01', description: 'x', lines: [{}] },
+    { date: '2026-04-01', description: 'x', lines: [{}, {}] },
+    { date: '2026-04-01', description: 'x', lines: [{ accountId: 'bad', debit: '10', credit: -1 }, { accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', debit: 1.005, credit: 0, description: 5 }] },
+    { date: '2026-04-01', description: 'x', reference: 5, sourceType: null, lines: [{ accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', debit: 10.5, credit: 0, junk: 1 }, { accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', debit: 0, credit: 10.5 }] },
+    { date: '2026-04-01', description: 'ok', reference: 'R', sourceType: 'MANUAL', sourceId: 'S', extra: true, lines: [{ accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', debit: 100, credit: 0, description: 'd' }, { accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', debit: 0, credit: 100 }] },
+    { date: '2026-04-01', description: 'x', lines: [{ accountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', debit: null, credit: 0 }, null] },
+    { date: '2026-04-01', description: 'x', lines: { a: 1 } },
+  ]],
+  LedgerFilterDto: [dto('modules/ledger/dto/ledger-filter.dto.ts', 'LedgerFilterDto'), [
+    {}, { dateFrom: '2026-04-01', dateTo: '2026-04-30', sourceType: 'MANUAL' }, { dateFrom: 'x' }, { dateTo: '2026-13-01', sourceType: ['a', 'b'] }, { junk: '1' },
+  ]],
   PaginationDto: [dto('common/dto/pagination.dto.ts', 'PaginationDto'), [
     {}, { page: '2', limit: '50' }, { page: '0' }, { limit: '101' }, { page: 'abc' }, { page: '1.5' }, { page: '' }, { limit: '0' },
     { page: ['1', '2'] }, { page: '-1', limit: 'x' }, { other: 'y' }, { page: ' 3 ' }, { page: '1e1' },
@@ -61,7 +85,7 @@ const cases = {
   for (const [name, [cls, inputs]] of Object.entries(cases)) {
     out[name] = [];
     for (const input of inputs) {
-      const type = name === 'PaginationDto' ? 'query' : 'body';
+      const type = ['PaginationDto', 'LedgerFilterDto'].includes(name) ? 'query' : 'body';
       try {
         const value = await pipe.transform(JSON.parse(JSON.stringify(input)), { type, metatype: cls });
         out[name].push({ input, ok: JSON.parse(JSON.stringify(value)) });

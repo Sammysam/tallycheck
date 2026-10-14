@@ -1,7 +1,9 @@
-//! `/api` routes implemented in W0. Routes of later waves answer 404 like any unknown path.
+//! `/api` routes implemented so far (W0, W1). Routes of later waves answer 404 like any unknown path.
 
+pub mod accounts;
 pub mod audit_logs;
 pub mod auth;
+pub mod ledger;
 pub mod roles;
 pub mod settings;
 pub mod users;
@@ -28,5 +30,13 @@ pub fn api_router() -> Router<AppState> {
         .route("/audit-logs/users", get(audit_logs::users))
         .route("/audit-logs", get(audit_logs::list))
         .route("/settings", get(settings::find_all).patch(settings::update))
+        .route("/accounts", get(accounts::list).post(accounts::create))
+        .route("/accounts/seed", post(accounts::seed))
+        .route("/accounts/{id}", get(accounts::find_one).patch(accounts::update).delete(accounts::remove))
+        .route("/ledger/entries", get(ledger::list_entries).post(ledger::post_entry))
+        .route("/ledger/entries/{id}", get(ledger::get_entry))
+        .route("/ledger/entries/{id}/reverse", post(ledger::reverse))
+        .route("/ledger/trial-balance", get(ledger::trial_balance))
+        .route("/ledger/balance/{account_id}", get(ledger::account_balance))
         .fallback(unknown_route)
 }

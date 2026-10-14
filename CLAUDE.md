@@ -157,6 +157,19 @@ recommendations without answering each one individually; revisit any of them on 
 - `null` in optional PATCH fields means "not sent" (the reference stored the text "null" in
   settings, and crashed with 500 for `isActive: null` / role `name: null`).
 - 2FA codes are throttled per user like passwords (5 failures / 15 min).
+- W1 ledger/accounts (verified by the contract suite):
+  - D1 confirmed live on the reference: after reversing a 250.00 expense its trial balance
+    showed Cash 1,350.80 (correct 1,100.80) and the expense at −250.00. Here both count.
+  - Reversals are dated with the local business date (D5); a date-ranged balance shows the
+    original in its period and the reversal in its own period.
+  - Changing an account to a code that already exists is a 409 (the reference crashed, 500).
+  - Posting to, or parenting under, an unknown account is a 404 `Account <id> not found` (the
+    reference crashed on the foreign key, 500).
+  - Raw date query parameters (`asOf`, `dateFrom`, `dateTo` on trial balance / balance) must be
+    `YYYY-MM-DD`, else 400 (the reference passed them to SQL and crashed).
+  - `null` for an account's code, name or type in PATCH is ignored (reference: 500).
+  - Entry numbers are taken inside the posting transaction: a failed post never skips a number.
+  - Journal lines are returned in posting order (the reference returned them unordered).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
@@ -177,6 +190,10 @@ answer 201.
 - The copied frontend fails `npm run lint` (77 errors, 10 warnings) exactly as the reference
   does, and `npm audit --omit=dev` reports advisories in react-router, form-data and dompurify.
   Upgrades need a decision; they are not "minimal changes".
+- **Fresh installs have no base chart of accounts.** The migration seeds only the 11 payroll
+  accounts, and `POST /accounts/seed` (like the reference) does nothing once any account exists,
+  so 1000 Cash, 1100 AR, 2000 AP … must be created by hand or come from the importer. W2
+  postings need 1100 and 2000. Decide before W2 whether seeding should add missing codes.
 - The production reference server's time zone (for importing `timestamp without time zone`
   values) is unconfirmed.
 

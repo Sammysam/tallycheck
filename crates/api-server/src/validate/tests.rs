@@ -137,3 +137,63 @@ fn repeated_query_keys_become_arrays() {
     assert_eq!(m["page"], serde_json::json!(["1", "2"]));
     assert_eq!(m["limit"], serde_json::json!("5"));
 }
+
+#[test]
+fn accounts_match_reference() {
+    check("CreateAccountDto", |b| {
+        let mut v = Validator::new(b);
+        account_rules(&mut v, false);
+        whitelisted(v)
+    });
+    check("UpdateAccountDto", |b| {
+        let mut v = Validator::new(b);
+        account_rules(&mut v, true);
+        whitelisted(v)
+    });
+}
+
+#[test]
+fn journal_entries_match_reference() {
+    check("CreateJournalEntryDto", |b| {
+        create_journal_entry(b).map(|d| {
+            let mut out = serde_json::json!({ "date": d.date, "description": d.description });
+            for (k, val) in [("reference", d.reference), ("sourceType", d.source_type), ("sourceId", d.source_id)] {
+                if let Some(x) = val {
+                    out[k] = Value::String(x);
+                }
+            }
+            out["lines"] = Value::Array(
+                d.lines
+                    .iter()
+                    .map(|l| {
+                        let mut o = serde_json::json!({
+                            "accountId": l.account_id,
+                            "debit": l.debit.to_json_number(),
+                            "credit": l.credit.to_json_number(),
+                        });
+                        if let Some(desc) = &l.description {
+                            o["description"] = Value::String(desc.clone());
+                        }
+                        o
+                    })
+                    .collect(),
+            );
+            out
+        })
+    });
+}
+
+#[test]
+fn ledger_filter_matches_reference() {
+    check("LedgerFilterDto", |q| {
+        ledger_filter(q).map(|f| {
+            let mut out = serde_json::json!({});
+            for (k, val) in [("dateFrom", f.date_from), ("dateTo", f.date_to), ("sourceType", f.source_type)] {
+                if let Some(x) = val {
+                    out[k] = Value::String(x);
+                }
+            }
+            out
+        })
+    });
+}

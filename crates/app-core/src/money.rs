@@ -107,6 +107,16 @@ impl fmt::Display for Money {
     }
 }
 
+/// `serialize_with` helper: a `numeric(15,2)` column as TypeORM returns it (`"1000.50"`).
+pub fn as_db_string<S: serde::Serializer>(m: &Money, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(&m.to_db_string())
+}
+
+/// `serialize_with` helper: an amount the reference computed in JavaScript (a JSON number).
+pub fn as_json_number<S: serde::Serializer>(m: &Money, s: S) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(&m.to_json_number(), s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
