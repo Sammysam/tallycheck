@@ -1,0 +1,389 @@
+@import "tailwindcss";
+
+/* ── Base ─────────────────────────────────────────────────────────── */
+@layer base {
+  *,
+  *::before,
+  *::after { box-sizing: border-box; }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: #111827;
+    background-color: #f3f4f6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Form elements inherit app font */
+  input, select, textarea, button {
+    font-family: inherit;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  /* Consistent input height + focus ring */
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    display: block;
+    width: 100%;
+    height: 2.125rem;
+    padding: 0 0.75rem;
+    background-color: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    color: #111827;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1.25rem;
+    padding-right: 2.25rem;
+    cursor: pointer;
+  }
+
+  textarea {
+    height: auto;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    resize: vertical;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+  }
+
+  input::placeholder { color: #9ca3af; }
+
+  button { cursor: pointer; }
+}
+
+/* ── Components ───────────────────────────────────────────────────── */
+@layer components {
+  /* Primary button */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    height: 2.125rem;
+    padding: 0 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+  }
+
+  .btn-primary {
+    background-color: #2563eb;
+    color: #ffffff;
+    border-color: #2563eb;
+  }
+  .btn-primary:hover { background-color: #1d4ed8; border-color: #1d4ed8; }
+
+  .btn-secondary {
+    background-color: #ffffff;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+  .btn-secondary:hover { background-color: #f9fafb; }
+
+  .btn-danger {
+    background-color: #ffffff;
+    color: #dc2626;
+    border-color: #fca5a5;
+    font-size: 0.75rem;
+    height: 1.75rem;
+    padding: 0 0.5rem;
+  }
+  .btn-danger:hover { background-color: #fef2f2; }
+
+  .btn-link {
+    background: none;
+    border: none;
+    color: #2563eb;
+    font-size: 0.75rem;
+    height: auto;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .btn-link:hover { color: #1d4ed8; }
+
+  /* Row actions: the ⋮ trigger and its portalled menu */
+  .action-dots {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    font-size: 1.125rem;
+    line-height: 1;
+    color: #6b7280;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0.375rem;
+  }
+  .action-dots:hover { background-color: #f3f4f6; color: #111827; }
+  .action-dots:focus { outline: none; border-color: #d1d5db; }
+
+  .action-menu {
+    position: fixed;
+    z-index: 50;
+    padding: 0.25rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  }
+  .action-menu button {
+    display: block;
+    width: 100%;
+    padding: 0.4rem 0.625rem;
+    font-size: 0.8125rem;
+    text-align: left;
+    color: #374151;
+    background: none;
+    border: none;
+    border-radius: 0.375rem;
+  }
+  .action-menu button:hover { background-color: #f3f4f6; }
+  .action-menu button.danger { color: #dc2626; }
+  .action-menu button.danger:hover { background-color: #fef2f2; }
+
+  /* Card */
+  .card {
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1.25rem;
+  }
+
+  /* Form row */
+  .form-grid {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  /* Section title */
+  .section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b7280;
+    padding: 0.5rem 0.75rem 0.25rem;
+  }
+
+  /* ── Invoice sheet: the New Invoice form drawn as the invoice document ──
+     Mirrors the markup/styling of utils/invoicePdf.ts so what you fill in
+     here matches the Preview / PDF output. */
+  /* Two columns: bookkeeping controls on the left, the document on the right. */
+  .inv-editor {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1.25rem;
+  }
+
+  .inv-side {
+    position: sticky;
+    top: 1rem;
+    flex: 0 0 240px;
+    max-width: 240px;
+    padding: 1rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+  }
+
+  .inv-side-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b7280;
+  }
+
+  .inv-side-note {
+    margin: 0.25rem 0 0.75rem;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: #9ca3af;
+  }
+
+  .inv-side-field {
+    display: block;
+    margin-bottom: 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #374151;
+  }
+
+  .inv-side-field select { margin-top: 0.25rem; }
+
+  .inv-side-hint {
+    display: block;
+    margin-top: 0.125rem;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    line-height: 1.35;
+    color: #9ca3af;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Under ~1200px the panel stacks above the sheet rather than squeezing it. */
+  @media (max-width: 1200px) {
+    .inv-editor { flex-direction: column; align-items: center; }
+    .inv-side { position: static; flex: none; max-width: 794px; width: 100%; }
+  }
+
+  .inv-sheet-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .inv-sheet {
+    width: 794px;                 /* A4 width at 96dpi, same as the PDF */
+    max-width: 100%;
+    background: #fff;
+    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.18);
+    padding: 40px 44px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px;
+    color: #111;
+  }
+
+  .inv-sheet .logo-row { display: flex; justify-content: flex-end; }
+  .inv-sheet .logo-row img { height: 40px; }
+  .inv-sheet .rule { border-top: 1px solid #111; margin: 7px 0; }
+  .inv-sheet .contact { text-align: center; font-size: 11px; color: #333; line-height: 1.6; }
+  .inv-sheet h1 { font-size: 26px; margin: 22px 0 18px; font-weight: 700; }
+  .inv-sheet .meta { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
+  .inv-sheet .label { font-weight: bold; margin-bottom: 5px; }
+  .inv-sheet .block { margin-bottom: 16px; }
+
+  .inv-sheet .meta-right { min-width: 300px; }
+  .inv-sheet .meta-row {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .inv-sheet .meta-row .auto { color: #9ca3af; font-style: italic; }
+
+  /* Editable fields styled as document text, not app inputs */
+  .inv-sheet .inv-input,
+  .inv-sheet textarea.inv-input {
+    width: 100%;
+    height: auto;
+    min-height: 1.5rem;
+    padding: 1px 4px;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.4;
+    color: #111;
+    background: transparent;
+    border: none;
+    border-bottom: 1px dashed #9ca3af;
+    border-radius: 0;
+  }
+  .inv-sheet .inv-input:focus,
+  .inv-sheet textarea.inv-input:focus {
+    outline: none;
+    border-bottom: 1px solid #2563eb;
+    box-shadow: none;
+    background: #eff6ff;
+  }
+  .inv-sheet .inv-input.right { text-align: right; }
+  .inv-sheet .inv-select { padding-right: 20px; background-position: right 2px center; background-size: 1rem; cursor: pointer; }
+  .inv-sheet .bill-block { max-width: 360px; }
+  .inv-sheet .bill-to { font-weight: 600; margin-top: 4px; }
+  .inv-sheet textarea.inv-input { resize: vertical; }
+
+  .inv-sheet table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .inv-sheet th,
+  .inv-sheet td { border: 1px solid #444; padding: 6px 8px; vertical-align: top; }
+  .inv-sheet thead th { background: #63d2e8; font-weight: bold; text-align: center; }
+  .inv-sheet .c-desc { text-align: left; }
+  .inv-sheet .c-num { text-align: right; white-space: nowrap; }
+  .inv-sheet .c-date { white-space: nowrap; }
+  .inv-sheet tfoot td { border: none; padding: 4px 8px; }
+  .inv-sheet tfoot .total-label { text-align: right; font-weight: bold; }
+  .inv-sheet tfoot .total-val { text-align: right; font-weight: bold; border-top: 1px solid #444; white-space: nowrap; }
+  .inv-sheet .words { margin-top: 10px; font-size: 12px; }
+
+  /* Right-hand gutter holds app-only controls, outside the printed table */
+  .inv-sheet th.gutter,
+  .inv-sheet td.gutter { border: none; width: 28px; padding: 6px 0 6px 6px; background: none; }
+  .inv-sheet .row-del {
+    border: none;
+    background: none;
+    color: #9ca3af;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+  }
+  .inv-sheet .row-del:hover { color: #dc2626; }
+
+  .inv-sheet .pay { margin-top: 30px; }
+  .inv-sheet .pay p { margin: 3px 0; font-size: 12px; }
+  .inv-sheet .sign { margin-top: 46px; }
+  .inv-sheet .sign .thanks { font-weight: bold; margin-bottom: 46px; }
+  .inv-sheet .sysnote {
+    margin-top: 34px;
+    padding-top: 8px;
+    border-top: 1px solid #ccc;
+    text-align: center;
+    font-size: 11px;
+    font-style: italic;
+    color: #444;
+  }
+  .inv-sheet .sign .sig-name { font-weight: bold; max-width: 260px; }
+  .inv-sheet .sign .sig-title { max-width: 260px; margin-top: 2px; }
+
+  .inv-sheet .pay-row { display: flex; align-items: flex-start; gap: 4px; max-width: 620px; }
+  .inv-sheet textarea.pay-opt { font-size: 12px; min-height: 1.4rem; }
+
+  .inv-actions {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 794px;
+    max-width: 100%;
+    padding: 0.75rem 1rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+  }
+}

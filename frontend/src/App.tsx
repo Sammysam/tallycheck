@@ -1,0 +1,93 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import './index.css';
+import { AuthProvider } from './contexts/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import Layout from './components/Layout';
+import Login from './pages/Login';
+import TwoFactorSetup from './pages/TwoFactorSetup';
+import TwoFactorVerify from './pages/TwoFactorVerify';
+import Dashboard from './pages/Dashboard';
+import Accounts from './pages/Accounts';
+import Customers from './pages/Customers';
+import Vendors from './pages/Vendors';
+import Employees from './pages/Employees';
+import EmployeeProfile from './pages/EmployeeProfile';
+import Payroll from './pages/Payroll';
+import PayrollRun from './pages/PayrollRun';
+import Invoices from './pages/Invoices';
+import Bills from './pages/Bills';
+import Expenses from './pages/Expenses';
+import Payments from './pages/Payments';
+import Ledger from './pages/Ledger';
+import TrialBalance from './pages/reports/TrialBalance';
+import ProfitLoss from './pages/reports/ProfitLoss';
+import BalanceSheet from './pages/reports/BalanceSheet';
+import ArAging from './pages/reports/ArAging';
+import ApAging from './pages/reports/ApAging';
+import Users from './pages/Users';
+import Roles from './pages/Roles';
+import AuditLog from './pages/AuditLog';
+import Settings from './pages/Settings';
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Public auth routes */}
+          <Route path="/login"      element={<Login />} />
+          <Route path="/2fa/setup"  element={<TwoFactorSetup />} />
+          <Route path="/2fa/verify" element={<TwoFactorVerify />} />
+
+          {/* Protected app routes */}
+          <Route path="/*" element={
+            <ProtectedRoute>
+              <Layout>
+                <Routes>
+                  <Route path="/"                         element={<Dashboard />} />
+                  <Route path="/accounts"                 element={<Accounts />} />
+                  <Route path="/customers"                element={<Customers />} />
+                  <Route path="/vendors"                  element={<Vendors />} />
+                  <Route path="/employees" element={
+                    <ProtectedRoute permission="employees"><Employees /></ProtectedRoute>
+                  } />
+                  <Route path="/employees/:id" element={
+                    <ProtectedRoute permission="employees"><EmployeeProfile /></ProtectedRoute>
+                  } />
+                  <Route path="/payroll" element={
+                    <ProtectedRoute permission="payroll"><Payroll /></ProtectedRoute>
+                  } />
+                  <Route path="/payroll/:id" element={
+                    <ProtectedRoute permission="payroll"><PayrollRun /></ProtectedRoute>
+                  } />
+                  <Route path="/invoices"                 element={<Invoices />} />
+                  <Route path="/bills"                    element={<Bills />} />
+                  <Route path="/expenses"                 element={<Expenses />} />
+                  <Route path="/payments"                 element={<Payments />} />
+                  <Route path="/ledger"                   element={<Ledger />} />
+                  <Route path="/reports/trial-balance"    element={<TrialBalance />} />
+                  <Route path="/reports/profit-loss"      element={<ProfitLoss />} />
+                  <Route path="/reports/balance-sheet"    element={<BalanceSheet />} />
+                  <Route path="/reports/ar-aging"         element={<ArAging />} />
+                  <Route path="/reports/ap-aging"         element={<ApAging />} />
+                  <Route path="/users" element={
+                    <ProtectedRoute permission="users"><Users /></ProtectedRoute>
+                  } />
+                  <Route path="/roles" element={
+                    <ProtectedRoute permission="users"><Roles /></ProtectedRoute>
+                  } />
+                  <Route path="/audit" element={
+                    <ProtectedRoute permission="audit"><AuditLog /></ProtectedRoute>
+                  } />
+                  <Route path="/settings" element={
+                    <ProtectedRoute permission="settings"><Settings /></ProtectedRoute>
+                  } />
+                </Routes>
+              </Layout>
+            </ProtectedRoute>
+          } />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}
