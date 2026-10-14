@@ -15,6 +15,10 @@ fn check(dto: &str, f: impl Fn(Map<String, Value>) -> Result<Value, AppError>) {
     for case in cases {
         let input = case["input"].as_object().cloned().unwrap_or_default();
         let got = f(input);
+        if let Some(intended) = approved_deviation(dto, &case["input"]) {
+            assert_eq!(got.ok(), Some(intended), "{dto} {}: approved deviation", case["input"]);
+            continue;
+        }
         match (&case["message"], got) {
             (Value::Array(expected), Err(AppError::BadRequest(app_core::ErrorMessage::List(actual)))) => {
                 let expected: Vec<String> = expected.iter().filter_map(Value::as_str).map(str::to_string).collect();
@@ -23,6 +27,17 @@ fn check(dto: &str, f: impl Fn(Map<String, Value>) -> Result<Value, AppError>) {
             (Value::Null, Ok(out)) => assert_eq!(out, case["ok"], "{dto} {}", case["input"]),
             (expected, got) => panic!("{dto} {}: expected {expected}, got {got:?}", case["input"]),
         }
+    }
+}
+
+/// Fixture cases where the reference result is deliberately not reproduced, with the intended
+/// whitelisted output. D11: an empty optional email means "no email" (the reference rejected it).
+fn approved_deviation(dto: &str, input: &Value) -> Option<Value> {
+    match (dto, input) {
+        ("CreateCustomerDto", i) if i == &serde_json::json!({"name": "Acme", "email": ""}) => {
+            Some(serde_json::json!({"name": "Acme", "email": null}))
+        }
+        _ => None,
     }
 }
 

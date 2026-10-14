@@ -188,6 +188,18 @@ recommendations without answering each one individually; revisit any of them on 
   - Response shapes reproduce TypeORM exactly: a created invoice/bill echoes `unitPrice` and
     `amount` as JSON numbers but `quantity`/`totalAmount` as strings and has no `customer` /
     `vendor`; a draft PATCH that replaces lines answers `totalAmount` as a number.
+- **D11–D15** (approved by the user 2026-10-14, after W2):
+  - D11/D12: an empty string in an optional email or date field means "not given". The
+    Customers/Vendors forms send `email: ""` and the Bills form `dueDate: ""`; the reference
+    rejected both, which made those fields required in practice.
+  - D13: bills accumulate AP payments in a new `bills."amountPaid"` column (migration 0002, kept
+    out of the JSON so the bill shape is unchanged) and become PAID when nothing is outstanding;
+    an AP payment larger than the outstanding amount is refused, as for invoices. The importer
+    must back-fill `amountPaid` from each bill's AP payments.
+  - D14: a DRAFT bill must be posted before it can be paid (the reference marked it PAID
+    without ever posting it).
+  - D15: a part-paid bill cannot be voided (the reference voided it and left the payment's AP
+    debit standing alone).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
@@ -210,15 +222,7 @@ answer 201.
   Upgrades need a decision; they are not "minimal changes".
 - Fresh installs: run `POST /accounts/seed` (D10) to get 1000 Cash, 1100 AR, 2000 AP …; the
   migration still seeds only the 11 payroll accounts, as the reference did.
-- Reference quirks reproduced in W2, awaiting a decision:
-  - Bills: partial AP payments do not accumulate; a bill is PAID only when one payment covers
-    it; a DRAFT bill can be paid (it becomes PAID without ever being posted); a part-paid bill
-    can be voided.
-  - The Customers/Vendors forms send `email: ""` and the Bills form sends `dueDate: ""` when
-    left empty; the API rejects both (`email must be an email`, `dueDate must be a valid date`),
-    so those fields are effectively required in the UI. Fixing it is a frontend or validation
-    change.
-  - `currentBalance` on bank accounts is never updated by postings (balances come from the
+- `currentBalance` on bank accounts is never updated by postings (balances come from the
     ledger); there is no Banking screen in the frontend.
 - The production reference server's time zone (for importing `timestamp without time zone`
   values) is unconfirmed.

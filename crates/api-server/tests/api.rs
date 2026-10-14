@@ -650,7 +650,12 @@ async fn invoice_to_payment_flow_with_bills_and_expenses() -> TestResult {
         .call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme", "email": "a@acme.lk"})))
         .await?;
     let cust_id = cust.body["id"].as_str().ok_or("cust")?.to_string();
-    let bad = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "X", "email": ""}))).await?;
+    // D11: the form sends "" for an email left empty; that means "no email".
+    let blank = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "X", "email": ""}))).await?;
+    assert_eq!(blank.status, StatusCode::CREATED);
+    assert_eq!(blank.body["email"], Value::Null);
+    let bad =
+        app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "X", "email": "nope"}))).await?;
     assert_nest_error(&bad, 400, json!(["email must be an email"]), "/api/customers");
 
     let inv = app
@@ -701,7 +706,7 @@ async fn invoice_to_payment_flow_with_bills_and_expenses() -> TestResult {
             "lines": [{"description": "Paper", "quantity": 3, "unitPrice": 12.5, "accountId": expense}]})),
         )
         .await?;
-    let bill_id = bill.body["id"].as_str().ok_or("bill")?.to_string();
+    let bill_id = bill.body["id"].as_str().ok_or_else(|| format!("bill: {} {}", bill.status, bill.body))?.to_string();
     let bill_post = app.call(Method::POST, &format!("/api/bills/{bill_id}/post"), Some(&admin), None).await?;
     assert_eq!(bill_post.body["status"], "POSTED");
     let exp = app

@@ -18,6 +18,9 @@ const PG_COLUMNS: &str = include_str!("../tests/fixtures/reference_pg_columns.tx
 const PG_CONSTRAINTS: &str = include_str!("../tests/fixtures/reference_pg_constraints.txt");
 const PG_INDEXES: &str = include_str!("../tests/fixtures/reference_pg_indexes.txt");
 
+/// Columns this project adds on purpose (approved deviations), appended after the reference's.
+const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[("bills", "amountPaid", true)]; // D13
+
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =
         sqlx::query_as(&format!("SELECT name, \"notnull\", pk FROM pragma_table_info('{table}')"))
@@ -43,7 +46,13 @@ async fn tables_columns_and_nullability_match_reference_postgres() -> AppResult<
     .collect();
     assert_eq!(tables, expected.keys().cloned().collect::<BTreeSet<_>>());
     for (table, cols) in &expected {
-        assert_eq!(&sqlite_columns(&db, table).await?, cols, "columns / NOT NULL of {table}");
+        let mut cols = cols.clone();
+        for (t, c, not_null) in APPROVED_EXTRA_COLUMNS {
+            if t == table {
+                cols.push((c.to_string(), *not_null));
+            }
+        }
+        assert_eq!(sqlite_columns(&db, table).await?, cols, "columns / NOT NULL of {table}");
     }
     Ok(())
 }
@@ -339,5 +348,47 @@ async fn settings_upsert_overrides_defaults() -> AppResult<()> {
     let s = settings::find_all(&db).await?;
     assert_eq!(s.get("signatoryName").map(String::as_str), Some("Someone Else"));
     assert_eq!(s.get("newKey").map(String::as_str), Some("v"));
+    Ok(())
+}
+
+/// Upgrade path: a database created by an earlier release keeps its data when the newer
+/// migrations run. Each prefix of the migration list is applied, data is written, and then the
+/// full list runs on top.
+#[tokio::test]
+async fn every_earlier_schema_version_upgrades_cleanly() -> AppResult<()> {
+    let all: Vec<sqlx::migrate::Migration> = MIGRATOR.iter().cloned().collect();
+    assert!(all.len() >= 2);
+    for applied in 1..all.len() {
+        let dir = tempfile::tempdir().map_err(AppError::internal)?;
+        let path = dir.path().join("old.db");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(base_options(&path).create_if_missing(true))
+            .await?;
+        let older = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(all[..applied].to_vec()),
+            ignore_missing: false,
+            locking: true,
+            no_tx: false,
+        };
+        older.run(&pool).await?;
+        sqlx::query(r#"INSERT INTO "vendors" ("id","name") VALUES ('v1','Paper Co')"#).execute(&pool).await?;
+        sqlx::query(
+            r#"INSERT INTO "bills" ("id","billNumber","vendorId","date","status","totalAmount") VALUES ('b1','BILL-000001','v1','2026-04-03','POSTED',5750)"#,
+        )
+        .execute(&pool)
+        .await?;
+        pool.close().await;
+
+        let db = Db::open(&path).await?;
+        let (total, paid): (i64, i64) =
+            sqlx::query_as(r#"SELECT "totalAmount", "amountPaid" FROM "bills" WHERE "id" = 'b1'"#)
+                .fetch_one(db.read())
+                .await?;
+        assert_eq!((total, paid), (5750, 0), "after upgrading from {applied} migration(s)");
+        let versions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations").fetch_one(db.read()).await?;
+        assert_eq!(versions, i64::try_from(all.len()).map_err(AppError::internal)?);
+        db.close().await;
+    }
     Ok(())
 }
