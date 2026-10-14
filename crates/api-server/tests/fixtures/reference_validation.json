@@ -913,6 +913,793 @@
    "ok": {}
   }
  ],
+ "CreateCustomerDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "name should not be empty",
+    "name must be a string"
+   ]
+  },
+  {
+   "input": {
+    "name": ""
+   },
+   "status": 400,
+   "message": [
+    "name should not be empty"
+   ]
+  },
+  {
+   "input": {
+    "name": "Acme",
+    "email": "not-an-email"
+   },
+   "status": 400,
+   "message": [
+    "email must be an email"
+   ]
+  },
+  {
+   "input": {
+    "name": "Acme",
+    "email": "a@b.co",
+    "phone": "011",
+    "address": "x",
+    "taxId": "T",
+    "junk": 1
+   },
+   "ok": {
+    "name": "Acme",
+    "email": "a@b.co",
+    "phone": "011",
+    "address": "x",
+    "taxId": "T"
+   }
+  },
+  {
+   "input": {
+    "name": 5,
+    "email": 5,
+    "phone": 5,
+    "address": 5,
+    "taxId": 5
+   },
+   "status": 400,
+   "message": [
+    "name must be a string",
+    "email must be an email",
+    "phone must be a string",
+    "address must be a string",
+    "taxId must be a string"
+   ]
+  },
+  {
+   "input": {
+    "name": "Acme",
+    "email": null,
+    "phone": null
+   },
+   "ok": {
+    "name": "Acme",
+    "email": null,
+    "phone": null
+   }
+  },
+  {
+   "input": {
+    "name": "Acme",
+    "email": ""
+   },
+   "status": 400,
+   "message": [
+    "email must be an email"
+   ]
+  }
+ ],
+ "UpdateCustomerDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "name": ""
+   },
+   "status": 400,
+   "message": [
+    "name should not be empty"
+   ]
+  },
+  {
+   "input": {
+    "email": "x@y"
+   },
+   "status": 400,
+   "message": [
+    "email must be an email"
+   ]
+  },
+  {
+   "input": {
+    "name": "New",
+    "isActive": false
+   },
+   "ok": {
+    "name": "New"
+   }
+  }
+ ],
+ "CreateVendorDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "name should not be empty",
+    "name must be a string"
+   ]
+  },
+  {
+   "input": {
+    "name": "Supplier",
+    "email": "billing@supplier.lk"
+   },
+   "ok": {
+    "name": "Supplier",
+    "email": "billing@supplier.lk"
+   }
+  },
+  {
+   "input": {
+    "name": "S",
+    "email": "bad@"
+   },
+   "status": 400,
+   "message": [
+    "email must be an email"
+   ]
+  }
+ ],
+ "CreateBankAccountDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "name should not be empty",
+    "name must be a string",
+    "accountId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "name": "BOC",
+    "accountId": "x"
+   },
+   "status": 400,
+   "message": [
+    "accountId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "name": "BOC",
+    "bankName": "Bank of Ceylon",
+    "accountNumber": "123",
+    "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "currentBalance": 5
+   },
+   "ok": {
+    "name": "BOC",
+    "bankName": "Bank of Ceylon",
+    "accountNumber": "123",
+    "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+   }
+  }
+ ],
+ "UpdateBankAccountDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "name": ""
+   },
+   "status": 400,
+   "message": [
+    "name should not be empty"
+   ]
+  },
+  {
+   "input": {
+    "accountId": "x",
+    "bankName": 5
+   },
+   "status": 400,
+   "message": [
+    "bankName must be a string",
+    "accountId must be a UUID"
+   ]
+  }
+ ],
+ "CreateInvoiceDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "date must be a valid date in YYYY-MM-DD format",
+    "lines must contain at least 1 elements"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "lines": []
+   },
+   "status": 400,
+   "message": [
+    "lines must contain at least 1 elements"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "lines": [
+     {}
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.description should not be empty",
+    "lines.0.description must be a string"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "lines": [
+     {
+      "description": "Work",
+      "quantity": 0,
+      "unitPrice": -1,
+      "accountId": "x"
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.quantity must not be less than 0.001",
+    "lines.0.unitPrice must not be less than 0",
+    "lines.0.accountId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "lines": [
+     {
+      "description": "Work",
+      "quantity": 1.005,
+      "unitPrice": 10.001
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.quantity must be a number conforming to the specified constraints",
+    "lines.0.unitPrice must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "customerId": "x",
+    "date": "bad",
+    "dueDate": "bad",
+    "paymentTerms": "NET_90",
+    "poNumber": 5,
+    "notes": 5,
+    "billToName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "billToAddress": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "paymentOptions": "cash",
+    "signatoryName": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "signatoryTitle": 5,
+    "lines": [
+     {
+      "description": "a"
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "customerId must be a UUID",
+    "date must be a valid date in YYYY-MM-DD format",
+    "dueDate must be a valid date in YYYY-MM-DD format",
+    "paymentTerms must be one of the following values: DUE_ON_RECEIPT, NET_15, NET_30, NET_60",
+    "poNumber must be a string",
+    "notes must be a string",
+    "billToName must be shorter than or equal to 160 characters",
+    "billToAddress must be shorter than or equal to 500 characters",
+    "paymentOptions must be an array",
+    "signatoryName must be shorter than or equal to 120 characters",
+    "signatoryTitle must be shorter than or equal to 120 characters",
+    "signatoryTitle must be a string"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "paymentOptions": [
+     "Bank",
+     5,
+     "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+    ],
+    "lines": [
+     {
+      "description": "a"
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "each value in paymentOptions must be shorter than or equal to 300 characters",
+    "each value in paymentOptions must be a string"
+   ]
+  },
+  {
+   "input": {
+    "customerId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "dueDate": "2026-05-01",
+    "paymentTerms": "NET_30",
+    "poNumber": "PO1",
+    "notes": "n",
+    "billToName": "B",
+    "billToAddress": "A",
+    "paymentOptions": [
+     "Bank",
+     "Cash"
+    ],
+    "signatoryName": "S",
+    "signatoryTitle": "T",
+    "junk": 1,
+    "lines": [
+     {
+      "description": "Design",
+      "quantity": 2.5,
+      "unitPrice": 1000.25,
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "junk": 2
+     },
+     {
+      "description": "Free"
+     }
+    ]
+   },
+   "ok": {
+    "customerId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "dueDate": "2026-05-01",
+    "paymentTerms": "NET_30",
+    "poNumber": "PO1",
+    "notes": "n",
+    "billToName": "B",
+    "billToAddress": "A",
+    "paymentOptions": [
+     "Bank",
+     "Cash"
+    ],
+    "signatoryName": "S",
+    "signatoryTitle": "T",
+    "lines": [
+     {
+      "description": "Design",
+      "quantity": 2.5,
+      "unitPrice": 1000.25,
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+     },
+     {
+      "description": "Free"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "lines": "x"
+   },
+   "status": 400,
+   "message": [
+    "lines must contain at least 1 elements",
+    "each value in nested property lines must be either object or array"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "lines": [
+     null
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.each value in nested property lines must be either object or array"
+   ]
+  }
+ ],
+ "UpdateInvoiceDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "poNumber": "PO-9"
+   },
+   "ok": {
+    "poNumber": "PO-9"
+   }
+  },
+  {
+   "input": {
+    "lines": []
+   },
+   "status": 400,
+   "message": [
+    "lines must contain at least 1 elements"
+   ]
+  },
+  {
+   "input": {
+    "lines": [
+     {
+      "description": ""
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.description should not be empty"
+   ]
+  },
+  {
+   "input": {
+    "paymentTerms": null,
+    "dueDate": null,
+    "customerId": null
+   },
+   "ok": {
+    "paymentTerms": null,
+    "dueDate": null,
+    "customerId": null
+   }
+  },
+  {
+   "input": {
+    "status": "PAID"
+   },
+   "ok": {}
+  }
+ ],
+ "ChangeInvoiceStatusDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "status must be one of the following values: DRAFT, POSTED, PAID, VOID"
+   ]
+  },
+  {
+   "input": {
+    "status": "POSTED"
+   },
+   "ok": {
+    "status": "POSTED"
+   }
+  },
+  {
+   "input": {
+    "status": "posted"
+   },
+   "status": 400,
+   "message": [
+    "status must be one of the following values: DRAFT, POSTED, PAID, VOID"
+   ]
+  }
+ ],
+ "CreateBillDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "vendorId must be a UUID",
+    "date must be a valid date in YYYY-MM-DD format",
+    "lines must contain at least 1 elements"
+   ]
+  },
+  {
+   "input": {
+    "vendorId": "x",
+    "date": "2026-04-01",
+    "lines": []
+   },
+   "status": 400,
+   "message": [
+    "vendorId must be a UUID",
+    "lines must contain at least 1 elements"
+   ]
+  },
+  {
+   "input": {
+    "vendorId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "lines": [
+     {
+      "description": "Paper"
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.quantity must not be less than 0.001",
+    "lines.0.quantity must be a number conforming to the specified constraints",
+    "lines.0.unitPrice must not be less than 0",
+    "lines.0.unitPrice must be a number conforming to the specified constraints",
+    "lines.0.accountId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "vendorId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "dueDate": "2026-05-01",
+    "notes": "n",
+    "lines": [
+     {
+      "description": "Paper",
+      "quantity": 3,
+      "unitPrice": 12.5,
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+     }
+    ]
+   },
+   "ok": {
+    "vendorId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "dueDate": "2026-05-01",
+    "notes": "n",
+    "lines": [
+     {
+      "description": "Paper",
+      "quantity": 3,
+      "unitPrice": 12.5,
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+     }
+    ]
+   }
+  },
+  {
+   "input": {
+    "vendorId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "lines": [
+     {
+      "description": "P",
+      "quantity": 0.0001,
+      "unitPrice": 1,
+      "accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+     }
+    ]
+   },
+   "status": 400,
+   "message": [
+    "lines.0.quantity must not be less than 0.001",
+    "lines.0.quantity must be a number conforming to the specified constraints"
+   ]
+  }
+ ],
+ "CreateExpenseDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "date must be a valid date in YYYY-MM-DD format",
+    "description should not be empty",
+    "description must be a string",
+    "amount must not be less than 0.01",
+    "amount must be a number conforming to the specified constraints",
+    "expenseAccountId must be a UUID",
+    "paymentAccountId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "Taxi",
+    "amount": 0,
+    "expenseAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+   },
+   "status": 400,
+   "message": [
+    "amount must not be less than 0.01"
+   ]
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "Taxi",
+    "amount": 1500.75,
+    "expenseAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "receiptUrl": "r",
+    "junk": 1
+   },
+   "ok": {
+    "date": "2026-04-01",
+    "description": "Taxi",
+    "amount": 1500.75,
+    "expenseAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "receiptUrl": "r"
+   }
+  },
+  {
+   "input": {
+    "date": "2026-04-01",
+    "description": "Taxi",
+    "amount": "15",
+    "expenseAccountId": "x",
+    "paymentAccountId": "y",
+    "receiptUrl": 5
+   },
+   "status": 400,
+   "message": [
+    "amount must not be less than 0.01",
+    "amount must be a number conforming to the specified constraints",
+    "expenseAccountId must be a UUID",
+    "paymentAccountId must be a UUID",
+    "receiptUrl must be a string"
+   ]
+  }
+ ],
+ "CreatePaymentDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "type must be one of the following values: AR, AP",
+    "date must be a valid date in YYYY-MM-DD format",
+    "amount must not be less than 0.01",
+    "amount must be a number conforming to the specified constraints",
+    "paymentMethod must be one of the following values: CASH, BANK_TRANSFER, CHECK",
+    "paymentAccountId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "type": "AR",
+    "date": "2026-04-01",
+    "amount": 0.001,
+    "paymentMethod": "CARD",
+    "paymentAccountId": "x"
+   },
+   "status": 400,
+   "message": [
+    "amount must not be less than 0.01",
+    "amount must be a number conforming to the specified constraints",
+    "paymentMethod must be one of the following values: CASH, BANK_TRANSFER, CHECK",
+    "paymentAccountId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "type": "AR",
+    "invoiceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "customerId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "amount": 100,
+    "paymentMethod": "BANK_TRANSFER",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "notes": "n",
+    "junk": 1
+   },
+   "ok": {
+    "type": "AR",
+    "invoiceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "customerId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-04-01",
+    "amount": 100,
+    "paymentMethod": "BANK_TRANSFER",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "notes": "n"
+   }
+  },
+  {
+   "input": {
+    "type": "AP",
+    "billId": "x",
+    "vendorId": "y",
+    "date": "2026-04-01",
+    "amount": 1,
+    "paymentMethod": "CASH",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+   },
+   "status": 400,
+   "message": [
+    "billId must be a UUID",
+    "vendorId must be a UUID"
+   ]
+  }
+ ],
+ "QueryInvoicesDto": [
+  {
+   "input": {},
+   "ok": {
+    "page": 1,
+    "limit": 20
+   }
+  },
+  {
+   "input": {
+    "q": " INV ",
+    "status": "POSTED",
+    "customerId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "dateFrom": "2026-04-01",
+    "dateTo": "2026-04-30",
+    "page": "2",
+    "limit": "10"
+   },
+   "ok": {
+    "page": 2,
+    "limit": 10,
+    "q": " INV ",
+    "status": "POSTED",
+    "customerId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "dateFrom": "2026-04-01",
+    "dateTo": "2026-04-30"
+   }
+  },
+  {
+   "input": {
+    "q": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "status": "OPEN",
+    "customerId": "x",
+    "dateFrom": "x"
+   },
+   "status": 400,
+   "message": [
+    "q must be shorter than or equal to 120 characters",
+    "status must be one of the following values: DRAFT, POSTED, PAID, VOID",
+    "customerId must be a UUID",
+    "dateFrom must be a valid date in YYYY-MM-DD format"
+   ]
+  },
+  {
+   "input": {
+    "page": "0"
+   },
+   "status": 400,
+   "message": [
+    "page must not be less than 1"
+   ]
+  },
+  {
+   "input": {
+    "status": "OPEN",
+    "limit": "500",
+    "page": "x"
+   },
+   "status": 400,
+   "message": [
+    "status must be one of the following values: DRAFT, POSTED, PAID, VOID",
+    "page must not be less than 1",
+    "page must be an integer number",
+    "limit must not be greater than 100"
+   ]
+  }
+ ],
  "PaginationDto": [
   {
    "input": {},

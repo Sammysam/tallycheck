@@ -83,6 +83,17 @@ impl Money {
         Money::parse_decimal(&text)
     }
 
+    /// `quantity × unit price` rounded half-up (away from zero) to the cent. The quantity is
+    /// held like money, in hundredths: `Money::from_cents(250)` is a quantity of 2.50.
+    /// Exact decimal arithmetic (deviation D4). The reference's `Number((q * p).toFixed(2))`
+    /// agrees except on rare .xx5 products, e.g. 0.29 × 0.50 = 0.145 → 0.15 here, 0.14 there.
+    pub fn line_amount(quantity: Money, unit_price: Money) -> Option<Money> {
+        let product = i128::from(quantity.0) * i128::from(unit_price.0); // units of 0.0001
+        let half = if product < 0 { -50 } else { 50 };
+        let cents = (product + half) / 100;
+        i64::try_from(cents).ok().map(Money)
+    }
+
     /// `"1234.50"` — the pg/TypeORM rendering of a `numeric(15,2)` column.
     pub fn to_db_string(self) -> String {
         self.to_string()
@@ -153,6 +164,16 @@ mod tests {
         assert_eq!(Money(10).to_json_number().to_string(), "0.1");
         assert_eq!(Money(123_456).to_json_number().to_string(), "1234.56");
         assert_eq!(Money(MAX_NUMERIC_15_2_CENTS).to_json_number().to_string(), "999999999999.99");
+    }
+
+    #[test]
+    fn line_amounts_round_half_up_exactly() {
+        let q = |s: &str| Money::parse_decimal(s).unwrap_or_default();
+        assert_eq!(Money::line_amount(q("2.5"), q("1000.25")), Some(q("2500.63")));
+        assert_eq!(Money::line_amount(q("0.29"), q("0.5")), Some(q("0.15")));
+        assert_eq!(Money::line_amount(q("12"), q("15.5")), Some(q("186")));
+        assert_eq!(Money::line_amount(q("0.01"), q("0.01")), Some(Money::ZERO));
+        assert_eq!(Money::line_amount(q("1"), q("0")), Some(Money::ZERO));
     }
 
     #[test]

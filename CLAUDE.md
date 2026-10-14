@@ -45,7 +45,9 @@ No Node/NestJS/PostgreSQL/Docker/cloud dependency at runtime. Node is a dev-time
 - `api-server` — Axum router, extractors, validation, handlers, static files, the
   `accounting-server` binary. → all of the above
 - `src-tauri` — desktop shell. → api-server
-- Later waves add: `ledger`, `invoices`, `payments`, `payroll`, `employees`, `documents`,
+- `ledger` (W1) — accounts, journal entries, balances. → database, app-core
+- `operations` (W2) — customers, vendors, banking, invoices, bills, expenses, payments. → ledger
+- Later waves add: `payroll`, `employees`, `documents`,
   `reports`, `backup`, `importer`.
 
 ## 3. Accounting invariants (non-negotiable)
@@ -170,6 +172,22 @@ recommendations without answering each one individually; revisit any of them on 
   - `null` for an account's code, name or type in PATCH is ignored (reference: 500).
   - Entry numbers are taken inside the posting transaction: a failed post never skips a number.
   - Journal lines are returned in posting order (the reference returned them unordered).
+- **D10 Seeding adds missing default accounts** (approved by the user 2026-10-14):
+  `POST /accounts/seed` inserts each of the 10 default codes that does not exist yet and never
+  touches existing accounts. The reference only seeded an empty chart.
+- W2 (verified by the contract suite, 232 steps):
+  - Every document and its journal entry are written in one transaction; status checks inside it
+    make retried posts/payments fail instead of double-posting.
+  - Unknown customer, vendor, account or bank-account ids are a 404 `<Thing> <id> not found`
+    (the reference crashed on the foreign key, 500). Payments must reference an existing
+    customer/vendor if one is given (the reference stored any id).
+  - "Cannot void a paid bill — reverse the payment first": the reference source file garbled
+    the dash (`â€”`); the intended text is sent.
+  - Line amounts: exact half-up (D4). 0 of 20,000 random quantity × price pairs differ from the
+    reference; known edge cases such as 0.29 × 0.50 give 0.15 here and 0.14 there.
+  - Response shapes reproduce TypeORM exactly: a created invoice/bill echoes `unitPrice` and
+    `amount` as JSON numbers but `quantity`/`totalAmount` as strings and has no `customer` /
+    `vendor`; a draft PATCH that replaces lines answers `totalAmount` as a number.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
@@ -190,10 +208,18 @@ answer 201.
 - The copied frontend fails `npm run lint` (77 errors, 10 warnings) exactly as the reference
   does, and `npm audit --omit=dev` reports advisories in react-router, form-data and dompurify.
   Upgrades need a decision; they are not "minimal changes".
-- **Fresh installs have no base chart of accounts.** The migration seeds only the 11 payroll
-  accounts, and `POST /accounts/seed` (like the reference) does nothing once any account exists,
-  so 1000 Cash, 1100 AR, 2000 AP … must be created by hand or come from the importer. W2
-  postings need 1100 and 2000. Decide before W2 whether seeding should add missing codes.
+- Fresh installs: run `POST /accounts/seed` (D10) to get 1000 Cash, 1100 AR, 2000 AP …; the
+  migration still seeds only the 11 payroll accounts, as the reference did.
+- Reference quirks reproduced in W2, awaiting a decision:
+  - Bills: partial AP payments do not accumulate; a bill is PAID only when one payment covers
+    it; a DRAFT bill can be paid (it becomes PAID without ever being posted); a part-paid bill
+    can be voided.
+  - The Customers/Vendors forms send `email: ""` and the Bills form sends `dueDate: ""` when
+    left empty; the API rejects both (`email must be an email`, `dueDate must be a valid date`),
+    so those fields are effectively required in the UI. Fixing it is a frontend or validation
+    change.
+  - `currentBalance` on bank accounts is never updated by postings (balances come from the
+    ledger); there is no Banking screen in the frontend.
 - The production reference server's time zone (for importing `timestamp without time zone`
   values) is unconfirmed.
 

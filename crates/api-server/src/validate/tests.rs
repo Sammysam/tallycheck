@@ -197,3 +197,53 @@ fn ledger_filter_matches_reference() {
         })
     });
 }
+
+// ── W2 ───────────────────────────────────────────────────────────────────────
+
+fn rules_check(dto: &str, f: fn(&mut Validator)) {
+    check(dto, |b| {
+        let mut v = Validator::new(b);
+        f(&mut v);
+        whitelisted(v)
+    });
+}
+
+#[test]
+fn parties_and_banking_match_reference() {
+    rules_check("CreateCustomerDto", |v| ops::party_rules(v, false));
+    rules_check("UpdateCustomerDto", |v| ops::party_rules(v, true));
+    rules_check("CreateVendorDto", |v| ops::party_rules(v, false));
+    rules_check("CreateBankAccountDto", |v| ops::bank_rules(v, false));
+    rules_check("UpdateBankAccountDto", |v| ops::bank_rules(v, true));
+}
+
+#[test]
+fn invoices_match_reference() {
+    rules_check("CreateInvoiceDto", |v| ops::invoice_rules(v, false));
+    rules_check("UpdateInvoiceDto", |v| ops::invoice_rules(v, true));
+    rules_check("ChangeInvoiceStatusDto", ops::status_rules);
+    check("QueryInvoicesDto", |q| {
+        ops::invoice_query(q).map(|iq| {
+            let mut out = serde_json::json!({ "page": iq.page, "limit": iq.limit });
+            for (k, val) in [
+                ("q", iq.q),
+                ("status", iq.status),
+                ("customerId", iq.customer_id),
+                ("dateFrom", iq.date_from),
+                ("dateTo", iq.date_to),
+            ] {
+                if let Some(x) = val {
+                    out[k] = Value::String(x);
+                }
+            }
+            out
+        })
+    });
+}
+
+#[test]
+fn bills_expenses_payments_match_reference() {
+    rules_check("CreateBillDto", ops::bill_rules);
+    rules_check("CreateExpenseDto", ops::expense_rules);
+    rules_check("CreatePaymentDto", ops::payment_rules);
+}

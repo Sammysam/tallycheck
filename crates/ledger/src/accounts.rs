@@ -262,16 +262,21 @@ pub const DEFAULT_CHART: &[(&str, &str, AccountType, &str)] = &[
     ("6100", "Salaries Expense", AccountType::Expense, "operating_expense"),
 ];
 
-/// Returns whether anything was inserted.
-pub async fn seed(db: &Db) -> AppResult<bool> {
+/// Adds every default account whose code does not exist yet; existing accounts are untouched.
+/// Approved deviation D10: the reference seeded only an empty chart, so after the payroll
+/// migration (11 accounts) it never added 1000 Cash, 1100 AR, 2000 AP … on a fresh install.
+/// Returns how many accounts were added.
+pub async fn seed(db: &Db) -> AppResult<usize> {
     let mut tx = db.begin().await?;
-    let count: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "accounts""#).fetch_one(&mut *tx).await?;
-    if count > 0 {
-        return Ok(false);
+    let mut missing = Vec::new();
+    for row in DEFAULT_CHART {
+        if !code_taken(&mut tx, row.0).await? {
+            missing.push(*row);
+        }
     }
-    insert_chart(&mut tx, DEFAULT_CHART).await?;
+    insert_chart(&mut tx, &missing).await?;
     tx.commit().await?;
-    Ok(true)
+    Ok(missing.len())
 }
 
 pub async fn insert_chart(tx: &mut Tx, chart: &[(&str, &str, AccountType, &str)]) -> AppResult<()> {

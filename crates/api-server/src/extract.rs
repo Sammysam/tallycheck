@@ -91,4 +91,11 @@ pub mod perm {
     permission!(Settings, "settings");
     permission!(Accounts, "accounts");
     permission!(Ledger, "ledger");
+    permission!(Customers, "customers");
+    permission!(Vendors, "vendors");
+    permission!(Banking, "banking");
+    permission!(Invoices, "invoices");
+    permission!(Bills, "bills");
+    permission!(Expenses, "expenses");
+    permission!(Payments, "payments");
 }
