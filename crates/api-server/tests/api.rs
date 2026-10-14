@@ -265,7 +265,7 @@ async fn users_endpoints_match_reference_contract() -> TestResult {
     }
     assert_eq!(created.body["isActive"], json!(true));
     assert_eq!(created.body["isTwoFactorEnabled"], json!(false));
-    assert_eq!(created.body["role"], Value::Null);
+    assert!(created.body.get("role").is_none(), "reference omits role on create");
     let id = created.body["id"].as_str().ok_or("id")?.to_string();
 
     let dup = app
@@ -465,6 +465,7 @@ async fn frontend_is_served_with_spa_fallback() -> TestResult {
     assert!(deep.body.as_str().is_some_and(|b| b.contains("<title>app</title>")));
     let asset = app.call(Method::GET, "/assets/app.js", None, None).await?;
     assert_eq!(asset.body, json!("console.log(1)"));
+    assert_eq!(asset.headers.get("cache-control").and_then(|v| v.to_str().ok()), Some("no-cache"));
     let api = app.call(Method::GET, "/api/bills", None, None).await?;
     assert_nest_error(&api, 404, json!("Cannot GET /api/bills"), "/api/bills");
     Ok(())

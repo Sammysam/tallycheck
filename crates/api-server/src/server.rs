@@ -18,7 +18,8 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 const JWT_SECRET_FILE: &str = "jwt-secret.dpapi";
 const JWT_SECRET_LEN: usize = 64;
@@ -30,14 +31,27 @@ pub fn build_router(state: AppState, frontend_dir: Option<&Path>) -> Router {
     router = match frontend_dir {
         Some(dir) => {
             let index = dir.join("index.html");
-            router.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)))
+            // Always revalidate (cheap 304s locally) so an upgraded install never runs a stale
+            // cached index.html that points at asset files which no longer exist.
+            let files = tower::ServiceBuilder::new()
+                .layer(SetResponseHeaderLayer::overriding(
+                    axum::http::header::CACHE_CONTROL,
+                    axum::http::HeaderValue::from_static("no-cache"),
+                ))
+                .service(ServeDir::new(dir).fallback(ServeFile::new(index)));
+            router.fallback_service(files)
         }
         None => router.fallback(unknown_route),
     };
     let mut router = router
         .layer(from_fn_with_state(state.clone(), audit_log))
         .layer(from_fn(nest_errors))
-        .layer(TraceLayer::new_for_http());
+        // Method, URL, status and latency only: headers (Authorization) and bodies are never logged.
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO).include_headers(false))
+                .on_response(DefaultOnResponse::new().level(Level::INFO).include_headers(false)),
+        );
     for (name, value) in security_headers() {
         router = router.layer(SetResponseHeaderLayer::overriding(name, value));
     }
@@ -144,7 +158,9 @@ pub fn init_logging(log_dir: &Path) -> anyhow::Result<tracing_appender::non_bloc
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tower_http=info,sqlx=warn"));
     tracing_subscriber::registry()
         .with(filter)
-        .with(fmt::layer().with_writer(std::io::stderr))
+        // Plain text on both outputs: formatted span fields are shared between layers, so ANSI
+        // colour codes on the console layer would also leak into the log file.
+        .with(fmt::layer().with_ansi(false).with_writer(std::io::stderr))
         .with(fmt::layer().with_ansi(false).with_writer(writer))
         .try_init()
         .map_err(|e| anyhow::anyhow!("logging already initialised: {e}"))?;

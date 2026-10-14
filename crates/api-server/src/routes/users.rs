@@ -4,11 +4,12 @@ use crate::body::JsonBody;
 use crate::extract::{perm, Authorized};
 use crate::state::AppState;
 use crate::validate;
-use app_core::AppResult;
+use app_core::{AppError, AppResult};
 use auth::users::{self, CreateUser, UpdateUser, UserView};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
+use serde_json::Value;
 
 pub async fn list(State(state): State<AppState>, _auth: Authorized<perm::Users>) -> AppResult<Json<Vec<UserView>>> {
     Ok(Json(users::find_all(&state.db).await?.into_iter().map(UserView::from).collect()))
@@ -18,14 +19,20 @@ pub async fn create(
     State(state): State<AppState>,
     _auth: Authorized<perm::Users>,
     body: JsonBody,
-) -> AppResult<(StatusCode, Json<UserView>)> {
+) -> AppResult<(StatusCode, Json<Value>)> {
     let dto = validate::create_user(body.object())?;
     let user = users::create_user(
         &state.db,
         CreateUser { username: dto.username, password: dto.password, role_id: dto.role_id },
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(user.into())))
+    // The reference returns the freshly saved entity, whose eager `role` relation was never
+    // loaded, so the key is absent (not null) in this one response.
+    let mut view = serde_json::to_value(UserView::from(user)).map_err(AppError::internal)?;
+    if let Some(obj) = view.as_object_mut() {
+        obj.remove("role");
+    }
+    Ok((StatusCode::CREATED, Json(view)))
 }
 
 pub async fn update(

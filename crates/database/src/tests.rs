@@ -9,329 +9,31 @@ async fn fresh() -> AppResult<(tempfile::TempDir, Db)> {
     Ok((dir, db))
 }
 
-/// Final column set of every reference table after migrations 1717400000000–1717400021000.
-const REFERENCE_SCHEMA: &[(&str, &[&str])] = &[
-    (
-        "accounts",
-        &["id", "code", "name", "type", "subtype", "description", "isActive", "parentId", "createdAt", "updatedAt"],
-    ),
-    (
-        "journal_entries",
-        &[
-            "id",
-            "entryNumber",
-            "date",
-            "description",
-            "reference",
-            "sourceType",
-            "sourceId",
-            "status",
-            "reversalOfId",
-            "createdAt",
-            "updatedAt",
-        ],
-    ),
-    ("journal_lines", &["id", "journalEntryId", "accountId", "description", "debit", "credit"]),
-    ("customers", &["id", "name", "email", "phone", "address", "taxId", "isActive", "createdAt", "updatedAt"]),
-    ("vendors", &["id", "name", "email", "phone", "address", "taxId", "isActive", "createdAt", "updatedAt"]),
-    (
-        "invoices",
-        &[
-            "id",
-            "invoiceNumber",
-            "customerId",
-            "date",
-            "dueDate",
-            "status",
-            "notes",
-            "totalAmount",
-            "journalEntryId",
-            "createdAt",
-            "updatedAt",
-            "poNumber",
-            "billToName",
-            "billToAddress",
-            "paymentOptions",
-            "signatoryName",
-            "signatoryTitle",
-            "paymentTerms",
-            "amountPaid",
-            "createdById",
-        ],
-    ),
-    ("invoice_lines", &["id", "invoiceId", "description", "quantity", "unitPrice", "amount", "accountId"]),
-    (
-        "bills",
-        &[
-            "id",
-            "billNumber",
-            "vendorId",
-            "date",
-            "dueDate",
-            "status",
-            "notes",
-            "totalAmount",
-            "journalEntryId",
-            "createdAt",
-            "updatedAt",
-        ],
-    ),
-    ("bill_lines", &["id", "billId", "description", "quantity", "unitPrice", "amount", "accountId"]),
-    (
-        "bank_accounts",
-        &[
-            "id",
-            "name",
-            "bankName",
-            "accountNumber",
-            "accountId",
-            "currentBalance",
-            "isActive",
-            "createdAt",
-            "updatedAt",
-        ],
-    ),
-    (
-        "expenses",
-        &[
-            "id",
-            "expenseNumber",
-            "date",
-            "description",
-            "amount",
-            "expenseAccountId",
-            "paymentAccountId",
-            "receiptUrl",
-            "status",
-            "journalEntryId",
-            "createdAt",
-            "updatedAt",
-        ],
-    ),
-    (
-        "payments",
-        &[
-            "id",
-            "paymentNumber",
-            "type",
-            "invoiceId",
-            "billId",
-            "customerId",
-            "vendorId",
-            "date",
-            "amount",
-            "paymentMethod",
-            "paymentAccountId",
-            "notes",
-            "journalEntryId",
-            "createdAt",
-            "updatedAt",
-        ],
-    ),
-    ("counters", &["key", "value"]),
-    (
-        "users",
-        &[
-            "id",
-            "username",
-            "passwordHash",
-            "twoFactorSecret",
-            "isTwoFactorEnabled",
-            "createdAt",
-            "updatedAt",
-            "roleId",
-            "isActive",
-        ],
-    ),
-    ("roles", &["id", "name", "permissions", "isSystem", "createdAt", "updatedAt"]),
-    ("audit_logs", &["id", "userId", "username", "action", "method", "path", "statusCode", "detail", "createdAt"]),
-    ("settings", &["key", "value", "updatedAt"]),
-    (
-        "employees",
-        &[
-            "id",
-            "employeeId",
-            "name",
-            "jobTitle",
-            "department",
-            "email",
-            "phone",
-            "joinDate",
-            "status",
-            "notes",
-            "photoKey",
-            "photoMime",
-            "userId",
-            "createdAt",
-            "updatedAt",
-            "employmentType",
-            "epfNumber",
-            "nationalId",
-            "resignedDate",
-            "bankName",
-            "bankBranch",
-            "bankAccountNo",
-            "staffLoanBalance",
-        ],
-    ),
-    (
-        "employee_documents",
-        &[
-            "id",
-            "employeeId",
-            "category",
-            "title",
-            "fileKey",
-            "originalName",
-            "mimeType",
-            "size",
-            "expiryDate",
-            "notes",
-            "isCurrent",
-            "replacesId",
-            "uploadedById",
-            "uploadedByName",
-            "createdAt",
-        ],
-    ),
-    (
-        "employee_salaries",
-        &[
-            "id",
-            "employeeId",
-            "effectiveFrom",
-            "basic",
-            "bra2005",
-            "bra2016",
-            "vehicleAllowance",
-            "otherAllowance",
-            "epfApplicable",
-            "welfareDeduction",
-            "loanInstallment",
-            "reason",
-            "notes",
-            "createdById",
-            "createdByName",
-            "createdAt",
-            "updatedAt",
-        ],
-    ),
-    (
-        "payroll_runs",
-        &[
-            "id",
-            "runNumber",
-            "period",
-            "periodStart",
-            "periodEnd",
-            "status",
-            "notes",
-            "ratesSnapshot",
-            "employeeCount",
-            "earningsTotal",
-            "noPayTotal",
-            "grossTotal",
-            "epfEmployeeTotal",
-            "payeTotal",
-            "stampDutyTotal",
-            "welfareTotal",
-            "loanRecoveryTotal",
-            "salaryAdvanceTotal",
-            "otherDeductionsTotal",
-            "deductionsTotal",
-            "netTotal",
-            "epfEmployerTotal",
-            "etfTotal",
-            "employerWelfareTotal",
-            "costToCompanyTotal",
-            "journalEntryId",
-            "paymentJournalEntryId",
-            "paymentAccountId",
-            "payDate",
-            "postedAt",
-            "paidAt",
-            "createdById",
-            "createdByName",
-            "createdAt",
-            "updatedAt",
-            "slipsFiledAt",
-        ],
-    ),
-    (
-        "payroll_lines",
-        &[
-            "id",
-            "runId",
-            "employeeId",
-            "salaryId",
-            "slipNumber",
-            "employeeCode",
-            "employeeName",
-            "jobTitle",
-            "department",
-            "employmentType",
-            "epfNumber",
-            "nationalId",
-            "bankName",
-            "bankBranch",
-            "bankAccountNo",
-            "epfApplicable",
-            "daysInMonth",
-            "daysWorked",
-            "basic",
-            "basicForMonth",
-            "bra2005",
-            "bra2016",
-            "vehicleAllowance",
-            "otherAllowance",
-            "projectBonus",
-            "arrears",
-            "medical",
-            "otherEarnings",
-            "earningsTotal",
-            "noPayAmount",
-            "grossSalary",
-            "epfBase",
-            "epfEmployee",
-            "payeOverride",
-            "paye",
-            "stampDuty",
-            "welfare",
-            "loanRecovery",
-            "salaryAdvance",
-            "phoneBill",
-            "otherDeductions",
-            "deductionsTotal",
-            "netSalary",
-            "epfEmployer",
-            "etf",
-            "employerWelfare",
-            "costToCompany",
-            "notes",
-            "createdAt",
-            "updatedAt",
-        ],
-    ),
-    (
-        "payroll_remittances",
-        &[
-            "id",
-            "runId",
-            "type",
-            "amount",
-            "date",
-            "paymentAccountId",
-            "reference",
-            "journalEntryId",
-            "createdByName",
-            "createdAt",
-        ],
-    ),
-];
+// The fixtures were exported from a PostgreSQL database built by running all 22 reference
+// migrations (tests/contract/run-all.sh starts that database):
+//   reference_pg_columns.txt      table|column|type|nullable|default  (ordinal order)
+//   reference_pg_constraints.txt  table|name|definition               (FK, UNIQUE, CHECK)
+//   reference_pg_indexes.txt      CREATE INDEX statements
+const PG_COLUMNS: &str = include_str!("../tests/fixtures/reference_pg_columns.txt");
+const PG_CONSTRAINTS: &str = include_str!("../tests/fixtures/reference_pg_constraints.txt");
+const PG_INDEXES: &str = include_str!("../tests/fixtures/reference_pg_indexes.txt");
+
+async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
+    let rows: Vec<(String, i64, i64)> =
+        sqlx::query_as(&format!("SELECT name, \"notnull\", pk FROM pragma_table_info('{table}')"))
+            .fetch_all(db.read())
+            .await?;
+    Ok(rows.into_iter().map(|(n, notnull, pk)| (n, notnull == 1 || pk > 0)).collect())
+}
 
 #[tokio::test]
-async fn schema_matches_reference_inventory() -> AppResult<()> {
+async fn tables_columns_and_nullability_match_reference_postgres() -> AppResult<()> {
     let (_dir, db) = fresh().await?;
+    let mut expected: std::collections::BTreeMap<String, Vec<(String, bool)>> = Default::default();
+    for line in PG_COLUMNS.lines().filter(|l| !l.trim().is_empty()) {
+        let f: Vec<&str> = line.split('|').collect();
+        expected.entry(f[0].to_string()).or_default().push((f[1].to_string(), f[3] == "NO"));
+    }
     let tables: BTreeSet<String> = sqlx::query_scalar(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations'",
     )
@@ -339,15 +41,72 @@ async fn schema_matches_reference_inventory() -> AppResult<()> {
     .await?
     .into_iter()
     .collect();
-    let expected: BTreeSet<String> = REFERENCE_SCHEMA.iter().map(|(t, _)| t.to_string()).collect();
-    assert_eq!(tables, expected);
+    assert_eq!(tables, expected.keys().cloned().collect::<BTreeSet<_>>());
+    for (table, cols) in &expected {
+        assert_eq!(&sqlite_columns(&db, table).await?, cols, "columns / NOT NULL of {table}");
+    }
+    Ok(())
+}
 
-    for (table, cols) in REFERENCE_SCHEMA {
-        let actual: Vec<String> = sqlx::query_scalar(&format!(r#"SELECT name FROM pragma_table_info('{table}')"#))
+#[tokio::test]
+async fn every_reference_foreign_key_and_unique_constraint_exists() -> AppResult<()> {
+    let (_dir, db) = fresh().await?;
+    let mut fk_checked = 0;
+    let mut uq_checked = 0;
+    for line in PG_CONSTRAINTS.lines().filter(|l| !l.trim().is_empty()) {
+        let f: Vec<&str> = line.splitn(3, '|').collect();
+        let (table, def) = (f[0], f[2]);
+        let cols_in = |s: &str| -> Vec<String> {
+            let inner = s.split_once('(').and_then(|(_, r)| r.split_once(')')).map(|(c, _)| c).unwrap_or("");
+            inner.split(',').map(|c| c.trim().trim_matches('"').to_string()).collect()
+        };
+        if let Some(rest) = def.strip_prefix("FOREIGN KEY ") {
+            let column = cols_in(rest)[0].clone();
+            let target = rest.split("REFERENCES ").nth(1).and_then(|r| r.split('(').next()).unwrap_or("").trim();
+            let on_delete = if def.contains("ON DELETE CASCADE") {
+                "CASCADE"
+            } else if def.contains("ON DELETE SET NULL") {
+                "SET NULL"
+            } else {
+                "NO ACTION"
+            };
+            let found: Option<(String, String)> = sqlx::query_as(&format!(
+                "SELECT \"table\", on_delete FROM pragma_foreign_key_list('{table}') WHERE \"from\" = ?1"
+            ))
+            .bind(&column)
+            .fetch_optional(db.read())
+            .await?;
+            assert_eq!(found, Some((target.to_string(), on_delete.to_string())), "FK {table}.{column}");
+            fk_checked += 1;
+        } else if def.starts_with("UNIQUE") {
+            let cols = cols_in(def);
+            let indexes: Vec<String> = sqlx::query_scalar(&format!(
+                "SELECT name FROM pragma_index_list('{table}') WHERE \"unique\" = 1 AND partial = 0"
+            ))
             .fetch_all(db.read())
             .await?;
-        let expected: Vec<String> = cols.iter().map(|c| c.to_string()).collect();
-        assert_eq!(actual, expected, "columns of {table}");
+            let mut matched = false;
+            for idx in indexes {
+                let idx_cols: Vec<String> =
+                    sqlx::query_scalar(&format!("SELECT name FROM pragma_index_info('{idx}') ORDER BY seqno"))
+                        .fetch_all(db.read())
+                        .await?;
+                matched |= idx_cols == cols;
+            }
+            assert!(matched, "UNIQUE {table} {cols:?}");
+            uq_checked += 1;
+        }
+    }
+    assert_eq!((fk_checked, uq_checked), (19, 11));
+
+    // Expression / partial unique indexes keep their reference names.
+    for name in ["UQ_employees_employeeId_ci", "UQ_payroll_runs_period_live"] {
+        assert!(PG_INDEXES.contains(name));
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1")
+            .bind(name)
+            .fetch_one(db.read())
+            .await?;
+        assert_eq!(n, 1, "{name}");
     }
     Ok(())
 }

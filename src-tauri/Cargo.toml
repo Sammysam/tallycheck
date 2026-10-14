@@ -1,0 +1,26 @@
+[package]
+name = "accounting-desktop"
+description = "Cenango Accounting — offline desktop shell"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "accounting_desktop_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+api-server.workspace = true
+app-core.workspace = true
+tauri = { version = "2", features = [] }
+tracing.workspace = true
+tracing-appender.workspace = true
+
+[lints]
+workspace = true
