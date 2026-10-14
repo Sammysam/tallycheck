@@ -1,0 +1,67 @@
+import { useEffect, useState } from 'react';
+import api from '../api/client';
+import PageHeader from '../components/PageHeader';
+import Table from '../components/Table';
+
+interface Vendor { id: string; name: string; email: string; phone: string; address: string }
+
+export default function Vendors() {
+  const [rows, setRows] = useState<Vendor[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', phone: '', address: '' });
+
+  const load = () => api.get('/vendors').then((r) => setRows(r.data));
+  useEffect(() => { load(); }, []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await api.post('/vendors', form);
+    setShowForm(false);
+    setForm({ name: '', email: '', phone: '', address: '' });
+    load();
+  };
+
+  const remove = async (row: Vendor) => {
+    if (!window.confirm(`Delete vendor "${row.name}"? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/vendors/${row.id}`);
+      load();
+    } catch (err: any) {
+      alert(err?.response?.data?.message ?? 'Failed to delete vendor');
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader
+        title="Vendors"
+        action={<button onClick={() => setShowForm(!showForm)} className="btn btn-primary">+ New Vendor</button>}
+      />
+
+      {showForm && (
+        <div className="card mb-5">
+          <form onSubmit={submit} className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            <input required placeholder="Vendor Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <input placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+            <div className="flex gap-2" style={{ gridColumn: '1 / -1' }}>
+              <button type="submit" className="btn btn-primary">Save</button>
+              <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <Table data={rows} columns={[
+        { header: 'Name',    accessor: 'name' },
+        { header: 'Email',   accessor: (r) => r.email   || '—' },
+        { header: 'Phone',   accessor: (r) => r.phone   || '—' },
+        { header: 'Address', accessor: (r) => r.address || '—' },
+        { header: '', accessor: (r) => (
+          <button onClick={() => remove(r)} className="btn-link text-xs" style={{ color: '#dc2626' }}>Delete</button>
+        )},
+      ]} />
+    </div>
+  );
+}
