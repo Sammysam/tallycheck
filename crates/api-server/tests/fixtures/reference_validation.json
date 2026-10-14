@@ -1,0 +1,613 @@
+{
+ "CreateUserDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "username may only contain letters, numbers, dots, underscores and hyphens",
+    "username must be longer than or equal to 3 characters",
+    "username must be a string",
+    "password must be longer than or equal to 8 characters",
+    "password must be a string"
+   ]
+  },
+  {
+   "input": {
+    "username": "ab",
+    "password": "short"
+   },
+   "status": 400,
+   "message": [
+    "username must be longer than or equal to 3 characters",
+    "password must be longer than or equal to 8 characters"
+   ]
+  },
+  {
+   "input": {
+    "username": "bad name!",
+    "password": "longenough"
+   },
+   "status": 400,
+   "message": [
+    "username may only contain letters, numbers, dots, underscores and hyphens"
+   ]
+  },
+  {
+   "input": {
+    "username": "alice",
+    "password": "longenough"
+   },
+   "ok": {
+    "username": "alice",
+    "password": "longenough"
+   }
+  },
+  {
+   "input": {
+    "username": "alice",
+    "password": "longenough",
+    "roleId": "nope"
+   },
+   "status": 400,
+   "message": [
+    "roleId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "username": "alice",
+    "password": "longenough",
+    "roleId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "extra": 1
+   },
+   "ok": {
+    "username": "alice",
+    "password": "longenough",
+    "roleId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+   }
+  },
+  {
+   "input": {
+    "username": 123,
+    "password": 12345678
+   },
+   "status": 400,
+   "message": [
+    "username may only contain letters, numbers, dots, underscores and hyphens",
+    "username must be longer than or equal to 3 characters",
+    "username must be a string",
+    "password must be longer than or equal to 8 characters",
+    "password must be a string"
+   ]
+  },
+  {
+   "input": {
+    "username": null,
+    "password": null
+   },
+   "status": 400,
+   "message": [
+    "username may only contain letters, numbers, dots, underscores and hyphens",
+    "username must be longer than or equal to 3 characters",
+    "username must be a string",
+    "password must be longer than or equal to 8 characters",
+    "password must be a string"
+   ]
+  },
+  {
+   "input": {
+    "username": "alice",
+    "password": "longenough",
+    "roleId": null
+   },
+   "ok": {
+    "username": "alice",
+    "password": "longenough",
+    "roleId": null
+   }
+  },
+  {
+   "input": {
+    "username": "alice",
+    "password": "longenough",
+    "roleId": ""
+   },
+   "status": 400,
+   "message": [
+    "roleId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "username": "a.b_c-d",
+    "password": "😀😀😀😀😀😀😀😀"
+   },
+   "ok": {
+    "username": "a.b_c-d",
+    "password": "😀😀😀😀😀😀😀😀"
+   }
+  },
+  {
+   "input": {
+    "username": "",
+    "password": ""
+   },
+   "status": 400,
+   "message": [
+    "username may only contain letters, numbers, dots, underscores and hyphens",
+    "username must be longer than or equal to 3 characters",
+    "password must be longer than or equal to 8 characters"
+   ]
+  },
+  {
+   "input": {
+    "username": "alice",
+    "password": "longenough",
+    "roleId": "11111111-1111-1111-1111-111111111111"
+   },
+   "status": 400,
+   "message": [
+    "roleId must be a UUID"
+   ]
+  }
+ ],
+ "UpdateUserDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "username": "x"
+   },
+   "status": 400,
+   "message": [
+    "username must be longer than or equal to 3 characters"
+   ]
+  },
+  {
+   "input": {
+    "isActive": "true"
+   },
+   "status": 400,
+   "message": [
+    "isActive must be a boolean value"
+   ]
+  },
+  {
+   "input": {
+    "isActive": false
+   },
+   "ok": {
+    "isActive": false
+   }
+  },
+  {
+   "input": {
+    "roleId": "x",
+    "isActive": 1
+   },
+   "status": 400,
+   "message": [
+    "roleId must be a UUID",
+    "isActive must be a boolean value"
+   ]
+  },
+  {
+   "input": {
+    "username": null,
+    "roleId": null,
+    "isActive": null
+   },
+   "ok": {
+    "username": null,
+    "roleId": null,
+    "isActive": null
+   }
+  },
+  {
+   "input": {
+    "username": "good.name",
+    "other": "stripped"
+   },
+   "ok": {
+    "username": "good.name"
+   }
+  }
+ ],
+ "ResetPasswordDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "password must be longer than or equal to 8 characters",
+    "password must be a string"
+   ]
+  },
+  {
+   "input": {
+    "password": "short"
+   },
+   "status": 400,
+   "message": [
+    "password must be longer than or equal to 8 characters"
+   ]
+  },
+  {
+   "input": {
+    "password": "longenough"
+   },
+   "ok": {
+    "password": "longenough"
+   }
+  },
+  {
+   "input": {
+    "password": 5
+   },
+   "status": 400,
+   "message": [
+    "password must be longer than or equal to 8 characters",
+    "password must be a string"
+   ]
+  }
+ ],
+ "CreateRoleDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "name should not be empty",
+    "name must be a string",
+    "each value in permissions must be one of the following values: dashboard, accounts, customers, vendors, employees, payroll, invoices, invoices:all, bills, expenses, payments, banking, ledger, reports, users, audit, settings",
+    "All permissions's elements must be unique",
+    "permissions must be an array"
+   ]
+  },
+  {
+   "input": {
+    "name": "",
+    "permissions": []
+   },
+   "status": 400,
+   "message": [
+    "name should not be empty"
+   ]
+  },
+  {
+   "input": {
+    "name": "Clerk",
+    "permissions": [
+     "invoices",
+     "invoices"
+    ]
+   },
+   "status": 400,
+   "message": [
+    "All permissions's elements must be unique"
+   ]
+  },
+  {
+   "input": {
+    "name": "Clerk",
+    "permissions": [
+     "nope"
+    ]
+   },
+   "status": 400,
+   "message": [
+    "each value in permissions must be one of the following values: dashboard, accounts, customers, vendors, employees, payroll, invoices, invoices:all, bills, expenses, payments, banking, ledger, reports, users, audit, settings"
+   ]
+  },
+  {
+   "input": {
+    "name": "Clerk",
+    "permissions": "invoices"
+   },
+   "status": 400,
+   "message": [
+    "All permissions's elements must be unique",
+    "permissions must be an array"
+   ]
+  },
+  {
+   "input": {
+    "name": "Clerk",
+    "permissions": [
+     "invoices",
+     "bills"
+    ]
+   },
+   "ok": {
+    "name": "Clerk",
+    "permissions": [
+     "invoices",
+     "bills"
+    ]
+   }
+  },
+  {
+   "input": {
+    "name": 5,
+    "permissions": [
+     1
+    ]
+   },
+   "status": 400,
+   "message": [
+    "name must be a string",
+    "each value in permissions must be one of the following values: dashboard, accounts, customers, vendors, employees, payroll, invoices, invoices:all, bills, expenses, payments, banking, ledger, reports, users, audit, settings"
+   ]
+  },
+  {
+   "input": {
+    "name": "Clerk",
+    "permissions": [
+     "nope",
+     "nope"
+    ]
+   },
+   "status": 400,
+   "message": [
+    "each value in permissions must be one of the following values: dashboard, accounts, customers, vendors, employees, payroll, invoices, invoices:all, bills, expenses, payments, banking, ledger, reports, users, audit, settings",
+    "All permissions's elements must be unique"
+   ]
+  },
+  {
+   "input": {
+    "name": "Clerk",
+    "permissions": null
+   },
+   "status": 400,
+   "message": [
+    "each value in permissions must be one of the following values: dashboard, accounts, customers, vendors, employees, payroll, invoices, invoices:all, bills, expenses, payments, banking, ledger, reports, users, audit, settings",
+    "All permissions's elements must be unique",
+    "permissions must be an array"
+   ]
+  },
+  {
+   "input": {
+    "name": "Clerk",
+    "permissions": []
+   },
+   "ok": {
+    "name": "Clerk",
+    "permissions": []
+   }
+  }
+ ],
+ "UpdateRoleDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "name": ""
+   },
+   "status": 400,
+   "message": [
+    "name should not be empty"
+   ]
+  },
+  {
+   "input": {
+    "permissions": [
+     "x"
+    ]
+   },
+   "status": 400,
+   "message": [
+    "each value in permissions must be one of the following values: dashboard, accounts, customers, vendors, employees, payroll, invoices, invoices:all, bills, expenses, payments, banking, ledger, reports, users, audit, settings"
+   ]
+  },
+  {
+   "input": {
+    "name": "A",
+    "permissions": [
+     "audit"
+    ]
+   },
+   "ok": {
+    "name": "A",
+    "permissions": [
+     "audit"
+    ]
+   }
+  },
+  {
+   "input": {
+    "name": null
+   },
+   "ok": {
+    "name": null
+   }
+  },
+  {
+   "input": {
+    "permissions": null
+   },
+   "ok": {
+    "permissions": null
+   }
+  }
+ ],
+ "UpdateSettingsDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "signatoryName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "status": 400,
+   "message": [
+    "signatoryName must be shorter than or equal to 120 characters"
+   ]
+  },
+  {
+   "input": {
+    "signatoryName": 5,
+    "signatoryTitle": "T"
+   },
+   "status": 400,
+   "message": [
+    "signatoryName must be shorter than or equal to 120 characters",
+    "signatoryName must be a string"
+   ]
+  },
+  {
+   "input": {
+    "signatoryName": "Ok",
+    "junk": 1
+   },
+   "ok": {
+    "signatoryName": "Ok"
+   }
+  },
+  {
+   "input": {
+    "signatoryName": null
+   },
+   "ok": {
+    "signatoryName": null
+   }
+  },
+  {
+   "input": {
+    "signatoryTitle": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "ok": {
+    "signatoryTitle": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   }
+  }
+ ],
+ "PaginationDto": [
+  {
+   "input": {},
+   "ok": {
+    "page": 1,
+    "limit": 20
+   }
+  },
+  {
+   "input": {
+    "page": "2",
+    "limit": "50"
+   },
+   "ok": {
+    "page": 2,
+    "limit": 50
+   }
+  },
+  {
+   "input": {
+    "page": "0"
+   },
+   "status": 400,
+   "message": [
+    "page must not be less than 1"
+   ]
+  },
+  {
+   "input": {
+    "limit": "101"
+   },
+   "status": 400,
+   "message": [
+    "limit must not be greater than 100"
+   ]
+  },
+  {
+   "input": {
+    "page": "abc"
+   },
+   "status": 400,
+   "message": [
+    "page must not be less than 1",
+    "page must be an integer number"
+   ]
+  },
+  {
+   "input": {
+    "page": "1.5"
+   },
+   "status": 400,
+   "message": [
+    "page must be an integer number"
+   ]
+  },
+  {
+   "input": {
+    "page": ""
+   },
+   "status": 400,
+   "message": [
+    "page must not be less than 1"
+   ]
+  },
+  {
+   "input": {
+    "limit": "0"
+   },
+   "status": 400,
+   "message": [
+    "limit must not be less than 1"
+   ]
+  },
+  {
+   "input": {
+    "page": [
+     "1",
+     "2"
+    ]
+   },
+   "status": 400,
+   "message": [
+    "page must not be less than 1",
+    "page must be an integer number"
+   ]
+  },
+  {
+   "input": {
+    "page": "-1",
+    "limit": "x"
+   },
+   "status": 400,
+   "message": [
+    "page must not be less than 1",
+    "limit must not be greater than 100",
+    "limit must not be less than 1",
+    "limit must be an integer number"
+   ]
+  },
+  {
+   "input": {
+    "other": "y"
+   },
+   "ok": {
+    "page": 1,
+    "limit": 20
+   }
+  },
+  {
+   "input": {
+    "page": " 3 "
+   },
+   "ok": {
+    "page": 3,
+    "limit": 20
+   }
+  },
+  {
+   "input": {
+    "page": "1e1"
+   },
+   "ok": {
+    "page": 10,
+    "limit": 20
+   }
+  }
+ ]
+}
