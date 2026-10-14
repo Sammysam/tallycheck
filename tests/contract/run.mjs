@@ -336,9 +336,8 @@ async function scenario(base) {
   await step('bills.post', 'POST', `/api/bills/${s.bill1}/post`, { token: s.admin });
   await step('bills.post.again', 'POST', `/api/bills/${s.bill1}/post`, { token: s.admin });
   await step('payments.ap.no-bill', 'POST', '/api/payments', pay({ type: 'AP', amount: 10 }));
-  await step('payments.ap.partial', 'POST', '/api/payments', pay({ type: 'AP', billId: s.bill1, vendorId: s.vendor, amount: 10 }));
-  await step('bills.get.after-partial', 'GET', `/api/bills/${s.bill1}`, { token: s.admin });
-  await step('payments.ap.full', 'POST', '/api/payments', pay({ type: 'AP', billId: s.bill1, amount: 57.5 }));
+  await step('payments.ap.full', 'POST', '/api/payments', pay({ type: 'AP', billId: s.bill1, vendorId: s.vendor, amount: 57.5 }));
+  await step('bills.get.paid', 'GET', `/api/bills/${s.bill1}`, { token: s.admin });
   await step('bills.void.paid', 'POST', `/api/bills/${s.bill1}/void`, { token: s.admin });
   r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-04', lines: [{ description: 'Draft only', quantity: 1, unitPrice: 5, accountId: exp }] }));
   await step('bills.void.draft', 'POST', `/api/bills/${r.body?.id}/void`, { token: s.admin });
@@ -346,9 +345,6 @@ async function scenario(base) {
   r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-06', lines: [{ description: 'Toner', quantity: 2, unitPrice: 40, accountId: exp }] }));
   await call(base, 'POST', `/api/bills/${r.body?.id}/post`, { token: s.admin });
   await step('bills.void.posted', 'POST', `/api/bills/${r.body?.id}/void`, { token: s.admin });
-  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-07', lines: [{ description: 'Unposted', quantity: 1, unitPrice: 9, accountId: exp }] }));
-  await step('payments.ap.draft-bill', 'POST', '/api/payments', pay({ type: 'AP', billId: r.body?.id, amount: 9 }));
-  await step('bills.get.draft-paid', 'GET', `/api/bills/${r.body?.id}`, { token: s.admin });
   await step('bills.list', 'GET', '/api/bills?limit=50', { token: s.admin });
 
   // ── W2: expenses ───────────────────────────────────────────────────────────
@@ -400,6 +396,24 @@ async function scenario(base) {
   await step('audit.list', 'GET', '/api/audit-logs?limit=100', { token: s.admin });
   await step('audit.invalid-pagination', 'GET', '/api/audit-logs?page=abc&limit=101', { token: s.admin });
   await step('audit.users', 'GET', '/api/audit-logs/users', { token: s.admin });
+  // ── Approved W2 fixes D11–D15, isolated at the end so they cannot affect shared steps ──
+  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-13', lines: [{ description: 'Desk', quantity: 1, unitPrice: 57.5, accountId: exp }] }));
+  const twoPay = r.body?.id;
+  await call(base, 'POST', `/api/bills/${twoPay}/post`, { token: s.admin });
+  await step('payments.ap.first-part', 'POST', '/api/payments', pay({ type: 'AP', billId: twoPay, amount: 10 }));
+  await step('payments.ap.second-part', 'POST', '/api/payments', pay({ type: 'AP', billId: twoPay, amount: 47.5 }));
+  await step('bills.get.two-payments', 'GET', `/api/bills/${twoPay}`, { token: s.admin });
+  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-14', lines: [{ description: 'Chair', quantity: 1, unitPrice: 30, accountId: exp }] }));
+  const partVoid = r.body?.id;
+  await call(base, 'POST', `/api/bills/${partVoid}/post`, { token: s.admin });
+  await call(base, 'POST', '/api/payments', pay({ type: 'AP', billId: partVoid, amount: 10 }));
+  await step('bills.void.part-paid', 'POST', `/api/bills/${partVoid}/void`, { token: s.admin });
+  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-15', lines: [{ description: 'Unposted', quantity: 1, unitPrice: 9, accountId: exp }] }));
+  await step('payments.ap.draft-bill', 'POST', '/api/payments', pay({ type: 'AP', billId: r.body?.id, amount: 9 }));
+  // These two create records only on the new server, so they come after everything shared.
+  await step('customers.create.empty-email', 'POST', '/api/customers', A({ name: 'No Email Ltd', email: '' }));
+  await step('bills.create.empty-due-date', 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-12', dueDate: '', lines: [{ description: 'Pens', quantity: 1, unitPrice: 4, accountId: exp }] }));
+
   // D10 last: its extra accounts would shift the UUID numbering of everything after it.
   await step('accounts.seed', 'POST', '/api/accounts/seed', { token: s.admin });
   await step('accounts.list.after-seed', 'GET', '/api/accounts', { token: s.admin });
@@ -454,6 +468,11 @@ const EXPECTED = {
   'ledger.trial-balance.after-w2': 'D1: reversed invoice/bill/expense entries and their reversals both count',
   'invoices.create.rounding': 'D4: 0.29 x 0.50 = 0.145 rounds half-up to 0.15; the reference float toFixed gives 0.14',
   'bills.void.paid': 'The reference source file garbles the dash in this message (â€”); the intended text is sent',
+  'customers.create.empty-email': 'D11: an empty email means no email (the reference rejected "")',
+  'bills.create.empty-due-date': 'D12: an empty due date means no due date (the reference rejected "")',
+  'bills.get.two-payments': 'D13: two part-payments covering the bill make it PAID (reference: stays POSTED)',
+  'bills.void.part-paid': 'D15: a part-paid bill cannot be voided (reference voided it, leaving the payment against nothing)',
+  'payments.ap.draft-bill': 'D14: a draft bill must be posted before it can be paid (reference marked it PAID unposted)',
   'accounts.list.after-seed': 'D10: seeding adds the missing default accounts (1200, 2100, 5000)',
   'audit.users': 'D2: failed logins are audited (adds rows for known users)',
 };

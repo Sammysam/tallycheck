@@ -140,7 +140,14 @@ impl Validator {
 
     /// Validates one property. Rules are given in declaration order (top to bottom).
     pub fn field(&mut self, prop: &str, optional: bool, rules: &[Rule]) -> &mut Self {
-        let present = self.input.get(prop).cloned();
+        let mut present = self.input.get(prop).cloned();
+        // D11/D12: the frontend sends "" for an optional email or date the user left empty.
+        if optional
+            && present.as_ref().and_then(Value::as_str) == Some("")
+            && rules.iter().any(|r| matches!(r, Rule::IsEmail | Rule::IsDateFormat))
+        {
+            present = Some(Value::Null);
+        }
         let value = present.clone().unwrap_or(Value::Null);
         if optional && value.is_null() {
             if let Some(v) = present {

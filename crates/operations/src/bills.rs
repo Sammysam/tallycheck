@@ -1,8 +1,10 @@
 //! Bills (reference `bills.service.ts`). Posting debits each line's expense account and credits
 //! 2000 Accounts Payable for the total; voiding reverses that entry.
 //!
-//! Reference behaviour kept as-is (open decisions, see CLAUDE.md §10): bills do not accumulate
-//! partial AP payments, and a bill becomes PAID only when one payment covers its whole total.
+//! Approved deviations D13–D15: bills accumulate partial AP payments in `amountPaid` (a column
+//! the reference lacked) and become PAID once nothing is outstanding; a DRAFT bill cannot be
+//! paid; a part-paid bill cannot be voided. `amountPaid` is kept internal so the JSON shape of a
+//! bill stays exactly the reference's.
 
 use crate::parties::{self, Party, PartyKind};
 use crate::{money_num, money_str, opt, overflow, require_account};
@@ -37,6 +39,8 @@ pub struct Bill {
     pub status: String,
     pub notes: Option<String>,
     pub total_amount: Money,
+    /// Sum of AP payments recorded against the bill (D13).
+    pub amount_paid: Money,
     pub journal_entry_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -82,7 +86,7 @@ impl Bill {
     }
 }
 
-const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","journalEntryId","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","journalEntryId","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Bill> {
     Ok(Bill {
@@ -94,6 +98,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Bill> {
         status: r.try_get("status")?,
         notes: r.try_get("notes")?,
         total_amount: Money::from_cents(r.try_get("totalAmount")?),
+        amount_paid: Money::from_cents(r.try_get("amountPaid")?),
         journal_entry_id: r.try_get("journalEntryId")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
@@ -222,6 +227,17 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     Ok(bill)
 }
 
+pub(crate) async fn set_paid(tx: &mut Tx, id: &str, amount_paid: Money, status: &str) -> AppResult<()> {
+    sqlx::query(r#"UPDATE "bills" SET "amountPaid" = ?1, "status" = ?2, "updatedAt" = ?3 WHERE "id" = ?4"#)
+        .bind(amount_paid.cents())
+        .bind(status)
+        .bind(now_iso())
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn set_status(tx: &mut Tx, id: &str, status: &str, journal_entry_id: Option<&str>) -> AppResult<()> {
     sqlx::query(r#"UPDATE "bills" SET "status" = ?1, "journalEntryId" = COALESCE(?2, "journalEntryId"), "updatedAt" = ?3 WHERE "id" = ?4"#)
         .bind(status)
@@ -278,6 +294,10 @@ pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Bill> {
     if bill.status == "PAID" {
         // The reference's source file garbled the dash ("â€”"); the intended text is sent.
         return Err(AppError::bad_request("Cannot void a paid bill — reverse the payment first"));
+    }
+    if bill.amount_paid > Money::ZERO {
+        // D15: voiding would leave the payments' debit to AP with no bill behind it.
+        return Err(AppError::bad_request("Cannot void a part-paid bill — reverse the payments first"));
     }
     if let Some(je) = &bill.journal_entry_id {
         entries::reverse(&mut tx, je, today).await?;

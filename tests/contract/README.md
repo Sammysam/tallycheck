@@ -31,6 +31,7 @@ Requirements: Docker Desktop running, Node 24, the reference repository with its
 W0 result (2026-10-14): 71 steps — 65 identical, 6 approved deviations, 0 mismatches.
 W1 result (2026-10-14): 120 steps — 110 identical, 10 approved deviations, 0 mismatches.
 W2 result (2026-10-14): 232 steps — 218 identical, 14 approved deviations, 0 mismatches.
+After D11–D15 (2026-10-14): 236 steps — 217 identical, 19 approved deviations, 0 mismatches.
 Journal lines are compared as a set, because the reference returns them in no fixed order.
 
 Other reference-derived fixtures (regenerate with the scripts in `tools/`):

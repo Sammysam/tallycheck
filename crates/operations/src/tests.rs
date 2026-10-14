@@ -236,14 +236,36 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
 
     payments::create(&s.db, s.pay("AP", None, Some(&bill.id), "10")).await?;
     let mut c = s.db.read().acquire().await?;
-    assert_eq!(bills::find_one(&mut c, &bill.id).await?.status, "POSTED", "partial AP payments do not accumulate");
+    let part = bills::find_one(&mut c, &bill.id).await?;
     drop(c);
-    payments::create(&s.db, s.pay("AP", None, Some(&bill.id), "57.5")).await?;
+    assert_eq!((part.status.as_str(), part.amount_paid), ("POSTED", m("10")), "D13: part-payments accumulate");
+    let v = bills::void(&s.db, &bill.id, TODAY).await;
+    assert_eq!(bad_request(&v).as_deref(), Some("Cannot void a part-paid bill — reverse the payments first"), "D15");
+    let too_much = payments::create(&s.db, s.pay("AP", None, Some(&bill.id), "57.5")).await;
+    assert_eq!(bad_request(&too_much).as_deref(), Some("Payment exceeds the outstanding balance of 47.50"));
+    payments::create(&s.db, s.pay("AP", None, Some(&bill.id), "47.5")).await?;
     let mut c = s.db.read().acquire().await?;
-    assert_eq!(bills::find_one(&mut c, &bill.id).await?.status, "PAID");
+    assert_eq!(bills::find_one(&mut c, &bill.id).await?.status, "PAID", "D13: paid once nothing is outstanding");
     drop(c);
+    assert_eq!(s.balance("2000").await?, Money::ZERO);
     let v = bills::void(&s.db, &bill.id, TODAY).await;
     assert_eq!(bad_request(&v).as_deref(), Some("Cannot void a paid bill — reverse the payment first"));
+    let again = payments::create(&s.db, s.pay("AP", None, Some(&bill.id), "1")).await;
+    assert_eq!(bad_request(&again).as_deref(), Some("Bill is already fully paid"));
+
+    let draft = bills::create(
+        &s.db,
+        CreateBill {
+            vendor_id: s.vendor.clone(),
+            date: "2026-04-07".into(),
+            due_date: None,
+            notes: None,
+            lines: vec![line("Unposted", "1", "9")],
+        },
+    )
+    .await?;
+    let r = payments::create(&s.db, s.pay("AP", None, Some(&draft.id), "9")).await;
+    assert_eq!(bad_request(&r).as_deref(), Some("Post the bill before recording a payment against it"), "D14");
 
     let e = expenses::create(
         &s.db,
@@ -262,7 +284,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
     let again = expenses::post(&s.db, &e.id).await;
     assert_eq!(bad_request(&again).as_deref(), Some("Expense is already POSTED"));
     expenses::void(&s.db, &e.id, TODAY).await?;
-    // Expense posted and voided: only the bill remains on 6000.
+    // Expense posted and voided: only the posted bill remains on 6000.
     assert_eq!(s.balance("6000").await?, m("57.5"));
     Ok(())
 }

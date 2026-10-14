@@ -3,8 +3,8 @@
 //!
 //! * AR: debit the payment account, credit 1100 AR; the invoice accumulates `amountPaid` and
 //!   becomes PAID when nothing is outstanding.
-//! * AP: debit 2000 AP, credit the payment account; the bill becomes PAID only when this one
-//!   payment covers its whole total (reference behaviour, see bills.rs).
+//! * AP: debit 2000 AP, credit the payment account; the bill accumulates `amountPaid` and
+//!   becomes PAID when nothing is outstanding (D13). A DRAFT bill cannot be paid (D14).
 
 use crate::invoices::{self, PAID};
 use crate::parties::{self, PartyKind};
@@ -152,6 +152,17 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         if b.status == "VOID" {
             return Err(AppError::bad_request("Cannot pay a voided bill"));
         }
+        // D14–D13: the same rules invoices follow.
+        if b.status == "DRAFT" {
+            return Err(AppError::bad_request("Post the bill before recording a payment against it"));
+        }
+        let balance = b.total_amount.checked_sub(b.amount_paid).ok_or_else(overflow)?;
+        if balance <= Money::ZERO {
+            return Err(AppError::bad_request("Bill is already fully paid"));
+        }
+        if !is_ar && dto.amount > balance {
+            return Err(AppError::bad_request(format!("Payment exceeds the outstanding balance of {balance}")));
+        }
         bill = Some(b);
     }
     // The reference stored any customer/vendor id it was given; here they must exist (D6).
@@ -211,9 +222,9 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
             invoices::set_paid(&mut tx, inv, paid, status).await?;
         }
     } else if let Some(b) = &bill {
-        if b.total_amount <= dto.amount {
-            bills::set_status(&mut tx, &b.id, "PAID", None).await?;
-        }
+        let paid = b.amount_paid.checked_add(dto.amount).ok_or_else(overflow)?;
+        let status = if paid >= b.total_amount { "PAID" } else { b.status.as_str() };
+        bills::set_paid(&mut tx, &b.id, paid, status).await?;
     }
 
     let id = new_id();
