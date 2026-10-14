@@ -189,6 +189,60 @@ try {
     await shot('07-audit');
   });
 
+  // ── W1 screens ───────────────────────────────────────────────────────────
+  const setSelect = (text) => evaluate(`(() => { const sel = document.querySelector('form select');
+    sel.value = ${JSON.stringify(text)}; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  async function newAccount(code, name, accountType) {
+    await clickText('+ New Account');
+    await waitFor(`!!document.querySelector('input[placeholder="Code (e.g. 1000)"]')`, 'account form');
+    await type('input[placeholder="Code (e.g. 1000)"]', code);
+    await type('input[placeholder="Account Name"]', name);
+    await setSelect(accountType);
+    await clickText('Save Account');
+    await waitFor(`document.body.innerText.includes(${JSON.stringify(name)})`, `account ${name} listed`);
+  }
+
+  await check('Accounts page creates accounts through the form', async () => {
+    await go('/accounts');
+    await waitFor(`document.body.innerText.includes('Salaries Payable')`, 'seeded payroll accounts');
+    await newAccount('1000', 'Cash', 'ASSET');
+    await newAccount('3000', 'Owners Capital', 'EQUITY');
+    await newAccount('9999', 'Temporary', 'EXPENSE');
+    await shot('09-accounts');
+  });
+
+  await check('Accounts page deletes an unused account', async () => {
+    await evaluate(`window.confirm = () => true`);
+    await evaluate(`(() => {
+      const row = [...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes('Temporary'));
+      [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Delete').click(); return true; })()`);
+    await waitFor(`!document.body.innerText.includes('Temporary')`, 'account removed');
+  });
+
+  await check('Ledger page lists a posted journal entry with its lines', async () => {
+    const posted = await evaluate(`(async () => {
+      const h = { 'content-type': 'application/json', authorization: 'Bearer ' + localStorage.getItem('accessToken') };
+      const accounts = await (await fetch('/api/accounts', { headers: h })).json();
+      const id = (code) => accounts.find((a) => a.code === code).id;
+      const r = await fetch('/api/ledger/entries', { method: 'POST', headers: h, body: JSON.stringify({
+        date: '2026-04-01', description: 'Opening capital', reference: 'OPEN-1',
+        lines: [{ accountId: id('1000'), debit: 1000.5, credit: 0 }, { accountId: id('3000'), debit: 0, credit: 1000.5 }] }) });
+      return r.status;
+    })()`);
+    if (posted !== 201) throw new Error(`posting returned ${posted}`);
+    await go('/ledger');
+    await waitFor(`document.body.innerText.includes('JE-000001') && document.body.innerText.includes('Opening capital')`, 'entry row');
+    await shot('10-ledger');
+  });
+
+  await check('Trial Balance page shows balanced totals from the ledger', async () => {
+    await go('/reports/trial-balance');
+    await waitFor(`['Cash', 'Owners Capital'].every((t) => document.body.innerText.includes(t))`, 'trial balance rows');
+    const text = await pageText();
+    if (!/1,000\.50/.test(text)) throw new Error('amount 1,000.50 not shown');
+    await shot('11-trial-balance');
+  });
+
   await check('second login goes through 2FA verify', async () => {
     await evaluate(`localStorage.removeItem('accessToken')`);
     await go('/login');

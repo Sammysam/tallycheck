@@ -9,6 +9,7 @@
 //! Every connection gets `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=FULL` and a
 //! 5-second busy timeout. `verify_pragmas` proves it in tests and at startup.
 
+pub mod counters;
 pub mod settings;
 
 use app_core::{AppError, AppResult};

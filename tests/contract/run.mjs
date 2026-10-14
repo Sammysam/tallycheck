@@ -165,6 +165,70 @@ async function scenario(base) {
   await step('viewer.audit', 'GET', '/api/audit-logs', { token: s.viewer });
   await step('viewer.me', 'GET', '/api/auth/me', { token: s.viewer });
 
+  // ── W1: chart of accounts ──────────────────────────────────────────────────
+  r = await step('accounts.list.initial', 'GET', '/api/accounts', { token: s.admin });
+  s.acct = Object.fromEntries((Array.isArray(r.body) ? r.body : []).map((a) => [a.code, a.id]));
+  await step('accounts.seed', 'POST', '/api/accounts/seed', { token: s.admin });
+  await step('accounts.create.empty', 'POST', '/api/accounts', { token: s.admin, body: {} });
+  await step('accounts.create.bad-type', 'POST', '/api/accounts', { token: s.admin, body: { code: '1000', name: 'Cash', type: 'INCOME' } });
+  const mk = async (label, body) => {
+    const res = await step(label, 'POST', '/api/accounts', { token: s.admin, body });
+    s.acct[body.code] = res.body?.id;
+    return res;
+  };
+  await mk('accounts.create.cash', { code: '1000', name: 'Cash', type: 'ASSET', subtype: 'current_asset' });
+  await mk('accounts.create.ar', { code: '1100', name: 'Accounts Receivable', type: 'ASSET', subtype: 'current_asset', description: 'Trade debtors', junk: 1 });
+  await mk('accounts.create.equity', { code: '3000', name: "Owner's Equity", type: 'EQUITY', subtype: 'equity' });
+  await mk('accounts.create.revenue', { code: '4000', name: 'Revenue', type: 'REVENUE', subtype: 'operating_revenue' });
+  await mk('accounts.create.expense', { code: '6000', name: 'Operating Expenses', type: 'EXPENSE', subtype: 'operating_expense' });
+  await mk('accounts.create.child', { code: '1010', name: 'Petty Cash', type: 'ASSET', parentId: s.acct['1000'] });
+  await mk('accounts.create.spare', { code: '9999', name: 'Spare', type: 'EXPENSE' });
+  await step('accounts.create.duplicate', 'POST', '/api/accounts', { token: s.admin, body: { code: '1000', name: 'Again', type: 'ASSET' } });
+  await step('accounts.get', 'GET', `/api/accounts/${s.acct['1100']}`, { token: s.admin });
+  await step('accounts.get.unknown', 'GET', `/api/accounts/${FIXED_UUID}`, { token: s.admin });
+  await step('accounts.update', 'PATCH', `/api/accounts/${s.acct['1010']}`, { token: s.admin, body: { name: 'Petty Cash Float', isActive: false } });
+  await step('accounts.update.invalid', 'PATCH', `/api/accounts/${s.acct['1010']}`, { token: s.admin, body: { type: 'X' } });
+  await step('accounts.update.code-conflict', 'PATCH', `/api/accounts/${s.acct['1010']}`, { token: s.admin, body: { code: '1000' } });
+  await step('accounts.delete.unused', 'DELETE', `/api/accounts/${s.acct['9999']}`, { token: s.admin });
+  await step('accounts.list', 'GET', '/api/accounts', { token: s.admin });
+
+  // ── W1: journal entries ────────────────────────────────────────────────────
+  const line = (code, debit, credit, description) => ({ accountId: s.acct[code], debit, credit, ...(description ? { description } : {}) });
+  const je = (body) => ({ token: s.admin, body });
+  await step('ledger.create.empty', 'POST', '/api/ledger/entries', je({}));
+  await step('ledger.create.one-line', 'POST', '/api/ledger/entries', je({ date: '2026-04-01', description: 'x', lines: [line('1000', 10, 0)] }));
+  await step('ledger.create.bad-lines', 'POST', '/api/ledger/entries', je({ date: '2026-04-01', description: 'x', lines: [{ accountId: 'bad', debit: '10', credit: -1 }, { accountId: s.acct['1000'], debit: 1.005, credit: 0 }] }));
+  await step('ledger.create.unbalanced', 'POST', '/api/ledger/entries', je({ date: '2026-04-01', description: 'x', lines: [line('1000', 100.1, 0), line('3000', 0, 100)] }));
+  await step('ledger.create.float-sum-balanced', 'POST', '/api/ledger/entries', je({ date: '2026-04-02', description: 'Float check', lines: [line('1000', 0.1, 0), line('1000', 0.2, 0), line('3000', 0, 0.3)] }));
+  r = await step('ledger.create.opening', 'POST', '/api/ledger/entries', je({ date: '2026-04-01', description: 'Opening balance', reference: 'OPEN-1', sourceType: 'MANUAL', sourceId: 'manual-1', lines: [line('1000', 1000.5, 0, 'Cash in hand'), line('3000', 0, 1000.5)] }));
+  s.je1 = r.body?.id;
+  r = await step('ledger.create.expense', 'POST', '/api/ledger/entries', je({ date: '2026-04-15', description: 'Office supplies', lines: [line('6000', 250, 0), line('1000', 0, 250)] }));
+  s.je2 = r.body?.id;
+  r = await step('ledger.create.three-lines', 'POST', '/api/ledger/entries', je({ date: '2026-04-20', description: 'Sale', sourceType: 'MANUAL', lines: [line('1000', 100, 0, 'cash part'), line('1100', 50.25, 0, 'on account'), line('4000', 0, 150.25, 'sales')] }));
+  s.je3 = r.body?.id;
+  await step('ledger.entries', 'GET', '/api/ledger/entries', { token: s.admin });
+  await step('ledger.entries.by-source', 'GET', '/api/ledger/entries?sourceType=MANUAL', { token: s.admin });
+  await step('ledger.entries.by-dates', 'GET', '/api/ledger/entries?dateFrom=2026-04-10&dateTo=2026-04-30', { token: s.admin });
+  await step('ledger.entries.only-from', 'GET', '/api/ledger/entries?dateFrom=2026-04-10', { token: s.admin });
+  await step('ledger.entries.bad-date', 'GET', '/api/ledger/entries?dateFrom=2026-02-30', { token: s.admin });
+  await step('ledger.entry', 'GET', `/api/ledger/entries/${s.je3}`, { token: s.admin });
+  await step('ledger.entry.unknown', 'GET', `/api/ledger/entries/${FIXED_UUID}`, { token: s.admin });
+  await step('ledger.reverse', 'POST', `/api/ledger/entries/${s.je2}/reverse`, { token: s.admin });
+  await step('ledger.reverse.again', 'POST', `/api/ledger/entries/${s.je2}/reverse`, { token: s.admin });
+  await step('ledger.reverse.unknown', 'POST', `/api/ledger/entries/${FIXED_UUID}/reverse`, { token: s.admin });
+  await step('ledger.entry.reversed', 'GET', `/api/ledger/entries/${s.je2}`, { token: s.admin });
+  await step('ledger.trial-balance', 'GET', '/api/ledger/trial-balance', { token: s.admin });
+  await step('ledger.trial-balance.as-of', 'GET', '/api/ledger/trial-balance?asOf=2026-04-10', { token: s.admin });
+  await step('ledger.balance.cash', 'GET', `/api/ledger/balance/${s.acct['1000']}`, { token: s.admin });
+  await step('ledger.balance.equity', 'GET', `/api/ledger/balance/${s.acct['3000']}`, { token: s.admin });
+  await step('ledger.balance.range', 'GET', `/api/ledger/balance/${s.acct['1000']}?dateFrom=2026-04-10&dateTo=2026-04-30`, { token: s.admin });
+  await step('ledger.balance.unknown-account', 'GET', `/api/ledger/balance/${FIXED_UUID}`, { token: s.admin });
+  await step('accounts.delete.used', 'DELETE', `/api/accounts/${s.acct['1000']}`, { token: s.admin });
+  await step('accounts.delete.unknown', 'DELETE', `/api/accounts/${FIXED_UUID}`, { token: s.admin });
+  await step('viewer.accounts', 'GET', '/api/accounts', { token: s.viewer });
+  await step('viewer.accounts.create', 'POST', '/api/accounts', { token: s.viewer, body: { code: '7000', name: 'X', type: 'EXPENSE' } });
+  await step('viewer.ledger.entries', 'GET', '/api/ledger/entries?sourceType=NONE', { token: s.viewer });
+
   // Deactivated viewer
   await call(base, 'PATCH', `/api/users/${s.viewerId}`, { token: s.admin, body: { isActive: false } });
   await step('inactive.users', 'GET', '/api/users', { token: s.viewer });
@@ -219,6 +283,10 @@ const EXPECTED = {
     'D9: the reference returns the stale eager role (roleId null) and silently drops a change away from an existing role',
   'users.update.role-change': 'D9: the reference answers with (and keeps) the old role',
   'users.list.after-role-change': 'D9: on the reference the user keeps the old role; here the change was saved',
+  'accounts.update.code-conflict': 'The reference crashed (500) on the duplicate code; here it is a 409 like create',
+  'ledger.trial-balance': 'D1: the reversed expense and its reversal both count (reference: cash +250 too high, expense -250)',
+  'ledger.balance.cash': 'D1: reversed entry and reversal cancel (correct cash 1100.80; reference 1350.80)',
+  'ledger.balance.range': 'D1: April shows the expense; its reversal is dated in October, outside the range',
   'audit.users': 'D2: failed logins are audited (adds rows for known users)',
 };
 
@@ -232,6 +300,19 @@ function mutationRows(body) {
 
 const stable = (v) => JSON.stringify(v);
 
+// PostgreSQL returns journal lines in no particular order (the reference has no ORDER BY), so
+// lines are compared as a set: sorted by their amounts, description and account code.
+function sortLines(v) {
+  if (Array.isArray(v)) return v.map(sortLines);
+  if (!v || typeof v !== 'object') return v;
+  const out = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sortLines(x)]));
+  if (Array.isArray(out.lines)) {
+    const key = (l) => [l.debit, l.credit, l.description ?? '', l.account?.code ?? ''].join('|');
+    out.lines = [...out.lines].sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0));
+  }
+  return out;
+}
+
 const [ref, neu] = await Promise.all([scenario(REF), scenario(NEW)]);
 const nr = normaliser();
 const nn = normaliser();
@@ -241,8 +322,8 @@ for (let i = 0; i < ref.length; i++) {
   const a = ref[i];
   const b = neu[i];
   const audit = a.label === 'audit.list';
-  const left = { status: a.status, body: nr(audit ? mutationRows(a.body) : a.body) };
-  const right = { status: b.status, body: nn(audit ? mutationRows(b.body) : b.body) };
+  const left = { status: a.status, body: nr(sortLines(audit ? mutationRows(a.body) : a.body)) };
+  const right = { status: b.status, body: nn(sortLines(audit ? mutationRows(b.body) : b.body)) };
   const same = stable(left) === stable(right);
   if (same) {
     console.log(`PASS  ${a.label}`);

@@ -470,3 +470,161 @@ async fn frontend_is_served_with_spa_fallback() -> TestResult {
     assert_nest_error(&api, 404, json!("Cannot GET /api/bills"), "/api/bills");
     Ok(())
 }
+
+// ── W1: chart of accounts and ledger ─────────────────────────────────────────
+
+async fn create_account(
+    app: &App,
+    token: &str,
+    code: &str,
+    name: &str,
+    kind: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let r = app
+        .call(Method::POST, "/api/accounts", Some(token), Some(json!({"code": code, "name": name, "type": kind})))
+        .await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    Ok(r.body["id"].as_str().ok_or("id")?.to_string())
+}
+
+#[tokio::test]
+async fn ledger_posting_reversal_and_balances_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let cash = create_account(&app, &admin, "1000", "Cash", "ASSET").await?;
+    let equity = create_account(&app, &admin, "3000", "Equity", "EQUITY").await?;
+    let expense = create_account(&app, &admin, "6000", "Expenses", "EXPENSE").await?;
+
+    let open = app
+        .call(
+            Method::POST,
+            "/api/ledger/entries",
+            Some(&admin),
+            Some(json!({
+            "date": "2026-04-01", "description": "Opening", "lines": [
+                {"accountId": cash, "debit": 1000.5, "credit": 0},
+                {"accountId": equity, "debit": 0, "credit": 1000.5}]})),
+        )
+        .await?;
+    assert_eq!(open.status, StatusCode::CREATED);
+    assert_eq!(open.body["entryNumber"], "JE-000001");
+    assert_eq!(open.body["lines"][0]["debit"], "1000.50");
+    assert!(open.body["lines"][0].get("account").is_none());
+
+    let spend = app
+        .call(
+            Method::POST,
+            "/api/ledger/entries",
+            Some(&admin),
+            Some(json!({
+            "date": "2026-04-15", "description": "Supplies", "lines": [
+                {"accountId": expense, "debit": 250, "credit": 0},
+                {"accountId": cash, "debit": 0, "credit": 250}]})),
+        )
+        .await?;
+    let spend_id = spend.body["id"].as_str().ok_or("id")?.to_string();
+
+    let unbalanced = app
+        .call(
+            Method::POST,
+            "/api/ledger/entries",
+            Some(&admin),
+            Some(json!({
+            "date": "2026-04-15", "description": "x", "lines": [
+                {"accountId": cash, "debit": 100.1, "credit": 0},
+                {"accountId": equity, "debit": 0, "credit": 100}]})),
+        )
+        .await?;
+    assert_nest_error(
+        &unbalanced,
+        400,
+        json!("Journal entry is not balanced: debits 100.1 ≠ credits 100"),
+        "/api/ledger/entries",
+    );
+
+    let unknown = app
+        .call(
+            Method::POST,
+            "/api/ledger/entries",
+            Some(&admin),
+            Some(json!({
+            "date": "2026-04-15", "description": "x", "lines": [
+                {"accountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "debit": 1, "credit": 0},
+                {"accountId": equity, "debit": 0, "credit": 1}]})),
+        )
+        .await?;
+    assert_eq!(unknown.status, StatusCode::NOT_FOUND);
+
+    let rev = app.call(Method::POST, &format!("/api/ledger/entries/{spend_id}/reverse"), Some(&admin), None).await?;
+    assert_eq!(rev.status, StatusCode::CREATED);
+    assert_eq!(rev.body["entryNumber"], "JE-000003", "failed posts consumed no numbers");
+    assert_eq!(rev.body["date"], json!(app_core::time::today_local().to_string()));
+    let again = app.call(Method::POST, &format!("/api/ledger/entries/{spend_id}/reverse"), Some(&admin), None).await?;
+    assert_nest_error(
+        &again,
+        400,
+        json!("This entry has already been reversed"),
+        &format!("/api/ledger/entries/{spend_id}/reverse"),
+    );
+
+    let bal = app.call(Method::GET, &format!("/api/ledger/balance/{cash}"), Some(&admin), None).await?;
+    assert_eq!(bal.body, json!({"accountId": cash, "debit": 1250.5, "credit": 250, "balance": 1000.5}));
+    let exp = app.call(Method::GET, &format!("/api/ledger/balance/{expense}"), Some(&admin), None).await?;
+    assert_eq!(exp.body["balance"], json!(0));
+
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    let rows = tb.body.as_array().ok_or("rows")?;
+    let total = |k: &str| rows.iter().map(|r| r[k].as_f64().unwrap_or(0.0)).sum::<f64>();
+    assert!((total("debit") - total("credit")).abs() < 1e-9);
+    let bad_date = app.call(Method::GET, "/api/ledger/trial-balance?asOf=30-04-2026", Some(&admin), None).await?;
+    assert_eq!(bad_date.status, StatusCode::BAD_REQUEST);
+
+    let entries = app.call(Method::GET, "/api/ledger/entries", Some(&admin), None).await?;
+    let list = entries.body.as_array().ok_or("entries")?;
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[0]["entryNumber"], "JE-000003", "newest date first");
+    assert!(list[0]["lines"][0]["account"]["code"].is_string(), "list carries accounts");
+    let reversed = list.iter().find(|e| e["id"] == json!(spend_id)).ok_or("spend")?;
+    assert_eq!(reversed["status"], "REVERSED");
+
+    // Accounts used by the ledger cannot be deleted; there is no route that deletes entries.
+    let del = app.call(Method::DELETE, &format!("/api/accounts/{cash}"), Some(&admin), None).await?;
+    assert_eq!(del.status, StatusCode::BAD_REQUEST);
+    let no_delete = app.call(Method::DELETE, &format!("/api/ledger/entries/{spend_id}"), Some(&admin), None).await?;
+    assert_eq!(no_delete.status, StatusCode::NOT_FOUND);
+
+    let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
+    let actions: Vec<&str> =
+        log.body["data"].as_array().ok_or("data")?.iter().filter_map(|e| e["action"].as_str()).collect();
+    assert!(actions.contains(&"Reversed a ledger entry"));
+    assert_eq!(actions.iter().filter(|a| **a == "Created a ledger entry").count(), 2);
+    assert_eq!(actions.iter().filter(|a| **a == "Created an account").count(), 3);
+    Ok(())
+}
+
+#[tokio::test]
+async fn account_and_ledger_permissions_match_reference() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    create_account(&app, &admin, "1000", "Cash", "ASSET").await?;
+
+    // Reading the chart is open to every signed-in user; changing it needs `accounts`.
+    let list = app.call(Method::GET, "/api/accounts", Some(&viewer), None).await?;
+    assert_eq!(list.status, StatusCode::OK);
+    let create = app
+        .call(Method::POST, "/api/accounts", Some(&viewer), Some(json!({"code": "2", "name": "x", "type": "ASSET"})))
+        .await?;
+    assert_eq!(create.status, StatusCode::FORBIDDEN);
+    let seed = app.call(Method::POST, "/api/accounts/seed", Some(&viewer), None).await?;
+    assert_eq!(seed.status, StatusCode::FORBIDDEN);
+    // The seeded Viewer role holds `ledger`, so it may read (and post) journal entries.
+    let entries = app.call(Method::GET, "/api/ledger/entries", Some(&viewer), None).await?;
+    assert_eq!(entries.status, StatusCode::OK);
+    let anon = app.call(Method::GET, "/api/accounts", None, None).await?;
+    assert_eq!(anon.status, StatusCode::UNAUTHORIZED);
+
+    let seeded = app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    assert_eq!(seeded.status, StatusCode::NO_CONTENT);
+    Ok(())
+}

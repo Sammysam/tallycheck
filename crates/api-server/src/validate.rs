@@ -29,6 +29,14 @@ pub enum Rule {
     ArrayUnique,
     /// `@IsIn(list, { each: true })`.
     IsInEach(fn() -> Vec<&'static str>),
+    /// `@IsEnum(E)`: one of the enum's string values.
+    IsEnum(&'static [&'static str]),
+    /// The reference's custom `@IsDateFormat()`: a real calendar date as `YYYY-MM-DD`.
+    IsDateFormat,
+    /// `@IsNumber({ maxDecimalPlaces: 2 })`: a finite JSON number with at most two decimals.
+    IsMoneyNumber,
+    /// `@Min(0)` on a number.
+    MinZero,
 }
 
 /// validator.js `isLength`: surrogate pairs count once, variation selectors not at all.
@@ -48,6 +56,10 @@ impl Rule {
             Rule::IsBoolean => v.is_boolean(),
             Rule::IsArray => v.is_array(),
             Rule::ArrayUnique => v.as_array().is_some_and(|a| a.iter().enumerate().all(|(i, x)| !a[..i].contains(x))),
+            Rule::IsEnum(values) => v.as_str().is_some_and(|s| values.contains(&s)),
+            Rule::IsDateFormat => v.as_str().is_some_and(app_core::time::is_date_format),
+            Rule::IsMoneyNumber => app_core::money::Money::from_json(v).is_some(),
+            Rule::MinZero => v.as_number().is_some_and(|n| n.as_f64().is_some_and(|x| x >= 0.0)),
             Rule::IsInEach(list) => {
                 let allowed = list();
                 let ok = |x: &Value| x.as_str().is_some_and(|s| allowed.contains(&s));
@@ -70,6 +82,10 @@ impl Rule {
             Rule::IsBoolean => format!("{prop} must be a boolean value"),
             Rule::IsArray => format!("{prop} must be an array"),
             Rule::ArrayUnique => format!("All {prop}'s elements must be unique"),
+            Rule::IsEnum(values) => format!("{prop} must be one of the following values: {}", values.join(", ")),
+            Rule::IsDateFormat => format!("{prop} must be a valid date in YYYY-MM-DD format"),
+            Rule::IsMoneyNumber => format!("{prop} must be a number conforming to the specified constraints"),
+            Rule::MinZero => format!("{prop} must not be less than 0"),
             Rule::IsInEach(list) => {
                 format!("each value in {prop} must be one of the following values: {}", list().join(", "))
             }
@@ -81,11 +97,17 @@ pub struct Validator {
     input: Map<String, Value>,
     output: Map<String, Value>,
     errors: Vec<String>,
+    /// Nest prefixes nested errors with their path, e.g. `lines.0.`.
+    prefix: String,
 }
 
 impl Validator {
     pub fn new(input: Map<String, Value>) -> Self {
-        Validator { input, output: Map::new(), errors: Vec::new() }
+        Validator { input, output: Map::new(), errors: Vec::new(), prefix: String::new() }
+    }
+
+    pub fn nested(input: Map<String, Value>, prefix: String) -> Self {
+        Validator { input, output: Map::new(), errors: Vec::new(), prefix }
     }
 
     /// Validates one property. Rules are given in declaration order (top to bottom).
@@ -98,13 +120,27 @@ impl Validator {
             }
             return self;
         }
-        let mut failed: Vec<String> = rules.iter().filter(|r| !r.passes(&value)).map(|r| r.message(prop)).collect();
+        let mut failed: Vec<String> =
+            rules.iter().filter(|r| !r.passes(&value)).map(|r| format!("{}{}", self.prefix, r.message(prop))).collect();
         failed.reverse();
         self.errors.extend(failed);
         if let Some(v) = present {
             self.output.insert(prop.to_string(), v);
         }
         self
+    }
+
+    /// Errors collected so far plus the whitelisted object (for nested validation).
+    pub fn into_parts(self) -> (Vec<String>, Map<String, Value>) {
+        (self.errors, self.output)
+    }
+
+    pub fn push_errors(&mut self, errors: Vec<String>) {
+        self.errors.extend(errors);
+    }
+
+    pub fn put(&mut self, prop: &str, value: Value) {
+        self.output.insert(prop.to_string(), value);
     }
 
     /// The whitelisted object, or a 400 with every message.
@@ -328,6 +364,192 @@ pub fn update_settings(body: Map<String, Value>) -> Result<Vec<(String, String)>
         .iter()
         .filter_map(|k| opt_string(&m, k).map(|s| (k.to_string(), s)))
         .collect())
+}
+
+// ─── DTOs (W1: accounts and ledger) ─────────────────────────────────────────
+
+pub const ACCOUNT_TYPES: &[&str] = &["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"];
+
+fn account_rules(v: &mut Validator, optional: bool) {
+    v.field("code", optional, &[Rule::IsString, Rule::IsNotEmpty])
+        .field("name", optional, &[Rule::IsString, Rule::IsNotEmpty])
+        .field("type", optional, &[Rule::IsEnum(ACCOUNT_TYPES)])
+        .field("subtype", true, &[Rule::IsString])
+        .field("description", true, &[Rule::IsString])
+        .field("parentId", true, &[Rule::IsUuid]);
+}
+
+/// Validated account fields. For the nullable ones, `Some(None)` means "sent as null".
+pub struct AccountDto {
+    pub code: Option<String>,
+    pub name: Option<String>,
+    pub account_type: Option<String>,
+    pub subtype: Option<Option<String>>,
+    pub description: Option<Option<String>>,
+    pub parent_id: Option<Option<String>>,
+}
+
+fn nullable(m: &Map<String, Value>, key: &str) -> Option<Option<String>> {
+    m.get(key).map(|v| v.as_str().map(str::to_string))
+}
+
+fn account_dto(m: &Map<String, Value>) -> AccountDto {
+    AccountDto {
+        code: opt_string(m, "code"),
+        name: opt_string(m, "name"),
+        account_type: opt_string(m, "type"),
+        subtype: nullable(m, "subtype"),
+        description: nullable(m, "description"),
+        parent_id: nullable(m, "parentId"),
+    }
+}
+
+pub fn create_account(body: Map<String, Value>) -> Result<AccountDto, AppError> {
+    let mut v = Validator::new(body);
+    account_rules(&mut v, false);
+    Ok(account_dto(&v.finish()?))
+}
+
+pub fn update_account(body: Map<String, Value>) -> Result<AccountDto, AppError> {
+    let mut v = Validator::new(body);
+    account_rules(&mut v, true);
+    Ok(account_dto(&v.finish()?))
+}
+
+pub struct JournalLineDto {
+    pub account_id: String,
+    pub debit: app_core::money::Money,
+    pub credit: app_core::money::Money,
+    pub description: Option<String>,
+}
+
+pub struct JournalEntryDto {
+    pub date: String,
+    pub description: String,
+    pub reference: Option<String>,
+    pub source_type: Option<String>,
+    pub source_id: Option<String>,
+    pub lines: Vec<JournalLineDto>,
+}
+
+const NESTED_MESSAGE: &str = "each value in nested property lines must be either object or array";
+
+fn line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>) {
+    let mut v = Validator::nested(item.as_object().cloned().unwrap_or_default(), prefix);
+    v.field("accountId", false, &[Rule::IsUuid])
+        .field("debit", false, &[Rule::IsMoneyNumber, Rule::MinZero])
+        .field("credit", false, &[Rule::IsMoneyNumber, Rule::MinZero])
+        .field("description", true, &[Rule::IsString]);
+    v.into_parts()
+}
+
+/// `CreateJournalEntryDto` with `@ValidateNested({ each: true }) @ArrayMinSize(2)` lines, and
+/// Nest's flattening: when any nested line has errors only the nested errors are reported.
+pub fn create_journal_entry(body: Map<String, Value>) -> Result<JournalEntryDto, AppError> {
+    let lines_value = body.get("lines").cloned();
+    let mut v = Validator::new(body);
+    v.field("date", false, &[Rule::IsDateFormat])
+        .field("description", false, &[Rule::IsString, Rule::IsNotEmpty])
+        .field("reference", true, &[Rule::IsString])
+        .field("sourceType", true, &[Rule::IsString])
+        .field("sourceId", true, &[Rule::IsString]);
+
+    let mut own = Vec::new();
+    if !lines_value.as_ref().and_then(Value::as_array).is_some_and(|a| a.len() >= 2) {
+        own.push("lines must contain at least 2 elements".to_string());
+    }
+    let mut children = Vec::new();
+    let mut clean_lines = Vec::new();
+    match &lines_value {
+        None => {}
+        Some(Value::Array(items)) => {
+            for (i, item) in items.iter().enumerate() {
+                if item.is_object() || item.is_array() {
+                    let (errs, clean) = line_rules(item, format!("lines.{i}."));
+                    children.extend(errs);
+                    clean_lines.push(Value::Object(clean));
+                } else {
+                    children.push(format!("lines.{NESTED_MESSAGE}"));
+                }
+            }
+        }
+        Some(obj @ Value::Object(_)) => {
+            let (errs, _) = line_rules(obj, "lines.".to_string());
+            children.extend(errs);
+        }
+        Some(_) => own.push(NESTED_MESSAGE.to_string()),
+    }
+    if children.is_empty() {
+        v.push_errors(own);
+    } else {
+        v.push_errors(children);
+    }
+    v.put("lines", Value::Array(clean_lines));
+    let m = v.finish()?;
+
+    let lines = m
+        .get("lines")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|l| JournalLineDto {
+                    account_id: l.get("accountId").and_then(Value::as_str).unwrap_or_default().to_string(),
+                    debit: l.get("debit").and_then(app_core::money::Money::from_json).unwrap_or_default(),
+                    credit: l.get("credit").and_then(app_core::money::Money::from_json).unwrap_or_default(),
+                    description: l.get("description").and_then(Value::as_str).map(str::to_string),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(JournalEntryDto {
+        date: opt_string(&m, "date").unwrap_or_default(),
+        description: opt_string(&m, "description").unwrap_or_default(),
+        reference: opt_string(&m, "reference"),
+        source_type: opt_string(&m, "sourceType"),
+        source_id: opt_string(&m, "sourceId"),
+        lines,
+    })
+}
+
+/// `LedgerFilterDto` (query string).
+pub struct LedgerFilterDto {
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub source_type: Option<String>,
+}
+
+pub fn ledger_filter(query: Map<String, Value>) -> Result<LedgerFilterDto, AppError> {
+    let mut v = Validator::new(query);
+    v.field("dateFrom", true, &[Rule::IsDateFormat]).field("dateTo", true, &[Rule::IsDateFormat]).field(
+        "sourceType",
+        true,
+        &[Rule::IsString],
+    );
+    let m = v.finish()?;
+    Ok(LedgerFilterDto {
+        date_from: opt_string(&m, "dateFrom"),
+        date_to: opt_string(&m, "dateTo"),
+        source_type: opt_string(&m, "sourceType"),
+    })
+}
+
+/// Raw `@Query('x')` dates the reference passed straight to SQL (a bad value was a 500 there).
+/// An empty value means "not given", as the reference's truthiness checks treated it.
+pub fn optional_query_date(query: &Map<String, Value>, prop: &str) -> Result<Option<String>, AppError> {
+    let raw = match query.get(prop) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(items)) => items.first().and_then(Value::as_str).unwrap_or_default().to_string(),
+        _ => return Ok(None),
+    };
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    if app_core::time::is_date_format(&raw) {
+        Ok(Some(raw))
+    } else {
+        Err(AppError::validation(vec![Rule::IsDateFormat.message(prop)]))
+    }
 }
 
 #[cfg(test)]
