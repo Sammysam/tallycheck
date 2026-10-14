@@ -1,10 +1,11 @@
-//! `/api` routes implemented so far (W0–W2). Routes of later waves answer 404 like any unknown path.
+//! `/api` routes implemented so far (W0–W3). Routes of later waves answer 404 like any unknown path.
 
 pub mod accounts;
 pub mod audit_logs;
 pub mod auth;
 pub mod ledger;
 pub mod operations;
+pub mod reports;
 pub mod roles;
 pub mod settings;
 pub mod users;
@@ -63,5 +64,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/expenses/{id}/void", post(op::expenses_void))
         .route("/payments", get(op::payments_list).post(op::payments_create))
         .route("/payments/{id}", get(op::payments_get))
+        .route("/reports/profit-loss", get(reports::profit_loss))
+        .route("/reports/balance-sheet", get(reports::balance_sheet))
+        .route("/reports/ar-aging", get(reports::ar_aging))
+        .route("/reports/ap-aging", get(reports::ap_aging))
         .fallback(unknown_route)
 }

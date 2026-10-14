@@ -803,3 +803,52 @@ async fn invoice_scope_and_operation_permissions() -> TestResult {
     assert_eq!(vend.status, StatusCode::FORBIDDEN);
     Ok(())
 }
+
+// ── W3: reports ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn reports_follow_reference_query_rules_and_permissions() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+
+    let pl = app.call(Method::GET, "/api/reports/profit-loss", Some(&admin), None).await?;
+    assert_eq!(pl.status, StatusCode::OK);
+    let today = app_core::time::today_local().to_string();
+    assert_eq!(pl.body["dateTo"], json!(today));
+    assert_eq!(pl.body["dateFrom"], json!(format!("{}-01-01", &today[..4])));
+    assert_eq!(pl.body["netIncome"], json!(0));
+    assert!(pl.body["operatingExpenses"].as_array().is_some_and(|a| !a.is_empty()), "zero-balance accounts are listed");
+
+    let open =
+        app.call(Method::GET, "/api/reports/profit-loss?dateFrom=&dateTo=2026-04-30", Some(&admin), None).await?;
+    assert_eq!(open.body["dateFrom"], json!(""), "an empty bound is kept and means unbounded");
+    let bad = app.call(Method::GET, "/api/reports/balance-sheet?asOf=30/04/2026", Some(&admin), None).await?;
+    assert_nest_error(
+        &bad,
+        400,
+        json!(["asOf must be a valid date in YYYY-MM-DD format"]),
+        "/api/reports/balance-sheet?asOf=30/04/2026",
+    );
+    let bs = app.call(Method::GET, "/api/reports/balance-sheet?asOf=2026-04-30", Some(&admin), None).await?;
+    assert_eq!(bs.body["balanced"], json!(true));
+    let ar = app.call(Method::GET, "/api/reports/ar-aging?asOf=2026-04-30", Some(&admin), None).await?;
+    for bucket in ["current", "days1_30", "days31_60", "days61_90", "days90plus"] {
+        assert_eq!(ar.body[bucket], json!({"items": [], "total": 0}));
+    }
+    assert_eq!(ar.body["grandTotal"], json!(0));
+
+    // Viewer holds `reports`; a role without it is refused.
+    let v = app.call(Method::GET, "/api/reports/ap-aging", Some(&viewer), None).await?;
+    assert_eq!(v.status, StatusCode::OK);
+    let role = app
+        .call(Method::POST, "/api/roles", Some(&admin), Some(json!({"name": "NoReports", "permissions": ["invoices"]})))
+        .await?;
+    let role_id = role.body["id"].as_str().ok_or("role")?.to_string();
+    let viewer_id: String =
+        sqlx::query_scalar(r#"SELECT "id" FROM "users" WHERE "username"='viewer'"#).fetch_one(app.db.read()).await?;
+    app.call(Method::PATCH, &format!("/api/users/{viewer_id}"), Some(&admin), Some(json!({"roleId": role_id}))).await?;
+    let denied = app.call(Method::GET, "/api/reports/ap-aging", Some(&viewer), None).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    Ok(())
+}

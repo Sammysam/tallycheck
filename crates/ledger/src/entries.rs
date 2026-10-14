@@ -357,34 +357,56 @@ pub struct TrialBalanceRow {
     pub balance: Money,
 }
 
-/// Reference `getTrialBalance`: active accounts by code, up to `as_of`, omitting accounts with
-/// no movement.
-pub async fn trial_balance(conn: &mut SqliteConnection, as_of: Option<&str>) -> AppResult<Vec<TrialBalanceRow>> {
-    let to = as_of.filter(|s| !s.is_empty());
-    let sums: Vec<(String, i64, i64)> = sqlx::query_as(
+/// Debit and credit totals per account over an optional date range (inclusive). Every entry
+/// counts whatever its status (D1). Empty strings mean "no bound", as the reference's
+/// truthiness checks treated them.
+pub async fn sums_by_account(
+    conn: &mut SqliteConnection,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+) -> AppResult<HashMap<String, (Money, Money)>> {
+    let from = date_from.filter(|s| !s.is_empty());
+    let to = date_to.filter(|s| !s.is_empty());
+    let rows: Vec<(String, i64, i64)> = sqlx::query_as(
         r#"SELECT l."accountId", COALESCE(SUM(l."debit"), 0), COALESCE(SUM(l."credit"), 0)
            FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."journalEntryId"
-           WHERE (?1 IS NULL OR e."date" <= ?1)
+           WHERE (?1 IS NULL OR e."date" >= ?1) AND (?2 IS NULL OR e."date" <= ?2)
            GROUP BY l."accountId""#,
     )
+    .bind(from)
     .bind(to)
     .fetch_all(&mut *conn)
     .await?;
-    let sums: HashMap<String, (i64, i64)> = sums.into_iter().map(|(a, d, c)| (a, (d, c))).collect();
+    Ok(rows.into_iter().map(|(a, d, c)| (a, (Money::from_cents(d), Money::from_cents(c)))).collect())
+}
+
+/// Balance in the account's normal direction: debit − credit for assets and expenses,
+/// credit − debit for everything else.
+pub fn normal_balance(account_type: AccountType, debit: Money, credit: Money) -> AppResult<Money> {
+    signed(Some(account_type), debit, credit)
+}
+
+/// Active accounts ordered by code.
+pub async fn active_accounts(conn: &mut SqliteConnection) -> AppResult<Vec<Account>> {
     let rows = sqlx::query(&format!(
         r#"SELECT {} FROM "accounts" WHERE "isActive" = 1 ORDER BY "code" ASC"#,
         accounts::COLUMNS
     ))
     .fetch_all(&mut *conn)
     .await?;
+    rows.iter().map(accounts::from_row).collect()
+}
+
+/// Reference `getTrialBalance`: active accounts by code, up to `as_of`, omitting accounts with
+/// no movement.
+pub async fn trial_balance(conn: &mut SqliteConnection, as_of: Option<&str>) -> AppResult<Vec<TrialBalanceRow>> {
+    let sums = sums_by_account(conn, None, as_of).await?;
     let mut out = Vec::new();
-    for r in &rows {
-        let account = accounts::from_row(r)?;
-        let (d, c) = sums.get(&account.id).copied().unwrap_or((0, 0));
-        if d == 0 && c == 0 {
+    for account in active_accounts(conn).await? {
+        let (debit, credit) = sums.get(&account.id).copied().unwrap_or((Money::ZERO, Money::ZERO));
+        if debit == Money::ZERO && credit == Money::ZERO {
             continue;
         }
-        let (debit, credit) = (Money::from_cents(d), Money::from_cents(c));
         let balance = signed(Some(account.account_type), debit, credit)?;
         out.push(TrialBalanceRow { account, debit, credit, balance });
     }
