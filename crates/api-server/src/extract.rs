@@ -98,4 +98,5 @@ pub mod perm {
     permission!(Bills, "bills");
     permission!(Expenses, "expenses");
     permission!(Payments, "payments");
+    permission!(Reports, "reports");
 }

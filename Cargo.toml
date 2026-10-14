@@ -7,6 +7,7 @@ members = [
     "crates/audit",
     "crates/ledger",
     "crates/operations",
+    "crates/reports",
     "crates/api-server",
     "src-tauri",
 ]
@@ -25,6 +26,7 @@ auth = { path = "crates/auth" }
 audit = { path = "crates/audit" }
 ledger = { path = "crates/ledger" }
 operations = { path = "crates/operations" }
+reports = { path = "crates/reports" }
 api-server = { path = "crates/api-server" }
 
 anyhow = "1"

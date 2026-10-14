@@ -367,6 +367,29 @@ async function scenario(base) {
   await step('ledger.trial-balance.after-w2', 'GET', '/api/ledger/trial-balance', { token: s.admin });
   await step('ledger.entries.invoices', 'GET', '/api/ledger/entries?sourceType=INVOICE', { token: s.admin });
 
+  // ── W3: reports ────────────────────────────────────────────────────────────
+  // Open items for ageing: a part-paid invoice and an unpaid bill (no voids, no part-paid bills).
+  r = await call(base, 'POST', '/api/invoices', A({ customerId: s.acme, date: '2026-04-16', dueDate: '2026-04-30', lines: [{ description: 'Retainer', unitPrice: 800, accountId: rev }] }));
+  s.inv3 = r.body?.id;
+  await call(base, 'POST', `/api/invoices/${s.inv3}/post`, { token: s.admin });
+  await call(base, 'POST', '/api/payments', pay({ type: 'AR', invoiceId: s.inv3, amount: 300 }));
+  r = await call(base, 'POST', '/api/bills', A({ vendorId: s.vendor, date: '2026-04-17', dueDate: '2026-06-01', lines: [{ description: 'Cleaning', quantity: 1, unitPrice: 120, accountId: exp }] }));
+  await call(base, 'POST', `/api/bills/${r.body?.id}/post`, { token: s.admin });
+  // Ranges without any voided document: identical on both sides.
+  await step('reports.profit-loss.clean-range', 'GET', '/api/reports/profit-loss?dateFrom=2026-04-16&dateTo=2026-04-30', { token: s.admin });
+  await step('reports.profit-loss.open-start', 'GET', '/api/reports/profit-loss?dateFrom=&dateTo=2026-04-04', { token: s.admin });
+  await step('reports.balance-sheet.clean', 'GET', '/api/reports/balance-sheet?asOf=2026-04-04', { token: s.admin });
+  await step('reports.ar-aging.as-of', 'GET', '/api/reports/ar-aging?asOf=2026-05-15', { token: s.admin });
+  await step('reports.ar-aging', 'GET', '/api/reports/ar-aging', { token: s.admin });
+  await step('reports.ap-aging.as-of', 'GET', '/api/reports/ap-aging?asOf=2026-05-15', { token: s.admin });
+  await step('reports.ap-aging', 'GET', '/api/reports/ap-aging', { token: s.admin });
+  // Whole year: the voided documents above make D1 visible.
+  await step('reports.profit-loss.year', 'GET', '/api/reports/profit-loss', { token: s.admin });
+  await step('reports.balance-sheet.today', 'GET', '/api/reports/balance-sheet', { token: s.admin });
+  await step('reports.profit-loss.bad-date', 'GET', '/api/reports/profit-loss?dateFrom=2026-13-01', { token: s.admin });
+  await step('viewer.reports', 'GET', '/api/reports/ar-aging', { token: s.viewer });
+  await step('viewer.reports.anonymous', 'GET', '/api/reports/ar-aging');
+
   // ── W2: own-invoices-only scope ────────────────────────────────────────────
   r = await call(base, 'POST', '/api/roles', A({ name: 'Sales', permissions: ['invoices'] }));
   await call(base, 'POST', '/api/users', A({ username: 'sales1', password: 'salespass1', roleId: r.body?.id }));
@@ -473,6 +496,10 @@ const EXPECTED = {
   'bills.get.two-payments': 'D13: two part-payments covering the bill make it PAID (reference: stays POSTED)',
   'bills.void.part-paid': 'D15: a part-paid bill cannot be voided (reference voided it, leaving the payment against nothing)',
   'payments.ap.draft-bill': 'D14: a draft bill must be posted before it can be paid (reference marked it PAID unposted)',
+  'reports.balance-sheet.clean': 'D4: the reference sums floats (totalAssets 3687.4300000000003); exact cents give 3687.43',
+  'reports.profit-loss.year': 'D1: reversed documents and their reversals both count (reference double-counts reversals)',
+  'reports.balance-sheet.today': 'D1: as above; the reference sheet is distorted by every void',
+  'reports.profit-loss.bad-date': 'The reference passed the bad date to SQL and crashed (500); here it is a 400',
   'accounts.list.after-seed': 'D10: seeding adds the missing default accounts (1200, 2100, 5000)',
   'audit.users': 'D2: failed logins are audited (adds rows for known users)',
 };
@@ -493,6 +520,9 @@ function sortLines(v) {
   if (Array.isArray(v)) return v.map(sortLines);
   if (!v || typeof v !== 'object') return v;
   const out = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sortLines(x)]));
+  if (Array.isArray(out.items) && out.items.every((i) => i && typeof i === 'object' && 'number' in i)) {
+    out.items = [...out.items].sort((x, y) => (x.number < y.number ? -1 : x.number > y.number ? 1 : 0));
+  }
   if (Array.isArray(out.lines)) {
     const key = (l) => [l.debit, l.credit, l.description ?? '', l.account?.code ?? ''].join('|');
     out.lines = [...out.lines].sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0));

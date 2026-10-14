@@ -47,6 +47,7 @@ No Node/NestJS/PostgreSQL/Docker/cloud dependency at runtime. Node is a dev-time
 - `src-tauri` — desktop shell. → api-server
 - `ledger` (W1) — accounts, journal entries, balances. → database, app-core
 - `operations` (W2) — customers, vendors, banking, invoices, bills, expenses, payments. → ledger
+- `reports` (W3) — profit & loss, balance sheet, AR/AP ageing. → ledger, database
 - Later waves add: `payroll`, `employees`, `documents`,
   `reports`, `backup`, `importer`.
 
@@ -200,6 +201,14 @@ recommendations without answering each one individually; revisit any of them on 
     without ever posting it).
   - D15: a part-paid bill cannot be voided (the reference voided it and left the payment's AP
     debit standing alone).
+- W3 reports (verified by the contract suite, 248 steps):
+  - Profit & Loss and Balance Sheet come only from ledger lines and count every entry (D1), so
+    voided documents cancel out. On ranges without voids they match the reference exactly.
+  - Totals are exact cents (D4); the reference summed floats and could show e.g.
+    3687.4300000000003. `balanced` is an exact comparison (the reference allowed 0.01).
+  - AP ageing ages what is still owed on each POSTED bill (D13); AR ageing as the reference.
+  - Report dates: absent → default (1 January of the current local year / today, D5), empty →
+    no bound (as the reference), malformed → 400 (the reference crashed with 500).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

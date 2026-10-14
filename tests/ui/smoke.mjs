@@ -395,6 +395,40 @@ try {
     await shot('16-trial-balance-w2');
   });
 
+  // ── W3 screens ───────────────────────────────────────────────────────────
+  await check('Dashboard shows the year-to-date figures from the reports', async () => {
+    const before = httpErrors.length;
+    await go('/');
+    await waitFor(`document.body.innerText.toLowerCase().includes('net income (ytd)') && document.body.innerText.toLowerCase().includes('ap outstanding')`, 'KPI cards');
+    const text = await pageText();
+    // Cards are CSS-uppercased, so innerText is too. Revenue 2,500.63 (the paid invoice);
+    // AP outstanding 37.50 (the posted bill); net income 962.38 = 2,500.63 - 37.50 - 1,500.75.
+    for (const v of ['2,500.63', '37.50', '962.38']) if (!text.includes(v)) throw new Error('dashboard is missing ' + v);
+    const newErrors = httpErrors.slice(before).filter((e) => e.includes('/api/reports'));
+    if (newErrors.length) throw new Error('report calls failed: ' + newErrors.join(', '));
+    await shot('17-dashboard');
+  });
+
+  await check('Profit & Loss and Balance Sheet pages render and balance', async () => {
+    await go('/reports/profit-loss');
+    await waitFor(`document.body.innerText.includes('Total Revenue') && document.body.innerText.includes('Net Income')`, 'P&L sections');
+    await shot('18-profit-loss');
+    await go('/reports/balance-sheet');
+    await waitFor(`document.body.innerText.includes('Balanced')`, 'balance indicator');
+    const text = await pageText();
+    if (!text.includes('✓ Balanced')) throw new Error('balance sheet is out of balance');
+    await shot('19-balance-sheet');
+  });
+
+  await check('AR and AP ageing pages list what is outstanding', async () => {
+    await go('/reports/ap-aging');
+    await waitFor(`document.body.innerText.includes('Grand Total Outstanding')`, 'AP ageing');
+    if (!(await pageText()).includes('BILL-000001')) throw new Error('posted bill missing from AP ageing');
+    await shot('20-ap-aging');
+    await go('/reports/ar-aging');
+    await waitFor(`document.body.innerText.includes('Grand Total Outstanding')`, 'AR ageing');
+  });
+
   await check('second login goes through 2FA verify', async () => {
     await evaluate(`localStorage.removeItem('accessToken')`);
     await go('/login');

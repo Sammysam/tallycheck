@@ -95,7 +95,7 @@ impl Rule {
         }
     }
 
-    fn message(&self, prop: &str) -> String {
+    pub(crate) fn message(&self, prop: &str) -> String {
         match self {
             Rule::IsString => format!("{prop} must be a string"),
             Rule::IsNotEmpty => format!("{prop} should not be empty"),
