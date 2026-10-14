@@ -1,0 +1,30 @@
+accounts|FK_e1496dabea319842640e45fb3ed|FOREIGN KEY ("parentId") REFERENCES accounts(id) ON DELETE SET NULL
+accounts|UQ_490319656e54a7957dc1fed027c|UNIQUE (code)
+journal_entries|UQ_4b3b30432878ce7cc7882e919be|UNIQUE ("entryNumber")
+journal_lines|FK_3c913ef1f691ce5b2c490116309|FOREIGN KEY ("journalEntryId") REFERENCES journal_entries(id) ON DELETE CASCADE
+journal_lines|FK_d9eecc536593997a18359db2b47|FOREIGN KEY ("accountId") REFERENCES accounts(id)
+invoices|FK_1df049f8943c6be0c1115541efb|FOREIGN KEY ("customerId") REFERENCES customers(id)
+invoices|UQ_bf8e0f9dd4558ef209ec111782d|UNIQUE ("invoiceNumber")
+invoice_lines|FK_9f57f31e620fe759b452feb776e|FOREIGN KEY ("invoiceId") REFERENCES invoices(id) ON DELETE CASCADE
+invoice_lines|FK_cb55616ee46d3c1f30f420c83ce|FOREIGN KEY ("accountId") REFERENCES accounts(id)
+bills|FK_faa314df72143d6dccd8bfe46e2|FOREIGN KEY ("vendorId") REFERENCES vendors(id)
+bills|UQ_82ab2a5bb3cead5a31887d7bbde|UNIQUE ("billNumber")
+bill_lines|FK_25b0017e33f541db26bb0165194|FOREIGN KEY ("accountId") REFERENCES accounts(id)
+bill_lines|FK_971c433d6f2ce1926847dd4b096|FOREIGN KEY ("billId") REFERENCES bills(id) ON DELETE CASCADE
+bank_accounts|FK_bf97ed64ce3918211d645a39af3|FOREIGN KEY ("accountId") REFERENCES accounts(id)
+expenses|FK_36d05d47bb0de4b4952fece8927|FOREIGN KEY ("expenseAccountId") REFERENCES accounts(id)
+expenses|FK_ee80fc04af0c6f58d89c1064db1|FOREIGN KEY ("paymentAccountId") REFERENCES accounts(id)
+expenses|UQ_57552c177da550b3271a2cfb646|UNIQUE ("expenseNumber")
+payments|FK_11efa724395540b991908acb5db|FOREIGN KEY ("paymentAccountId") REFERENCES accounts(id)
+payments|UQ_a4faec749345edbe3aa3e3b4d47|UNIQUE ("paymentNumber")
+users|FK_users_role|FOREIGN KEY ("roleId") REFERENCES roles(id)
+users|UQ_users_username|UNIQUE (username)
+roles|UQ_roles_name|UNIQUE (name)
+employee_documents|FK_employee_documents_employee|FOREIGN KEY ("employeeId") REFERENCES employees(id) ON DELETE CASCADE
+employee_salaries|FK_employee_salaries_employee|FOREIGN KEY ("employeeId") REFERENCES employees(id) ON DELETE CASCADE
+employee_salaries|UQ_employee_salaries_employee_date|UNIQUE ("employeeId", "effectiveFrom")
+payroll_runs|UQ_payroll_runs_runNumber|UNIQUE ("runNumber")
+payroll_lines|FK_payroll_lines_employee|FOREIGN KEY ("employeeId") REFERENCES employees(id) ON DELETE SET NULL
+payroll_lines|FK_payroll_lines_run|FOREIGN KEY ("runId") REFERENCES payroll_runs(id) ON DELETE CASCADE
+payroll_lines|UQ_payroll_lines_slipNumber|UNIQUE ("slipNumber")
+payroll_remittances|FK_payroll_remittances_run|FOREIGN KEY ("runId") REFERENCES payroll_runs(id) ON DELETE CASCADE

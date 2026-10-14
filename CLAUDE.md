@@ -150,6 +150,18 @@ recommendations without answering each one individually; revisit any of them on 
   crashed with 500).
 - No CORS layer: the frontend is same-origin. Tokens travel in the Authorization header, never
   cookies, so cross-site request forgery does not apply.
+- **D9 User role changes persist** (found by the W0 contract tests). In the reference,
+  TypeORM 1.0's eager `role` relation overrides `roleId` on save: changing a user from one role
+  to another is silently dropped, and a change from "no role" is saved but answered with the
+  stale `role: null, roleId: null`. Here `PATCH /users/:id` saves the new role and returns it.
+- `null` in optional PATCH fields means "not sent" (the reference stored the text "null" in
+  settings, and crashed with 500 for `isActive: null` / role `name: null`).
+- 2FA codes are throttled per user like passwords (5 failures / 15 min).
+
+Reference quirks reproduced on purpose (verified by tests): audit actions such as
+"Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
+reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
+answer 201.
 
 ## 10. Open items
 
@@ -159,6 +171,14 @@ recommendations without answering each one individually; revisit any of them on 
 - Reference quirks to decide in their wave: bills never accumulate partial AP payments; a
   part-paid bill can be voided; `POST /accounts/seed` does nothing after the payroll migration
   seeded 11 accounts.
+- The login page shows its own fixed "Invalid username or password" for every error, so a
+  throttled (429) or inactive (403) user does not see the real reason. Changing it is a
+  frontend change; not done in W0.
+- The copied frontend fails `npm run lint` (77 errors, 10 warnings) exactly as the reference
+  does, and `npm audit --omit=dev` reports advisories in react-router, form-data and dompurify.
+  Upgrades need a decision; they are not "minimal changes".
+- The production reference server's time zone (for importing `timestamp without time zone`
+  values) is unconfirmed.
 
 ## 11. Commands
 
@@ -171,7 +191,9 @@ cargo run -p api-server --bin accounting-server -- serve
 cargo run -p api-server --bin accounting-server -- create-admin <username>
 cargo run -p accounting-desktop
 ```
-Contract tests: see `tests/contract/README.md`.
+Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
+UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh database.
+Reference-derived fixtures are regenerated with the scripts in `tools/`; never hand-edit them.
 
 ## 12. Waves and approval gates
 

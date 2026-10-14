@@ -1,0 +1,306 @@
+accounts|id|uuid|NO|uuid_generate_v4()
+accounts|code|character varying|NO|
+accounts|name|character varying|NO|
+accounts|type|USER-DEFINED|NO|
+accounts|subtype|character varying|YES|
+accounts|description|character varying|YES|
+accounts|isActive|boolean|NO|true
+accounts|parentId|uuid|YES|
+accounts|createdAt|timestamp without time zone|NO|now()
+accounts|updatedAt|timestamp without time zone|NO|now()
+audit_logs|id|uuid|NO|uuid_generate_v4()
+audit_logs|userId|uuid|YES|
+audit_logs|username|character varying|YES|
+audit_logs|action|character varying|NO|
+audit_logs|method|character varying|YES|
+audit_logs|path|character varying|YES|
+audit_logs|statusCode|integer|YES|
+audit_logs|detail|character varying|YES|
+audit_logs|createdAt|timestamp without time zone|NO|now()
+bank_accounts|id|uuid|NO|uuid_generate_v4()
+bank_accounts|name|character varying|NO|
+bank_accounts|bankName|character varying|YES|
+bank_accounts|accountNumber|character varying|YES|
+bank_accounts|accountId|uuid|NO|
+bank_accounts|currentBalance|numeric|NO|0
+bank_accounts|isActive|boolean|NO|true
+bank_accounts|createdAt|timestamp without time zone|NO|now()
+bank_accounts|updatedAt|timestamp without time zone|NO|now()
+bill_lines|id|uuid|NO|uuid_generate_v4()
+bill_lines|billId|uuid|NO|
+bill_lines|description|character varying|NO|
+bill_lines|quantity|numeric|NO|1
+bill_lines|unitPrice|numeric|NO|
+bill_lines|amount|numeric|NO|
+bill_lines|accountId|uuid|NO|
+bills|id|uuid|NO|uuid_generate_v4()
+bills|billNumber|character varying|NO|
+bills|vendorId|uuid|NO|
+bills|date|date|NO|
+bills|dueDate|date|YES|
+bills|status|USER-DEFINED|NO|'DRAFT'::bill_status_enum
+bills|notes|character varying|YES|
+bills|totalAmount|numeric|NO|0
+bills|journalEntryId|uuid|YES|
+bills|createdAt|timestamp without time zone|NO|now()
+bills|updatedAt|timestamp without time zone|NO|now()
+counters|key|character varying|NO|
+counters|value|integer|NO|0
+customers|id|uuid|NO|uuid_generate_v4()
+customers|name|character varying|NO|
+customers|email|character varying|YES|
+customers|phone|character varying|YES|
+customers|address|character varying|YES|
+customers|taxId|character varying|YES|
+customers|isActive|boolean|NO|true
+customers|createdAt|timestamp without time zone|NO|now()
+customers|updatedAt|timestamp without time zone|NO|now()
+employee_documents|id|uuid|NO|uuid_generate_v4()
+employee_documents|employeeId|uuid|NO|
+employee_documents|category|USER-DEFINED|NO|'OTHER'::employee_documents_category_enum
+employee_documents|title|character varying|NO|
+employee_documents|fileKey|character varying|NO|
+employee_documents|originalName|character varying|NO|
+employee_documents|mimeType|character varying|NO|
+employee_documents|size|bigint|NO|
+employee_documents|expiryDate|date|YES|
+employee_documents|notes|text|YES|
+employee_documents|isCurrent|boolean|NO|true
+employee_documents|replacesId|uuid|YES|
+employee_documents|uploadedById|uuid|YES|
+employee_documents|uploadedByName|character varying|YES|
+employee_documents|createdAt|timestamp without time zone|NO|now()
+employee_salaries|id|uuid|NO|uuid_generate_v4()
+employee_salaries|employeeId|uuid|NO|
+employee_salaries|effectiveFrom|date|NO|
+employee_salaries|basic|numeric|NO|0
+employee_salaries|bra2005|numeric|NO|0
+employee_salaries|bra2016|numeric|NO|0
+employee_salaries|vehicleAllowance|numeric|NO|0
+employee_salaries|otherAllowance|numeric|NO|0
+employee_salaries|epfApplicable|boolean|NO|true
+employee_salaries|welfareDeduction|numeric|NO|300
+employee_salaries|loanInstallment|numeric|NO|0
+employee_salaries|reason|character varying|YES|
+employee_salaries|notes|text|YES|
+employee_salaries|createdById|uuid|YES|
+employee_salaries|createdByName|character varying|YES|
+employee_salaries|createdAt|timestamp without time zone|NO|now()
+employee_salaries|updatedAt|timestamp without time zone|NO|now()
+employees|id|uuid|NO|uuid_generate_v4()
+employees|employeeId|character varying|NO|
+employees|name|character varying|NO|
+employees|jobTitle|character varying|YES|
+employees|department|character varying|YES|
+employees|email|character varying|YES|
+employees|phone|character varying|YES|
+employees|joinDate|date|YES|
+employees|status|USER-DEFINED|NO|'ACTIVE'::employees_status_enum
+employees|notes|text|YES|
+employees|photoKey|character varying|YES|
+employees|photoMime|character varying|YES|
+employees|userId|uuid|YES|
+employees|createdAt|timestamp without time zone|NO|now()
+employees|updatedAt|timestamp without time zone|NO|now()
+employees|employmentType|USER-DEFINED|NO|'PERMANENT'::employees_employmenttype_enum
+employees|epfNumber|character varying|YES|
+employees|nationalId|character varying|YES|
+employees|resignedDate|date|YES|
+employees|bankName|character varying|YES|
+employees|bankBranch|character varying|YES|
+employees|bankAccountNo|character varying|YES|
+employees|staffLoanBalance|numeric|NO|0
+expenses|id|uuid|NO|uuid_generate_v4()
+expenses|expenseNumber|character varying|NO|
+expenses|date|date|NO|
+expenses|description|character varying|NO|
+expenses|amount|numeric|NO|
+expenses|expenseAccountId|uuid|NO|
+expenses|paymentAccountId|uuid|NO|
+expenses|receiptUrl|character varying|YES|
+expenses|status|USER-DEFINED|NO|'DRAFT'::expense_status_enum
+expenses|journalEntryId|uuid|YES|
+expenses|createdAt|timestamp without time zone|NO|now()
+expenses|updatedAt|timestamp without time zone|NO|now()
+invoice_lines|id|uuid|NO|uuid_generate_v4()
+invoice_lines|invoiceId|uuid|NO|
+invoice_lines|description|character varying|NO|
+invoice_lines|quantity|numeric|NO|1
+invoice_lines|unitPrice|numeric|NO|
+invoice_lines|amount|numeric|NO|
+invoice_lines|accountId|uuid|YES|
+invoices|id|uuid|NO|uuid_generate_v4()
+invoices|invoiceNumber|character varying|NO|
+invoices|customerId|uuid|YES|
+invoices|date|date|NO|
+invoices|dueDate|date|YES|
+invoices|status|USER-DEFINED|NO|'DRAFT'::invoice_status_enum
+invoices|notes|character varying|YES|
+invoices|totalAmount|numeric|NO|0
+invoices|journalEntryId|uuid|YES|
+invoices|createdAt|timestamp without time zone|NO|now()
+invoices|updatedAt|timestamp without time zone|NO|now()
+invoices|poNumber|character varying|YES|
+invoices|billToName|character varying|YES|
+invoices|billToAddress|text|YES|
+invoices|paymentOptions|text|YES|
+invoices|signatoryName|character varying|YES|
+invoices|signatoryTitle|character varying|YES|
+invoices|paymentTerms|character varying|YES|
+invoices|amountPaid|numeric|NO|0
+invoices|createdById|uuid|YES|
+journal_entries|id|uuid|NO|uuid_generate_v4()
+journal_entries|entryNumber|character varying|NO|
+journal_entries|date|date|NO|
+journal_entries|description|character varying|NO|
+journal_entries|reference|character varying|YES|
+journal_entries|sourceType|character varying|YES|
+journal_entries|sourceId|character varying|YES|
+journal_entries|status|USER-DEFINED|NO|'POSTED'::journal_entry_status_enum
+journal_entries|reversalOfId|uuid|YES|
+journal_entries|createdAt|timestamp without time zone|NO|now()
+journal_entries|updatedAt|timestamp without time zone|NO|now()
+journal_lines|id|uuid|NO|uuid_generate_v4()
+journal_lines|journalEntryId|uuid|NO|
+journal_lines|accountId|uuid|NO|
+journal_lines|description|character varying|YES|
+journal_lines|debit|numeric|NO|0
+journal_lines|credit|numeric|NO|0
+payments|id|uuid|NO|uuid_generate_v4()
+payments|paymentNumber|character varying|NO|
+payments|type|USER-DEFINED|NO|
+payments|invoiceId|uuid|YES|
+payments|billId|uuid|YES|
+payments|customerId|uuid|YES|
+payments|vendorId|uuid|YES|
+payments|date|date|NO|
+payments|amount|numeric|NO|
+payments|paymentMethod|USER-DEFINED|NO|'BANK_TRANSFER'::payment_method_enum
+payments|paymentAccountId|uuid|NO|
+payments|notes|character varying|YES|
+payments|journalEntryId|uuid|YES|
+payments|createdAt|timestamp without time zone|NO|now()
+payments|updatedAt|timestamp without time zone|NO|now()
+payroll_lines|id|uuid|NO|uuid_generate_v4()
+payroll_lines|runId|uuid|NO|
+payroll_lines|employeeId|uuid|YES|
+payroll_lines|salaryId|uuid|YES|
+payroll_lines|slipNumber|character varying|NO|
+payroll_lines|employeeCode|character varying|NO|
+payroll_lines|employeeName|character varying|NO|
+payroll_lines|jobTitle|character varying|YES|
+payroll_lines|department|character varying|YES|
+payroll_lines|employmentType|character varying|NO|'PERMANENT'::character varying
+payroll_lines|epfNumber|character varying|YES|
+payroll_lines|nationalId|character varying|YES|
+payroll_lines|bankName|character varying|YES|
+payroll_lines|bankBranch|character varying|YES|
+payroll_lines|bankAccountNo|character varying|YES|
+payroll_lines|epfApplicable|boolean|NO|true
+payroll_lines|daysInMonth|integer|NO|30
+payroll_lines|daysWorked|numeric|NO|30
+payroll_lines|basic|numeric|NO|0
+payroll_lines|basicForMonth|numeric|NO|0
+payroll_lines|bra2005|numeric|NO|0
+payroll_lines|bra2016|numeric|NO|0
+payroll_lines|vehicleAllowance|numeric|NO|0
+payroll_lines|otherAllowance|numeric|NO|0
+payroll_lines|projectBonus|numeric|NO|0
+payroll_lines|arrears|numeric|NO|0
+payroll_lines|medical|numeric|NO|0
+payroll_lines|otherEarnings|numeric|NO|0
+payroll_lines|earningsTotal|numeric|NO|0
+payroll_lines|noPayAmount|numeric|NO|0
+payroll_lines|grossSalary|numeric|NO|0
+payroll_lines|epfBase|numeric|NO|0
+payroll_lines|epfEmployee|numeric|NO|0
+payroll_lines|payeOverride|numeric|YES|
+payroll_lines|paye|numeric|NO|0
+payroll_lines|stampDuty|numeric|NO|0
+payroll_lines|welfare|numeric|NO|0
+payroll_lines|loanRecovery|numeric|NO|0
+payroll_lines|salaryAdvance|numeric|NO|0
+payroll_lines|phoneBill|numeric|NO|0
+payroll_lines|otherDeductions|numeric|NO|0
+payroll_lines|deductionsTotal|numeric|NO|0
+payroll_lines|netSalary|numeric|NO|0
+payroll_lines|epfEmployer|numeric|NO|0
+payroll_lines|etf|numeric|NO|0
+payroll_lines|employerWelfare|numeric|NO|0
+payroll_lines|costToCompany|numeric|NO|0
+payroll_lines|notes|text|YES|
+payroll_lines|createdAt|timestamp without time zone|NO|now()
+payroll_lines|updatedAt|timestamp without time zone|NO|now()
+payroll_remittances|id|uuid|NO|uuid_generate_v4()
+payroll_remittances|runId|uuid|NO|
+payroll_remittances|type|USER-DEFINED|NO|
+payroll_remittances|amount|numeric|NO|
+payroll_remittances|date|date|NO|
+payroll_remittances|paymentAccountId|uuid|NO|
+payroll_remittances|reference|character varying|YES|
+payroll_remittances|journalEntryId|uuid|YES|
+payroll_remittances|createdByName|character varying|YES|
+payroll_remittances|createdAt|timestamp without time zone|NO|now()
+payroll_runs|id|uuid|NO|uuid_generate_v4()
+payroll_runs|runNumber|character varying|NO|
+payroll_runs|period|character varying|NO|
+payroll_runs|periodStart|date|NO|
+payroll_runs|periodEnd|date|NO|
+payroll_runs|status|USER-DEFINED|NO|'DRAFT'::payroll_runs_status_enum
+payroll_runs|notes|text|YES|
+payroll_runs|ratesSnapshot|jsonb|NO|'{}'::jsonb
+payroll_runs|employeeCount|integer|NO|0
+payroll_runs|earningsTotal|numeric|NO|0
+payroll_runs|noPayTotal|numeric|NO|0
+payroll_runs|grossTotal|numeric|NO|0
+payroll_runs|epfEmployeeTotal|numeric|NO|0
+payroll_runs|payeTotal|numeric|NO|0
+payroll_runs|stampDutyTotal|numeric|NO|0
+payroll_runs|welfareTotal|numeric|NO|0
+payroll_runs|loanRecoveryTotal|numeric|NO|0
+payroll_runs|salaryAdvanceTotal|numeric|NO|0
+payroll_runs|otherDeductionsTotal|numeric|NO|0
+payroll_runs|deductionsTotal|numeric|NO|0
+payroll_runs|netTotal|numeric|NO|0
+payroll_runs|epfEmployerTotal|numeric|NO|0
+payroll_runs|etfTotal|numeric|NO|0
+payroll_runs|employerWelfareTotal|numeric|NO|0
+payroll_runs|costToCompanyTotal|numeric|NO|0
+payroll_runs|journalEntryId|uuid|YES|
+payroll_runs|paymentJournalEntryId|uuid|YES|
+payroll_runs|paymentAccountId|uuid|YES|
+payroll_runs|payDate|date|YES|
+payroll_runs|postedAt|timestamp without time zone|YES|
+payroll_runs|paidAt|timestamp without time zone|YES|
+payroll_runs|createdById|uuid|YES|
+payroll_runs|createdByName|character varying|YES|
+payroll_runs|createdAt|timestamp without time zone|NO|now()
+payroll_runs|updatedAt|timestamp without time zone|NO|now()
+payroll_runs|slipsFiledAt|timestamp without time zone|YES|
+roles|id|uuid|NO|uuid_generate_v4()
+roles|name|character varying|NO|
+roles|permissions|jsonb|NO|'[]'::jsonb
+roles|isSystem|boolean|NO|false
+roles|createdAt|timestamp without time zone|NO|now()
+roles|updatedAt|timestamp without time zone|NO|now()
+settings|key|character varying|NO|
+settings|value|character varying|NO|''::character varying
+settings|updatedAt|timestamp without time zone|NO|now()
+users|id|uuid|NO|uuid_generate_v4()
+users|username|character varying|NO|
+users|passwordHash|character varying|NO|
+users|twoFactorSecret|character varying|YES|
+users|isTwoFactorEnabled|boolean|NO|false
+users|createdAt|timestamp without time zone|NO|now()
+users|updatedAt|timestamp without time zone|NO|now()
+users|roleId|uuid|YES|
+users|isActive|boolean|NO|true
+vendors|id|uuid|NO|uuid_generate_v4()
+vendors|name|character varying|NO|
+vendors|email|character varying|YES|
+vendors|phone|character varying|YES|
+vendors|address|character varying|YES|
+vendors|taxId|character varying|YES|
+vendors|isActive|boolean|NO|true
+vendors|createdAt|timestamp without time zone|NO|now()
+vendors|updatedAt|timestamp without time zone|NO|now()
