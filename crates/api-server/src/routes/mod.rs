@@ -10,6 +10,7 @@ pub mod payroll;
 pub mod reports;
 pub mod roles;
 pub mod settings;
+pub mod system;
 pub mod users;
 
 use self::employees as hr;
@@ -108,5 +109,11 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/runs/{id}/remit", post(pr::remit))
         .route("/payroll/runs/{id}/slips-filed", post(pr::slips_filed))
         .route("/payroll/runs/{id}/void", post(pr::void))
+        .route("/system/backup", get(system::status))
+        .route("/system/backup/password", post(system::set_password))
+        .route("/system/backup/settings", axum::routing::put(system::update_settings))
+        .route("/system/backup/run", post(system::run))
+        .route("/system/restore/verify", post(system::verify))
+        .route("/system/restore/stage", post(system::stage).delete(system::cancel))
         .fallback(unknown_route)
 }

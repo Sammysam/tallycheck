@@ -188,6 +188,17 @@ pub fn summarize(method: &str, path: &str) -> String {
     let at = |i: usize| seg.get(i).copied();
     let noun = singular(resource);
 
+    if resource == "system" {
+        return match (at(1), last) {
+            (Some("backup"), "run") => "Made a backup".into(),
+            (Some("backup"), "password") => "Changed the backup password".into(),
+            (Some("backup"), "settings") => "Changed the daily backup settings".into(),
+            (Some("restore"), "verify") => "Checked a backup file".into(),
+            (Some("restore"), _) if method == "DELETE" => "Cancelled a staged restore".into(),
+            (Some("restore"), _) => "Staged a restore from a backup".into(),
+            _ => "Changed system settings".into(),
+        };
+    }
     match last {
         "post" => return format!("Posted {} {noun}", article(noun)),
         "void" => return format!("Voided {} {noun}", article(noun)),

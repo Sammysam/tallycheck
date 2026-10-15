@@ -1,0 +1,11 @@
+{
+  "name": "accounting-desktop-tooling",
+  "private": true,
+  "description": "Build tooling only (Tauri CLI for the Windows installer). The app's frontend lives in frontend/.",
+  "scripts": {
+    "installer": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.3"
+  }
+}

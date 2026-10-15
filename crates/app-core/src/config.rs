@@ -31,6 +31,10 @@ pub enum ConfigError {
     InvalidValue { name: &'static str, value: String },
     #[error("bind address {0} is not loopback; set lan_enabled = true in config.toml to allow LAN access")]
     LanDisabled(IpAddr),
+    #[error(
+        "the data folder {0} is on a network drive; keep it on this PC's own disk (other PCs connect through LAN mode)"
+    )]
+    NetworkDataDir(PathBuf),
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -40,7 +44,50 @@ struct FileConfig {
     port: Option<u16>,
     lan_enabled: Option<bool>,
     frontend_dir: Option<PathBuf>,
+    /// LAN clients must come from one of these networks (CIDR). Default: private ranges.
+    lan_allowed_networks: Option<Vec<String>>,
+    /// Extra names LAN clients may use in the address bar (besides IPs and this PC's name).
+    lan_host_names: Option<Vec<String>>,
 }
+
+/// An IP network in CIDR form, e.g. `192.168.1.0/24`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Network {
+    addr: IpAddr,
+    prefix: u8,
+}
+
+impl Network {
+    pub fn parse(text: &str) -> Option<Network> {
+        let (a, p) = text.trim().split_once('/').unwrap_or((text.trim(), ""));
+        let addr: IpAddr = a.parse().ok()?;
+        let max = if addr.is_ipv4() { 32 } else { 128 };
+        let prefix = if p.is_empty() { max } else { p.parse().ok().filter(|n| *n <= max)? };
+        Some(Network { addr, prefix })
+    }
+
+    pub fn contains(&self, ip: IpAddr) -> bool {
+        let ip = match ip {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(ip),
+            v4 => v4,
+        };
+        match (self.addr, ip) {
+            (IpAddr::V4(n), IpAddr::V4(a)) => {
+                let mask = if self.prefix == 0 { 0 } else { u32::MAX << (32 - u32::from(self.prefix)) };
+                u32::from(n) & mask == u32::from(a) & mask
+            }
+            (IpAddr::V6(n), IpAddr::V6(a)) => {
+                let mask = if self.prefix == 0 { 0 } else { u128::MAX << (128 - u32::from(self.prefix)) };
+                u128::from(n) & mask == u128::from(a) & mask
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Private and link-local ranges: the office network, never the internet.
+pub const DEFAULT_LAN_NETWORKS: &[&str] =
+    &["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "fc00::/7", "fe80::/10"];
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -48,6 +95,8 @@ pub struct AppConfig {
     pub bind: SocketAddr,
     pub lan_enabled: bool,
     pub frontend_dir: Option<PathBuf>,
+    pub lan_allowed: Vec<Network>,
+    pub lan_host_names: Vec<String>,
 }
 
 impl AppConfig {
@@ -57,6 +106,15 @@ impl AppConfig {
 
     pub fn secrets_dir(&self) -> PathBuf {
         self.data_dir.join("secrets")
+    }
+
+    /// Refuses a data folder on a network drive or share: SQLite must never be opened by
+    /// several PCs over the network (LAN clients use the main PC's API instead).
+    pub fn check_local_data_dir(&self) -> Result<(), ConfigError> {
+        if is_network_path(&self.data_dir) {
+            return Err(ConfigError::NetworkDataDir(self.data_dir.clone()));
+        }
+        Ok(())
     }
 
     pub fn log_dir(&self) -> PathBuf {
@@ -108,8 +166,22 @@ impl AppConfig {
             return Err(ConfigError::LanDisabled(ip));
         }
         let frontend_dir = frontend_env.map(PathBuf::from).or(file.frontend_dir);
+        let networks =
+            file.lan_allowed_networks.unwrap_or_else(|| DEFAULT_LAN_NETWORKS.iter().map(|s| s.to_string()).collect());
+        let lan_allowed = networks
+            .into_iter()
+            .map(|n| Network::parse(&n).ok_or(ConfigError::InvalidValue { name: "lan_allowed_networks", value: n }))
+            .collect::<Result<Vec<_>, _>>()?;
+        let lan_host_names = file.lan_host_names.unwrap_or_default();
 
-        Ok(AppConfig { data_dir, bind: SocketAddr::new(ip, port), lan_enabled, frontend_dir })
+        Ok(AppConfig {
+            data_dir,
+            bind: SocketAddr::new(ip, port),
+            lan_enabled,
+            frontend_dir,
+            lan_allowed,
+            lan_host_names,
+        })
     }
 }
 
@@ -135,9 +207,66 @@ fn default_data_dir() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()).map(|base| PathBuf::from(base).join(APP_DIR_NAME))
 }
 
+/// UNC shares (`\\server\share`) and mapped network drives.
+pub fn is_network_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    let verbatim_local = text.starts_with("\\\\?\\") && text.chars().nth(4).is_some_and(|c| c.is_ascii_alphabetic());
+    if text.starts_with("\\\\") && !verbatim_local {
+        return true;
+    }
+    drive::is_remote(path)
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod drive {
+    use std::path::{Component, Path, Prefix};
+    use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
+
+    const DRIVE_REMOTE: u32 = 4;
+
+    pub fn is_remote(path: &Path) -> bool {
+        let letter = match path.components().next() {
+            Some(Component::Prefix(p)) => match p.kind() {
+                Prefix::Disk(l) | Prefix::VerbatimDisk(l) => l,
+                Prefix::UNC(..) | Prefix::VerbatimUNC(..) => return true,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        let root: Vec<u16> = format!("{}:\\", char::from(letter)).encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `root` is a NUL-terminated UTF-16 string that outlives the call.
+        unsafe { GetDriveTypeW(root.as_ptr()) == DRIVE_REMOTE }
+    }
+}
+
+#[cfg(not(windows))]
+mod drive {
+    pub fn is_remote(_: &std::path::Path) -> bool {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lan_networks_parse_and_match() -> Result<(), ConfigError> {
+        let net = Network::parse("192.168.1.0/24").ok_or(ConfigError::NoDataDir)?;
+        assert!(net.contains("192.168.1.77".parse().map_err(|_| ConfigError::NoDataDir)?));
+        assert!(!net.contains("192.168.2.1".parse().map_err(|_| ConfigError::NoDataDir)?));
+        assert!(net.contains("::ffff:192.168.1.5".parse().map_err(|_| ConfigError::NoDataDir)?), "IPv4-mapped");
+        assert!(Network::parse("10.0.0.0/33").is_none());
+        assert!(Network::parse("nonsense").is_none());
+        let dir = tempfile::tempdir().map_err(|_| ConfigError::NoDataDir)?;
+        let c = AppConfig::resolve(dir.path().into(), None, None, None, None)?;
+        let public: IpAddr = "8.8.8.8".parse().map_err(|_| ConfigError::NoDataDir)?;
+        assert!(!c.lan_allowed.iter().any(|n| n.contains(public)), "the internet is never a LAN client");
+        assert!(super::is_network_path(Path::new(r"\\server\share\data")));
+        assert!(!super::is_network_path(Path::new(r"\\?\C:\data")));
+        Ok(())
+    }
 
     #[test]
     fn defaults_to_loopback() -> Result<(), ConfigError> {

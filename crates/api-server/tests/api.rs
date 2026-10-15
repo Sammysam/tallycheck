@@ -40,7 +40,7 @@ impl App {
         );
         let state =
             AppState::new(db.clone(), JwtKeys::new(b"test-secret-test-secret-test-secret!"), files, false, 47800);
-        let router = build_router(state, frontend);
+        let router = build_router(state.with_data_dir(dir.path().to_path_buf()), frontend);
         Ok(App { _dir: dir, db, router })
     }
 
@@ -1149,5 +1149,176 @@ async fn payroll_runs_need_the_payroll_permission_and_answer_201() -> TestResult
     assert!(actions.contains(&"Created a payroll run"), "{actions:?}");
     // Reference quirk reproduced on purpose: its payroll-specific wording is unreachable.
     assert!(actions.contains(&"Posted a payroll"), "{actions:?}");
+    Ok(())
+}
+
+// ── W6: backup, restore and LAN access ──────────────────────────────────────
+
+impl App {
+    /// A request arriving from `peer` (what `into_make_service_with_connect_info` records).
+    async fn call_from(
+        &self,
+        peer: &str,
+        host: &str,
+        method: Method,
+        uri: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+    ) -> Result<Resp, Box<dyn std::error::Error>> {
+        let addr: std::net::SocketAddr = peer.parse()?;
+        let mut req = Request::builder().method(method).uri(uri).header("host", host);
+        if let Some(t) = token {
+            req = req.header("authorization", format!("Bearer {t}"));
+        }
+        let mut req = match body {
+            Some(b) => req.header("content-type", "application/json").body(Body::from(b.to_string()))?,
+            None => req.body(Body::empty())?,
+        };
+        req.extensions_mut().insert(axum::extract::ConnectInfo(addr));
+        let res = self.router.clone().oneshot(req).await?;
+        let status = res.status();
+        let headers = res.headers().clone();
+        let bytes = res.into_body().collect().await?.to_bytes();
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        Ok(Resp { status, headers, body })
+    }
+
+    async fn local(
+        &self,
+        method: Method,
+        uri: &str,
+        token: &str,
+        body: Option<Value>,
+    ) -> Result<Resp, Box<dyn std::error::Error>> {
+        self.call_from("127.0.0.1:50000", HOST, method, uri, Some(token), body).await
+    }
+}
+
+#[tokio::test]
+async fn backup_and_restore_are_for_a_local_administrator_only() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let accountant = app.signed_in("acc1", "Accountant").await?;
+    let r = app.local(Method::GET, "/api/system/backup", &accountant, None).await?;
+    assert_nest_error(
+        &r,
+        403,
+        json!("Backup and restore are only available to an Administrator on the main PC"),
+        "/api/system/backup",
+    );
+    // An administrator, but over the network: refused.
+    let remote =
+        app.call_from("192.168.1.50:50000", HOST, Method::GET, "/api/system/backup", Some(&admin), None).await?;
+    assert_eq!(remote.status, StatusCode::FORBIDDEN);
+    let no_peer = app.call(Method::GET, "/api/system/backup", Some(&admin), None).await?;
+    assert_eq!(no_peer.status, StatusCode::FORBIDDEN, "unknown origin counts as remote");
+    let ok = app.local(Method::GET, "/api/system/backup", &admin, None).await?;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
+    assert_eq!(ok.body["passwordSet"], json!(false));
+    Ok(())
+}
+
+#[tokio::test]
+async fn backup_verify_stage_and_cancel_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let dest = tempfile::tempdir()?;
+    let folder = dest.path().to_string_lossy().to_string();
+
+    let no_password =
+        app.local(Method::POST, "/api/system/backup/run", &admin, Some(json!({"folder": folder}))).await?;
+    assert_nest_error(&no_password, 400, json!("Set a backup password first"), "/api/system/backup/run");
+    let short =
+        app.local(Method::POST, "/api/system/backup/password", &admin, Some(json!({"password": "short"}))).await?;
+    assert_eq!(short.status, StatusCode::BAD_REQUEST);
+    let set = app
+        .local(Method::POST, "/api/system/backup/password", &admin, Some(json!({"password": "office backup 2026"})))
+        .await?;
+    assert_eq!(set.status, StatusCode::NO_CONTENT);
+    let change = app
+        .local(
+            Method::POST,
+            "/api/system/backup/password",
+            &admin,
+            Some(json!({"password": "another long one", "currentPassword": "wrong"})),
+        )
+        .await?;
+    assert_nest_error(&change, 400, json!("The current backup password is not correct"), "/api/system/backup/password");
+
+    let made = app.local(Method::POST, "/api/system/backup/run", &admin, Some(json!({"folder": folder}))).await?;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    let file = made.body["file"].as_str().ok_or("file")?.to_string();
+    assert!(std::path::Path::new(&file).exists());
+    assert_eq!(made.body["counts"]["users"], json!(1));
+
+    let checked = app.local(Method::POST, "/api/system/restore/verify", &admin, Some(json!({"file": file}))).await?;
+    assert_eq!(checked.status, StatusCode::OK, "{}", checked.body);
+    let wrong = app
+        .local(
+            Method::POST,
+            "/api/system/restore/verify",
+            &admin,
+            Some(json!({"file": file, "password": "not it at all"})),
+        )
+        .await?;
+    assert_nest_error(
+        &wrong,
+        400,
+        json!("Wrong backup password, or the backup file is damaged"),
+        "/api/system/restore/verify",
+    );
+
+    let unconfirmed = app.local(Method::POST, "/api/system/restore/stage", &admin, Some(json!({"file": file}))).await?;
+    assert_eq!(unconfirmed.status, StatusCode::BAD_REQUEST);
+    let staged = app
+        .local(Method::POST, "/api/system/restore/stage", &admin, Some(json!({"file": file, "confirm": "RESTORE"})))
+        .await?;
+    assert_eq!(staged.status, StatusCode::CREATED, "{}", staged.body);
+    let status = app.local(Method::GET, "/api/system/backup", &admin, None).await?;
+    assert!(status.body["stagedRestore"].is_object());
+    assert!(status.body["status"]["lastSuccessAt"].is_string());
+    let cancel = app.local(Method::DELETE, "/api/system/restore/stage", &admin, None).await?;
+    assert_eq!(cancel.status, StatusCode::NO_CONTENT);
+    let status = app.local(Method::GET, "/api/system/backup", &admin, None).await?;
+    assert!(status.body["stagedRestore"].is_null());
+
+    let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
+    let actions: Vec<&str> =
+        log.body["data"].as_array().ok_or("data")?.iter().filter_map(|x| x["action"].as_str()).collect();
+    for a in
+        ["Made a backup", "Changed the backup password", "Staged a restore from a backup", "Cancelled a staged restore"]
+    {
+        assert!(actions.contains(&a), "{a} missing from {actions:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn lan_mode_accepts_office_clients_and_refuses_the_rest() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let db = Db::open(&dir.path().join("t.db")).await?;
+    let files = documents::FileStore::new(
+        dir.path().join("files"),
+        documents::StorageKey::from_bytes(&[5u8; 32]).map_err(AppError::internal)?,
+    );
+    let state = AppState::new(db.clone(), JwtKeys::new(b"test-secret-test-secret-test-secret!"), files, true, 47800)
+        .with_lan_policy(
+            vec![app_core::config::Network::parse("192.168.1.0/24").ok_or("net")?],
+            vec!["accounts-pc".into()],
+        );
+    let app = App { _dir: dir, db, router: build_router(state, None) };
+    let me = "/api/auth/me";
+    let office = app.call_from("192.168.1.20:50000", "192.168.1.10:47800", Method::GET, me, None, None).await?;
+    assert_eq!(office.status, StatusCode::UNAUTHORIZED, "reaches the API (then needs a login)");
+    let named = app.call_from("192.168.1.20:50000", "ACCOUNTS-PC:47800", Method::GET, me, None, None).await?;
+    assert_eq!(named.status, StatusCode::UNAUTHORIZED);
+    let outside = app.call_from("8.8.8.8:50000", "192.168.1.10:47800", Method::GET, me, None, None).await?;
+    assert_eq!(outside.status, StatusCode::FORBIDDEN, "not an office address");
+    let other_subnet = app.call_from("192.168.2.20:50000", "192.168.1.10:47800", Method::GET, me, None, None).await?;
+    assert_eq!(other_subnet.status, StatusCode::FORBIDDEN);
+    let rebinding = app.call_from("127.0.0.1:50000", "evil.example:47800", Method::GET, me, None, None).await?;
+    assert_eq!(rebinding.status, StatusCode::FORBIDDEN, "DNS rebinding through a foreign name");
+    let local = app.call_from("127.0.0.1:50000", "localhost:47800", Method::GET, me, None, None).await?;
+    assert_eq!(local.status, StatusCode::UNAUTHORIZED);
     Ok(())
 }

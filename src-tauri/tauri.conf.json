@@ -13,7 +13,31 @@
     }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.ico"]
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "publisher": "Cenango (Pvt) Ltd",
+    "shortDescription": "Cenango Accounting",
+    "longDescription": "Offline accounting, employees and payroll for Cenango.",
+    "copyright": "Cenango (Pvt) Ltd",
+    "resources": {
+      "../frontend/dist/": "frontend/"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

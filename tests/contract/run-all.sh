@@ -22,6 +22,7 @@ stop_port() {
 cleanup() {
   stop_port 3900
   stop_port 3901
+  stop_port 3902
 }
 trap cleanup EXIT
 
@@ -56,4 +57,30 @@ for port in 3900 3901; do
   done
 done
 
+set +e
 node "$ROOT/tests/contract/run.mjs" http://127.0.0.1:3900 http://127.0.0.1:3901
+contract=$?
+set -e
+
+# ── Importer: the reference database after the scenario, imported into a fresh data folder,
+#    must read back identically through this app (side by side with the reference). ──────────
+IMP="$SCRATCH/imported"
+mkdir -p "$IMP"
+(cd "$ROOT" && cargo build -q -p importer --bin accounting-import)
+echo 0000000000000000000000000000000000000000000000000000000000000001 |   ACCOUNTING_DATA_DIR="$(cygpath -w "$IMP")" "$ROOT/target/debug/accounting-server.exe" import-storage-key 2>/dev/null
+set +e
+"$ROOT/target/debug/accounting-import.exe" --source postgres://postgres:contract@127.0.0.1:55432/accounting_db   --source-tz +00:00 --target "$(cygpath -w "$IMP")" --files "$(cygpath -w "$SCRATCH/ref-uploads")" >"$SCRATCH/import.log" 2>&1
+imported=$?
+set -e
+echo "importer exit code: $imported (report: $IMP/import-report.md)"
+(cd "$ROOT" && ACCOUNTING_DATA_DIR="$(cygpath -w "$IMP")" ACCOUNTING_PORT=3902   ./target/debug/accounting-server.exe serve >"$SCRATCH/imported-server.log" 2>&1 &)
+for _ in $(seq 1 60); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3902/api/auth/me" || true)
+  [ "$code" = "401" ] && break
+  sleep 1
+done
+set +e
+node "$ROOT/tests/contract/side_by_side.mjs" http://127.0.0.1:3900 http://127.0.0.1:3902 "$SCRATCH/contract-state.json"
+side=$?
+set -e
+[ "$contract" = 0 ] && [ "$imported" = 0 ] && [ "$side" = 0 ]

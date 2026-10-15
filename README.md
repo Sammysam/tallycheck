@@ -14,8 +14,8 @@ deviations from the reference app and the wave approval gates.
 | W2 | Customers, vendors, bank accounts, invoices, bills, expenses, payments | done (approved) |
 | W3 | Reports: profit & loss, balance sheet, AR/AP ageing, dashboard figures | done (approved) |
 | W4 | Employees: profiles, photos, encrypted documents, salaries, increments, bank details | done (approved) |
-| W5 | Payroll runs: salary sheet, posting, salary payment, EPF/ETF/PAYE remittances, void | done, awaiting approval |
-| W6 | Production readiness: data import, backups, installer | not started |
+| W5 | Payroll runs: salary sheet, posting, salary payment, EPF/ETF/PAYE remittances, void | done (approved) |
+| W6 | Backup/restore, LAN mode, importer with reconciliation, installer, update strategy | done, awaiting approval |
 
 Screens that depend on later waves (dashboard figures, invoices, payroll, …) load but show no
 data: their API routes answer 404 until their wave is implemented.
@@ -33,6 +33,9 @@ crates/reports      profit & loss, balance sheet, AR/AP ageing
 crates/documents    AES-256-GCM file encryption (reference format) and the local file store
 crates/employees    employees, photos, versioned documents, salaries, increments, bank details
 crates/payroll      payroll rates and line arithmetic (exact decimal), payroll runs and postings
+crates/backup       encrypted .qbak backups, verification, staged restore, daily schedule
+crates/importer     one-time PostgreSQL import with reconciliation report (accounting-import)
+scripts             lan-firewall.ps1 (office-subnet firewall rule for LAN mode)
 crates/api-server   Axum routes, validation, middleware, static frontend, accounting-server binary
 src-tauri           desktop shell (window on the embedded server)
 frontend            the reference React app, copied unchanged
@@ -83,12 +86,20 @@ The JWT signing key is created on first start and stored encrypted with Windows 
 current user; it never appears in plain text on disk. Logs record method, URL, status and
 latency only — never headers, bodies, passwords, hashes, tokens or secrets.
 
+## Operations
+
+* Backup, restore and key recovery: `docs/backup-and-recovery.md` (desktop menu *Tools → Backup and restore…*)
+* Office LAN mode: `docs/lan-mode.md`
+* Importing the old PostgreSQL data: `docs/importer.md`
+* Installer, signing and updates: `docs/installer-and-updates.md`
+
 ## Tests
 
 ```
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
-bash tests/contract/run-all.sh                       # needs Docker and the reference repo
+bash tests/contract/run-all.sh                       # needs Docker and the reference repo; also imports
+                                                     # the reference data and compares side by side
 node tests/ui/smoke.mjs http://127.0.0.1:47800       # needs a running server with a fresh DB
 ```

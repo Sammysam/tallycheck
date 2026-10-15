@@ -91,6 +91,38 @@ impl Db {
         Ok(())
     }
 
+    /// If `path` holds a database that this build's migrations would upgrade, copies it to
+    /// `dest_dir` first (a consistent `VACUUM INTO` snapshot) and returns the copy's path.
+    /// An installer update therefore never changes the only copy of the data.
+    pub async fn snapshot_before_upgrade(path: &Path, dest_dir: &Path) -> AppResult<Option<std::path::PathBuf>> {
+        use sqlx::{ConnectOptions, Connection};
+        if !path.exists() {
+            return Ok(None);
+        }
+        let mut conn = base_options(path).connect().await?;
+        let has_table: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'")
+                .fetch_one(&mut conn)
+                .await?;
+        if has_table == 0 {
+            conn.close().await?;
+            return Ok(None);
+        }
+        let applied: Vec<i64> = sqlx::query_scalar("SELECT version FROM _sqlx_migrations").fetch_all(&mut conn).await?;
+        let pending = MIGRATOR.iter().any(|m| !applied.contains(&m.version));
+        if applied.is_empty() || !pending {
+            conn.close().await?;
+            return Ok(None);
+        }
+        std::fs::create_dir_all(dest_dir).map_err(AppError::internal)?;
+        let from = applied.iter().max().copied().unwrap_or(0);
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let dest = dest_dir.join(format!("accounting-v{from}-{stamp}.db"));
+        sqlx::query("VACUUM INTO ?1").bind(dest.to_string_lossy().to_string()).execute(&mut conn).await?;
+        conn.close().await?;
+        Ok(Some(dest))
+    }
+
     pub async fn close(&self) {
         self.reader.close().await;
         self.writer.close().await;

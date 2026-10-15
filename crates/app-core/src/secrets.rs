@@ -27,6 +27,10 @@ pub enum SecretError {
 /// cannot decrypt the blob by accident.
 const ENTROPY: &[u8] = b"accounting-desktop/secret/v1";
 
+/// File names of the installation secrets inside `<data_dir>/secrets`.
+pub const JWT_SECRET_FILE: &str = "jwt-secret.dpapi";
+pub const STORAGE_KEY_FILE: &str = "storage-key.dpapi";
+
 pub fn random_bytes(len: usize) -> Result<Vec<u8>, SecretError> {
     let mut buf = vec![0u8; len];
     getrandom::getrandom(&mut buf).map_err(|e| SecretError::Random(e.to_string()))?;

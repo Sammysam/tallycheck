@@ -11,6 +11,8 @@ members = [
     "crates/documents",
     "crates/employees",
     "crates/payroll",
+    "crates/backup",
+    "crates/importer",
     "crates/api-server",
     "src-tauri",
 ]
@@ -33,8 +35,10 @@ reports = { path = "crates/reports" }
 documents = { path = "crates/documents" }
 employees = { path = "crates/employees" }
 payroll = { path = "crates/payroll" }
+backup = { path = "crates/backup" }
 api-server = { path = "crates/api-server" }
 
+aes-gcm = "0.10"
 anyhow = "1"
 argon2 = "0.5"
 axum = { version = "0.8", features = ["multipart"] }
@@ -48,6 +52,7 @@ jsonwebtoken = "9"
 qrcode = { version = "0.14", default-features = false, features = ["image"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tempfile = "3"
 thiserror = "2"
@@ -60,7 +65,7 @@ tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
