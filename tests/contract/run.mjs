@@ -690,6 +690,7 @@ function normaliser() {
 
 // Approved deviations (CLAUDE.md §9). A difference on these labels is reported, not failed.
 const EXPECTED = {
+  'login.ok': 'D16: two-factor sign-in is optional; a user without it is signed in by the password step (accessToken)',
   '2fa.setup.after-enabled': 'D2: 2FA cannot be re-enrolled with a password alone',
   'inactive.me': 'D2: inactive users are refused on every protected route',
   'inactive.login': 'D2: inactive users cannot log in',

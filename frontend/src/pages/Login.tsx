@@ -7,7 +7,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, completeAuth } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: FormEvent) => {
@@ -16,7 +16,11 @@ export default function Login() {
     setError('');
     try {
       const result = await login(username, password);
-      if (result.isNewUser) {
+      if (result.accessToken) {
+        // No two-factor sign-in for this user: signed in with the password.
+        completeAuth(result.accessToken);
+        navigate('/');
+      } else if (result.isNewUser) {
         navigate('/2fa/setup');
       } else if (result.requiresTwoFactor) {
         navigate('/2fa/verify');

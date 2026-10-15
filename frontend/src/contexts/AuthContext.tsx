@@ -7,6 +7,8 @@ interface AuthUser {
   username: string;
   role: string;
   permissions: string[];
+  /** Undefined until the profile has loaded. */
+  twoFactorEnabled?: boolean;
 }
 
 interface AuthContextType {
@@ -16,7 +18,7 @@ interface AuthContextType {
   isLoading: boolean;
   permissions: string[];
   hasPermission: (permission: string) => boolean;
-  login: (username: string, password: string) => Promise<{ tempToken: string; requiresTwoFactor: boolean; isNewUser: boolean }>;
+  login: (username: string, password: string) => Promise<{ tempToken: string; requiresTwoFactor: boolean; isNewUser: boolean; accessToken?: string }>;
   completeAuth: (accessToken: string) => void;
   setTempToken: (token: string) => void;
   logout: () => void;
@@ -36,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       username: data.username,
       role: data.role?.name ?? '',
       permissions: data.role?.permissions ?? [],
+      twoFactorEnabled: !!data.isTwoFactorEnabled,
     });
   };
 

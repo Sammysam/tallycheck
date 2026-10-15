@@ -136,10 +136,10 @@ export default function Users() {
   };
 
   const reset2FA = async (row: UserRow) => {
-    if (!window.confirm(`Reset 2FA for ${row.username}? They will set up 2FA again on their next login.`)) return;
+    if (!window.confirm(`Reset 2FA for ${row.username}? They will sign in with their password only until they turn 2FA on again.`)) return;
     try {
       await api.post(`/users/${row.id}/reset-2fa`, {});
-      alert(`2FA reset for ${row.username}. They will set it up on next login.`);
+      alert(`2FA reset for ${row.username}. They can turn it on again from the top bar.`);
       load();
     } catch (err: any) {
       alert(err?.response?.data?.message ?? 'Failed to reset 2FA');

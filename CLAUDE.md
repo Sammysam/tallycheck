@@ -107,7 +107,10 @@ still needed (§10). Never change a formula to make a test pass; report the disc
 - Passwords: Argon2id for new hashes; legacy bcrypt hashes verified then rehashed on login.
 - JWT HS256, claims `{sub, username, stage, iat, exp}`; access 8 h, pre-2FA 10 min.
   The JWT secret is random per installation, stored DPAPI-protected in the data directory.
-- TOTP (SHA-1, 6 digits, 30 s, ±1 step) is mandatory for every user, as in the reference.
+- TOTP (SHA-1, 6 digits, 30 s, ±1 step) is **optional per user** (D16, requested by the user
+  2026-10-15). Without it, login returns an `accessToken` straight away; a signed-in user can turn
+  it on from the top bar ("Turn on 2FA"); once on, every login needs the code. An administrator's
+  "Reset 2FA" turns it off for that user.
 - Exact permission keys from the reference `permissions.ts`; Admin role bypasses checks.
 - LAN mode (W6, `docs/lan-mode.md`): clients must come from `lan_allowed_networks` (private
   ranges by default) and use an IP, `localhost`, this PC's name or a configured name as host;
@@ -255,6 +258,14 @@ recommendations without answering each one individually; revisit any of them on 
 - W6 adds endpoints the reference does not have (`/api/system/backup*`, `/api/system/restore*`)
   and a plain page at `/system/backup`; nothing of the reference API changes. Design and
   recovery scenarios: `docs/backup-and-recovery.md`; importer: `docs/importer.md`.
+
+- **D16 Optional 2FA** (requested by the user 2026-10-15): the reference forced every user to
+  enrol TOTP at first login. Now `POST /auth/login` for a user without 2FA answers
+  `{tempToken, requiresTwoFactor:false, isNewUser:false, accessToken}`; users with 2FA are unchanged.
+  Frontend changes (minimal): Login accepts the direct token; Layout offers "Turn on 2FA";
+  TwoFactorSetup works with the signed-in token and has "Not now"; Users page reset texts.
+  Risk accepted: such accounts are protected by the password alone (throttling and failed-login
+  audit still apply) — matters most in LAN mode.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
