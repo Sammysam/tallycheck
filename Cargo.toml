@@ -10,6 +10,7 @@ members = [
     "crates/reports",
     "crates/documents",
     "crates/employees",
+    "crates/payroll",
     "crates/api-server",
     "src-tauri",
 ]
@@ -31,6 +32,7 @@ operations = { path = "crates/operations" }
 reports = { path = "crates/reports" }
 documents = { path = "crates/documents" }
 employees = { path = "crates/employees" }
+payroll = { path = "crates/payroll" }
 api-server = { path = "crates/api-server" }
 
 anyhow = "1"

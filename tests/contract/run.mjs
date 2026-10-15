@@ -516,6 +516,89 @@ async function scenario(base) {
   await step('employees.delete', 'DELETE', `/api/employees/${s.emp2}`, { token: s.admin });
   await step('employees.list.after-delete', 'GET', '/api/employees', { token: s.admin });
 
+  // ── W5: payroll runs ────────────────────────────────────────────────────────
+  {
+    const Q = (body) => ({ token: s.admin, body });
+    await step('payroll.rates.get', 'GET', '/api/payroll/rates', { token: s.admin });
+    await step('payroll.rates.invalid', 'PATCH', '/api/payroll/rates', Q({ epfEmployeeRate: 1.5, daysInMonth: 27 }));
+    await step('payroll.rates.bad-slabs', 'PATCH', '/api/payroll/rates', Q({ payeSlabs: [[100, 0.1], [50, 0.2]] }));
+    await step('payroll.rates.update', 'PATCH', '/api/payroll/rates', Q({ stampDuty: '25', daysInMonth: 30,
+      payeSlabs: [[250000, 0], [500000, 0.06], [750000, 0.12], [null, 0.18]] }));
+    await step('payroll.company.get', 'GET', '/api/payroll/company', { token: s.admin });
+    await step('payroll.company.update', 'PATCH', '/api/payroll/company', Q({ telephone: ' 011-2508805 ', careOf: '', junk: 1 }));
+    await step('payroll.runs.create.invalid', 'POST', '/api/payroll/runs', Q({ period: '2026-4' }));
+
+    // A mid-month joiner, a leaver, a contractor without salary and a future joiner.
+    const emp = async (body) => (await call(base, 'POST', '/api/employees', Q(body))).body?.id;
+    s.emp3 = await emp({ employeeId: 'CEN-003', name: 'Kamal Fernando', joinDate: '2026-04-16' });
+    await call(base, 'POST', `/api/payroll/employees/${s.emp3}/salaries`, Q({ effectiveFrom: '2026-04-01', basic: 30000, bra2005: 1000, otherAllowance: 500 }));
+    s.emp4 = await emp({ employeeId: 'CEN-004', name: 'Left Person', status: 'LEFT' });
+    s.emp5 = await emp({ employeeId: 'CEN-005', name: 'Contract No Salary', employmentType: 'CONTRACT' });
+    s.emp6 = await emp({ employeeId: 'CEN-006', name: 'Future Joiner', joinDate: '2026-05-10' });
+
+    r = await step('payroll.runs.create', 'POST', '/api/payroll/runs', Q({ period: '2026-04', notes: ' April ' }));
+    s.run = r.body?.id;
+    const lineOf = (body, empId) => (body?.lines ?? []).find((l) => l.employeeId === empId)?.id;
+    s.line1 = lineOf(r.body, s.emp1);
+    s.line3 = lineOf(r.body, s.emp3);
+    await step('payroll.runs.create.duplicate', 'POST', '/api/payroll/runs', Q({ period: '2026-04' }));
+    await step('payroll.runs.list', 'GET', '/api/payroll/runs', { token: s.admin });
+    await step('payroll.runs.get', 'GET', `/api/payroll/runs/${s.run}`, { token: s.admin });
+    await step('payroll.runs.get.unknown', 'GET', `/api/payroll/runs/${FIXED_UUID}`, { token: s.admin });
+    await step('payroll.runs.get.not-uuid', 'GET', '/api/payroll/runs/abc', { token: s.admin });
+
+    const L = (id) => `/api/payroll/runs/${s.run}/lines/${id}`;
+    await step('payroll.lines.update', 'PATCH', L(s.line1), Q({ daysWorked: '28', projectBonus: '5000', notes: ' late joiner ' }));
+    await step('payroll.lines.update.days', 'PATCH', L(s.line1), Q({ daysWorked: 31 }));
+    await step('payroll.lines.update.loan-too-big', 'PATCH', L(s.line1), Q({ loanRecovery: 30000 }));
+    await step('payroll.lines.update.loan', 'PATCH', L(s.line1), Q({ loanRecovery: 2500, salaryAdvance: 500, phoneBill: 1200.5 }));
+    await step('payroll.lines.update.invalid', 'PATCH', L(s.line1), Q({ medical: 1.234, payeOverride: -1 }));
+    await step('payroll.lines.update.unknown', 'PATCH', L(FIXED_UUID), Q({ arrears: 1 }));
+    await step('payroll.lines.remove', 'DELETE', L(s.line3), { token: s.admin });
+    await step('payroll.lines.add.invalid', 'POST', `/api/payroll/runs/${s.run}/lines`, Q({ employeeId: 'x' }));
+    await step('payroll.lines.add.duplicate', 'POST', `/api/payroll/runs/${s.run}/lines`, Q({ employeeId: s.emp1 }));
+    await step('payroll.lines.add.no-salary', 'POST', `/api/payroll/runs/${s.run}/lines`, Q({ employeeId: s.emp5 }));
+    await step('payroll.lines.add.unknown', 'POST', `/api/payroll/runs/${s.run}/lines`, Q({ employeeId: FIXED_UUID }));
+    r = await step('payroll.lines.add', 'POST', `/api/payroll/runs/${s.run}/lines`, Q({ employeeId: s.emp3 }));
+    s.line3 = lineOf(r.body, s.emp3);
+    await step('payroll.lines.update.paye-override', 'PATCH', L(s.line3), Q({ payeOverride: '1200', arrears: 750.25 }));
+
+    const R = (what) => `/api/payroll/runs/${s.run}/${what}`;
+    const cash = s.acct['1000'];
+    await step('payroll.runs.pay.draft', 'POST', R('pay'), Q({ paymentAccountId: cash, payDate: '2026-04-30' }));
+    await step('payroll.runs.remit.draft', 'POST', R('remit'), Q({ type: 'EPF', paymentAccountId: cash, date: '2026-05-15' }));
+    await step('payroll.runs.slips.draft', 'POST', R('slips-filed'), { token: s.admin });
+    await step('payroll.runs.void.draft', 'POST', R('void'), { token: s.admin });
+    await step('payroll.runs.post', 'POST', R('post'), { token: s.admin });
+    await step('payroll.runs.post.again', 'POST', R('post'), { token: s.admin });
+    await step('payroll.lines.update.posted', 'PATCH', L(s.line1), Q({ arrears: 1 }));
+    await step('payroll.runs.delete.posted', 'DELETE', `/api/payroll/runs/${s.run}`, { token: s.admin });
+    await step('payroll.employee.loan-after-post', 'GET', `/api/payroll/employees/${s.emp1}`, { token: s.admin });
+    await step('payroll.ledger.posting', 'GET', '/api/ledger/entries?sourceType=PAYROLL', { token: s.admin });
+
+    await step('payroll.remit.invalid', 'POST', R('remit'), Q({ type: 'NHT', paymentAccountId: 'x', date: '', amount: 0 }));
+    await step('payroll.remit.too-much', 'POST', R('remit'), Q({ type: 'EPF', paymentAccountId: cash, date: '2026-05-15', amount: 999999 }));
+    await step('payroll.remit.epf', 'POST', R('remit'), Q({ type: 'EPF', paymentAccountId: cash, date: '2026-05-15', reference: ' C-0426 ' }));
+    await step('payroll.remit.epf.nothing', 'POST', R('remit'), Q({ type: 'EPF', paymentAccountId: cash, date: '2026-05-15' }));
+    await step('payroll.remit.welfare.part', 'POST', R('remit'), Q({ type: 'WELFARE', paymentAccountId: cash, date: '2026-05-10', amount: '100' }));
+    await step('payroll.remit.paye', 'POST', R('remit'), Q({ type: 'PAYE', paymentAccountId: cash, date: '2026-05-12' }));
+    await step('payroll.remit.unknown-account', 'POST', R('remit'), Q({ type: 'ETF', paymentAccountId: FIXED_UUID, date: '2026-05-15' }));
+    await step('payroll.runs.pay.invalid', 'POST', R('pay'), Q({ paymentAccountId: 'x' }));
+    await step('payroll.runs.pay', 'POST', R('pay'), Q({ paymentAccountId: cash, payDate: '2026-04-30' }));
+    await step('payroll.runs.pay.again', 'POST', R('pay'), Q({ paymentAccountId: cash, payDate: '2026-04-30' }));
+    await step('payroll.runs.slips-filed', 'POST', R('slips-filed'), { token: s.admin });
+    await step('payroll.ledger.trial-balance', 'GET', '/api/ledger/trial-balance', { token: s.admin });
+    await step('payroll.runs.void', 'POST', R('void'), { token: s.admin });
+    await step('payroll.runs.void.again', 'POST', R('void'), { token: s.admin });
+    await step('payroll.employee.loan-after-void', 'GET', `/api/payroll/employees/${s.emp1}`, { token: s.admin });
+    await step('payroll.ledger.after-void', 'GET', '/api/ledger/trial-balance', { token: s.admin });
+
+    r = await step('payroll.runs.redo', 'POST', '/api/payroll/runs', Q({ period: '2026-04' }));
+    await step('payroll.runs.delete', 'DELETE', `/api/payroll/runs/${r.body?.id}`, { token: s.admin });
+    await step('payroll.runs.list.final', 'GET', '/api/payroll/runs', { token: s.admin });
+    await step('hr.payroll.runs.forbidden', 'GET', '/api/payroll/runs', { token: s.hr });
+  }
+
   // ── W2: own-invoices-only scope ────────────────────────────────────────────
   r = await call(base, 'POST', '/api/roles', A({ name: 'Sales', permissions: ['invoices'] }));
   await call(base, 'POST', '/api/users', A({ username: 'sales1', password: 'salespass1', roleId: r.body?.id }));
@@ -615,6 +698,8 @@ const EXPECTED = {
   'ledger.balance.cash': 'D1: reversed entry and reversal cancel (correct cash 1100.80; reference 1350.80)',
   'ledger.balance.range': 'D1: April shows the expense; its reversal is dated in October, outside the range',
   'ledger.trial-balance.after-w2': 'D1: reversed invoice/bill/expense entries and their reversals both count',
+  'payroll.ledger.trial-balance': 'D1: the earlier voided invoice/bill/expense entries and their reversals both count',
+  'payroll.ledger.after-void': 'D1: a voided payroll run nets to zero here; the reference keeps only the reversals (salaries expense -103,400.25)',
   'invoices.create.rounding': 'D4: 0.29 x 0.50 = 0.145 rounds half-up to 0.15; the reference float toFixed gives 0.14',
   'bills.void.paid': 'The reference source file garbles the dash in this message (â€”); the intended text is sent',
   'customers.create.empty-email': 'D11: an empty email means no email (the reference rejected "")',

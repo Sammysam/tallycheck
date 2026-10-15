@@ -516,6 +516,85 @@ try {
     await shot('22-salary');
   });
 
+  // ── W5: payroll runs ────────────────────────────────────────────────────────
+  /** Sets the n-th control matching `selector` inside the form containing `formText`, the way React notices. */
+  const setInForm = (formText, selector, value, n = 0) => evaluate(`(() => {
+    const f = [...document.querySelectorAll('form')].find((x) => x.innerText.includes(${JSON.stringify(formText)}));
+    if (!f) throw new Error('no form with ' + ${JSON.stringify(formText)});
+    const el = f.querySelectorAll(${JSON.stringify(selector)})[${n}];
+    if (!el) throw new Error('no control ' + ${JSON.stringify(selector)});
+    const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${JSON.stringify(value)});
+    el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    return true; })()`);
+  const submitFormWith = (text) => evaluate(`(() => {
+    const f = [...document.querySelectorAll('form')].find((x) => x.innerText.includes(${JSON.stringify(text)}));
+    if (!f) throw new Error('no form with ' + ${JSON.stringify(text)});
+    f.requestSubmit(); return true; })()`);
+  const fetchText = (path) => evaluate(`(async () => {
+    const r = await fetch(${JSON.stringify(path)}, { headers: { authorization: 'Bearer ' + localStorage.getItem('accessToken') } });
+    return (await r.text()).slice(0, 5); })()`);
+  const trialBalanced = async () => {
+    const tb = (await api('GET', '/api/ledger/trial-balance')).body;
+    const debit = tb.reduce((a, r) => a + Math.round(r.debit * 100), 0);
+    const credit = tb.reduce((a, r) => a + Math.round(r.credit * 100), 0);
+    if (debit !== credit) throw new Error(`trial balance off: ${debit} vs ${credit}`);
+    return tb;
+  };
+  let runId = '';
+
+  await check('Payroll page starts a month and the run lists the employee', async () => {
+    await go('/payroll');
+    await setInForm('Month', 'input[type=month]', '2026-04');
+    await waitFor(`document.body.innerText.includes('Start payroll for')`, 'start button');
+    await submitFormWith('Start payroll for');
+    await waitFor(`/^\\/payroll\\/[0-9a-f-]{36}$/.test(location.pathname) && document.body.innerText.includes('Asha Perera')`, 'run page');
+    runId = await evaluate('location.pathname.split("/").pop()');
+    const run = (await api('GET', '/api/payroll/runs/' + runId)).body;
+    if (run.status !== 'DRAFT' || run.lines.length !== 1 || run.lines[0].grossSalary !== '51000.00') throw new Error(JSON.stringify(run).slice(0, 300));
+    await shot('23-payroll-draft');
+  });
+
+  await check('Run posts to the ledger, pays salaries and remits EPF', async () => {
+    await quietDialogs();
+    await clickText('Post to ledger');
+    await waitFor(`document.body.innerText.includes('Pay salaries')`, 'posted');
+    const cash = (await api('GET', '/api/accounts')).body.find((a) => a.code === '1000').id;
+    await setInForm('Record payment of', 'select', cash);
+    await submitFormWith('Record payment of');
+    await waitFor(`!document.body.innerText.includes('Record payment of')`, 'payment recorded');
+    await setInForm('Record remittance', 'select', cash, 1);
+    await submitFormWith('Record remittance');
+    await waitFor(`document.body.innerText.toLowerCase().includes('remittances recorded')`, 'remittance listed');
+    const run = (await api('GET', '/api/payroll/runs/' + runId)).body;
+    if (run.status !== 'PAID' || run.owed.EPF.outstanding !== 0 || run.remittances.length !== 1) throw new Error(run.status + ' ' + JSON.stringify(run.owed));
+    await trialBalanced();
+    await shot('24-payroll-paid');
+  });
+
+  await check('Salary slips are generated and filed into the employee record', async () => {
+    await quietDialogs();
+    await clickText('File slips to employee records');
+    await waitFor(`document.body.innerText.includes('Re-file slips to employee records')`, 'slips filed', 30000);
+    const docs = (await api('GET', `/api/employees/${empId}/documents`)).body;
+    const slip = docs.find((d) => d.category === 'PAYSLIP');
+    if (!slip || slip.mimeType !== 'application/pdf' || Number(slip.size) < 500) throw new Error('slip ' + JSON.stringify(slip));
+    const head = await fetchText(`/api/employees/${empId}/documents/${slip.id}/download`);
+    if (head !== '%PDF-') throw new Error('slip is not a PDF: ' + head);
+  });
+
+  await check('Voiding the run reverses every entry and restores the loan', async () => {
+    await quietDialogs();
+    await clickText('Void');
+    await waitFor(`document.body.innerText.includes('VOID')`, 'void badge');
+    const v = (await api('GET', '/api/payroll/employees/' + empId)).body;
+    if (v.staffLoanBalance !== 1500.5) throw new Error('loan ' + v.staffLoanBalance);
+    const tb = await trialBalanced();
+    const salaries = tb.find((r) => r.account.code === '6100');
+    if (salaries && salaries.balance !== 0) throw new Error('salaries expense ' + salaries.balance);
+    await shot('25-payroll-void');
+  });
+
   await check('second login goes through 2FA verify', async () => {
     await evaluate(`localStorage.removeItem('accessToken')`);
     await go('/login');

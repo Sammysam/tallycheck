@@ -14,7 +14,7 @@ use serde_json::{Map, Number, Value};
 // ─── Transforms (run before validation, like class-transformer) ─────────────
 
 /// `trim`: strings are trimmed, anything else passes unchanged.
-fn trim(v: &mut Validator, props: &[&str]) {
+pub(crate) fn trim(v: &mut Validator, props: &[&str]) {
     for p in props {
         if let Some(Value::String(s)) = v.input.get_mut(*p) {
             *s = s.trim().to_string();
@@ -23,7 +23,7 @@ fn trim(v: &mut Validator, props: &[&str]) {
 }
 
 /// `trimOrNull`: strings are trimmed and a blank one becomes null.
-fn trim_or_null(v: &mut Validator, props: &[&str]) {
+pub(crate) fn trim_or_null(v: &mut Validator, props: &[&str]) {
     for p in props {
         if let Some(slot) = v.input.get_mut(*p) {
             if let Value::String(s) = slot {
@@ -46,7 +46,7 @@ fn js_number_value(x: f64) -> Value {
 /// `@Type(() => Number)`: strings go through `Number()`, booleans become 1/0, null stays null.
 /// NaN and ±Infinity are not JSON; they are kept as a marker string that fails `IsNumber` and
 /// `Min` alike.
-fn to_number(v: &mut Validator, props: &[&str]) {
+pub(crate) fn to_number(v: &mut Validator, props: &[&str]) {
     for p in props {
         if let Some(slot) = v.input.get_mut(*p) {
             let n = match &*slot {
@@ -64,7 +64,7 @@ fn to_number(v: &mut Validator, props: &[&str]) {
 
 const AMOUNT: &[Rule] = &[Rule::IsMoneyNumber, Rule::MinZero];
 
-fn money(m: &Map<String, Value>, key: &str) -> Result<Option<Money>, AppError> {
+pub(crate) fn money(m: &Map<String, Value>, key: &str) -> Result<Option<Money>, AppError> {
     match m.get(key).and_then(Money::from_json) {
         Some(x) if x.cents() > MAX_NUMERIC_15_2_CENTS => Err(AppError::bad_request("Amount is too large")),
         other => Ok(other),

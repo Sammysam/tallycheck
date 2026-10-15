@@ -1,4 +1,4 @@
-//! `/api` routes implemented so far (W0–W4). Routes of later waves answer 404 like any unknown path.
+//! `/api` routes implemented so far (W0–W5). Routes of later waves answer 404 like any unknown path.
 
 pub mod accounts;
 pub mod audit_logs;
@@ -6,12 +6,14 @@ pub mod auth;
 pub mod employees;
 pub mod ledger;
 pub mod operations;
+pub mod payroll;
 pub mod reports;
 pub mod roles;
 pub mod settings;
 pub mod users;
 
 use self::employees as hr;
+use self::payroll as pr;
 use crate::errors::unknown_route;
 use crate::state::AppState;
 use crate::upload::UPLOAD_BODY_LIMIT;
@@ -95,5 +97,16 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/employees/{id}/bank", patch(hr::payroll_bank))
         .route("/payroll/employees/{id}/salaries", post(hr::salary_add))
         .route("/payroll/employees/{id}/salaries/{salary_id}", patch(hr::salary_update).delete(hr::salary_remove))
+        .route("/payroll/rates", get(pr::rates_get).patch(pr::rates_update))
+        .route("/payroll/company", get(pr::company_get).patch(pr::company_update))
+        .route("/payroll/runs", get(pr::list).post(pr::create))
+        .route("/payroll/runs/{id}", get(pr::get).delete(pr::remove))
+        .route("/payroll/runs/{id}/lines", post(pr::line_add))
+        .route("/payroll/runs/{id}/lines/{line_id}", patch(pr::line_update).delete(pr::line_remove))
+        .route("/payroll/runs/{id}/post", post(pr::post))
+        .route("/payroll/runs/{id}/pay", post(pr::pay))
+        .route("/payroll/runs/{id}/remit", post(pr::remit))
+        .route("/payroll/runs/{id}/slips-filed", post(pr::slips_filed))
+        .route("/payroll/runs/{id}/void", post(pr::void))
         .fallback(unknown_route)
 }

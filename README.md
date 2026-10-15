@@ -13,8 +13,9 @@ deviations from the reference app and the wave approval gates.
 | W1 | Ledger: chart of accounts, journal entries, reversals, trial balance, account balances | done (approved) |
 | W2 | Customers, vendors, bank accounts, invoices, bills, expenses, payments | done (approved) |
 | W3 | Reports: profit & loss, balance sheet, AR/AP ageing, dashboard figures | done (approved) |
-| W4 | Employees: profiles, photos, encrypted documents, salaries, increments, bank details | done, awaiting approval |
-| W5–W6 | Payroll runs, production readiness | not started |
+| W4 | Employees: profiles, photos, encrypted documents, salaries, increments, bank details | done (approved) |
+| W5 | Payroll runs: salary sheet, posting, salary payment, EPF/ETF/PAYE remittances, void | done, awaiting approval |
+| W6 | Production readiness: data import, backups, installer | not started |
 
 Screens that depend on later waves (dashboard figures, invoices, payroll, …) load but show no
 data: their API routes answer 404 until their wave is implemented.
@@ -31,6 +32,7 @@ crates/operations   customers, vendors, bank accounts, invoices, bills, expenses
 crates/reports      profit & loss, balance sheet, AR/AP ageing
 crates/documents    AES-256-GCM file encryption (reference format) and the local file store
 crates/employees    employees, photos, versioned documents, salaries, increments, bank details
+crates/payroll      payroll rates and line arithmetic (exact decimal), payroll runs and postings
 crates/api-server   Axum routes, validation, middleware, static frontend, accounting-server binary
 src-tauri           desktop shell (window on the embedded server)
 frontend            the reference React app, copied unchanged

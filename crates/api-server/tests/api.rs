@@ -207,8 +207,8 @@ async fn failed_logins_are_audited_and_throttled() -> TestResult {
 #[tokio::test]
 async fn unknown_routes_and_methods_are_nest_404s_before_auth() -> TestResult {
     let app = App::new().await?;
-    let r = app.call(Method::GET, "/api/payroll/runs?page=2", None, None).await?;
-    assert_nest_error(&r, 404, json!("Cannot GET /api/payroll/runs?page=2"), "/api/payroll/runs?page=2");
+    let r = app.call(Method::GET, "/api/no-such-thing?page=2", None, None).await?;
+    assert_nest_error(&r, 404, json!("Cannot GET /api/no-such-thing?page=2"), "/api/no-such-thing?page=2");
     let r = app.call(Method::DELETE, "/api/users", None, None).await?;
     assert_nest_error(&r, 404, json!("Cannot DELETE /api/users"), "/api/users");
     let r = app.call(Method::GET, "/nothing-here", None, None).await?;
@@ -471,8 +471,8 @@ async fn frontend_is_served_with_spa_fallback() -> TestResult {
     let asset = app.call(Method::GET, "/assets/app.js", None, None).await?;
     assert_eq!(asset.body, json!("console.log(1)"));
     assert_eq!(asset.headers.get("cache-control").and_then(|v| v.to_str().ok()), Some("no-cache"));
-    let api = app.call(Method::GET, "/api/payroll/rates", None, None).await?;
-    assert_nest_error(&api, 404, json!("Cannot GET /api/payroll/rates"), "/api/payroll/rates");
+    let api = app.call(Method::GET, "/api/no-such-thing", None, None).await?;
+    assert_nest_error(&api, 404, json!("Cannot GET /api/no-such-thing"), "/api/no-such-thing");
     Ok(())
 }
 
@@ -1090,5 +1090,64 @@ async fn bank_details_and_salaries_need_payroll_permission() -> TestResult {
         log.body["data"].as_array().ok_or("data")?.iter().filter_map(|x| x["action"].as_str()).collect();
     assert!(actions.contains(&"Added a salary / increment"), "{actions:?}");
     assert!(actions.contains(&"Updated an employee's bank details"), "{actions:?}");
+    Ok(())
+}
+
+// ── W5: payroll runs ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn payroll_runs_need_the_payroll_permission_and_answer_201() -> TestResult {
+    let app = App::new().await?;
+    let accountant = app.signed_in("acc1", "Accountant").await?;
+    let viewer = app.signed_in("viewer1", "Viewer").await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    app.call(Method::POST, "/api/roles", Some(&admin), Some(json!({"name": "HR", "permissions": ["employees"]})))
+        .await?;
+    let hr = app.signed_in("hr1", "HR").await?;
+
+    for token in [&viewer, &hr] {
+        let r = app.call(Method::GET, "/api/payroll/runs", Some(token), None).await?;
+        assert_nest_error(&r, 403, json!("Insufficient permissions"), "/api/payroll/runs");
+    }
+    let bad =
+        app.call(Method::POST, "/api/payroll/runs", Some(&accountant), Some(json!({"period": "2026-13"}))).await?;
+    assert_nest_error(&bad, 400, json!(["period must be YYYY-MM"]), "/api/payroll/runs");
+
+    let e = app
+        .call(Method::POST, "/api/employees", Some(&accountant), Some(json!({"employeeId": "CEN-1", "name": "Asha"})))
+        .await?;
+    let emp = e.body["id"].as_str().ok_or("employee id")?.to_string();
+    app.call(
+        Method::POST,
+        &format!("/api/payroll/employees/{emp}/salaries"),
+        Some(&accountant),
+        Some(json!({"effectiveFrom": "2026-01-01", "basic": 40500, "bra2005": 1000, "bra2016": 2500, "vehicleAllowance": 15000, "otherAllowance": 24850})),
+    )
+    .await?;
+    let run =
+        app.call(Method::POST, "/api/payroll/runs", Some(&accountant), Some(json!({"period": "2026-04"}))).await?;
+    assert_eq!(run.status, StatusCode::CREATED, "{}", run.body);
+    assert_eq!(run.body["netTotal"], "80005.00");
+    assert_eq!(run.body["owed"]["EPF"]["total"], json!(8800));
+    let id = run.body["id"].as_str().ok_or("run id")?.to_string();
+
+    let posted = app.call(Method::POST, &format!("/api/payroll/runs/{id}/post"), Some(&accountant), None).await?;
+    assert_eq!(posted.status, StatusCode::CREATED, "{}", posted.body);
+    let del = app.call(Method::DELETE, &format!("/api/payroll/runs/{id}"), Some(&accountant), None).await?;
+    assert_nest_error(
+        &del,
+        400,
+        json!("This run is POSTED and can no longer be changed — void it to redo the month"),
+        &format!("/api/payroll/runs/{id}"),
+    );
+    let not_uuid = app.call(Method::POST, "/api/payroll/runs/abc/void", Some(&accountant), None).await?;
+    assert_nest_error(&not_uuid, 400, json!("Validation failed (uuid is expected)"), "/api/payroll/runs/abc/void");
+
+    let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
+    let actions: Vec<&str> =
+        log.body["data"].as_array().ok_or("data")?.iter().filter_map(|x| x["action"].as_str()).collect();
+    assert!(actions.contains(&"Created a payroll run"), "{actions:?}");
+    // Reference quirk reproduced on purpose: its payroll-specific wording is unreachable.
+    assert!(actions.contains(&"Posted a payroll"), "{actions:?}");
     Ok(())
 }

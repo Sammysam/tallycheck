@@ -2138,6 +2138,483 @@
    }
   }
  ],
+ "CreateRunDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "period must be YYYY-MM",
+    "period must be a string"
+   ]
+  },
+  {
+   "input": {
+    "period": "2026-04"
+   },
+   "ok": {
+    "period": "2026-04"
+   }
+  },
+  {
+   "input": {
+    "period": "2026-4"
+   },
+   "status": 400,
+   "message": [
+    "period must be YYYY-MM"
+   ]
+  },
+  {
+   "input": {
+    "period": "2026-13"
+   },
+   "status": 400,
+   "message": [
+    "period must be YYYY-MM"
+   ]
+  },
+  {
+   "input": {
+    "period": "2026-00"
+   },
+   "status": 400,
+   "message": [
+    "period must be YYYY-MM"
+   ]
+  },
+  {
+   "input": {
+    "period": 202604
+   },
+   "status": 400,
+   "message": [
+    "period must be YYYY-MM",
+    "period must be a string"
+   ]
+  },
+  {
+   "input": {
+    "period": "2026-04",
+    "notes": "  "
+   },
+   "ok": {
+    "period": "2026-04",
+    "notes": null
+   }
+  },
+  {
+   "input": {
+    "period": "2026-04",
+    "notes": " April "
+   },
+   "ok": {
+    "period": "2026-04",
+    "notes": "April"
+   }
+  },
+  {
+   "input": {
+    "period": "2026-04",
+    "notes": 5,
+    "junk": 1
+   },
+   "status": 400,
+   "message": [
+    "notes must be a string"
+   ]
+  }
+ ],
+ "UpdateLineDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "daysWorked": "15"
+   },
+   "ok": {
+    "daysWorked": 15
+   }
+  },
+  {
+   "input": {
+    "daysWorked": 17.5,
+    "projectBonus": 1000,
+    "arrears": "250.5"
+   },
+   "ok": {
+    "daysWorked": 17.5,
+    "projectBonus": 1000,
+    "arrears": 250.5
+   }
+  },
+  {
+   "input": {
+    "daysWorked": -1
+   },
+   "status": 400,
+   "message": [
+    "daysWorked must not be less than 0"
+   ]
+  },
+  {
+   "input": {
+    "medical": 1.234
+   },
+   "status": 400,
+   "message": [
+    "medical must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "payeOverride": null
+   },
+   "ok": {
+    "payeOverride": null
+   }
+  },
+  {
+   "input": {
+    "payeOverride": "1200"
+   },
+   "ok": {
+    "payeOverride": 1200
+   }
+  },
+  {
+   "input": {
+    "payeOverride": -5
+   },
+   "status": 400,
+   "message": [
+    "payeOverride must not be less than 0"
+   ]
+  },
+  {
+   "input": {
+    "notes": "  "
+   },
+   "ok": {
+    "notes": null
+   }
+  },
+  {
+   "input": {
+    "notes": " x "
+   },
+   "ok": {
+    "notes": "x"
+   }
+  },
+  {
+   "input": {
+    "welfare": "abc",
+    "loanRecovery": null,
+    "salaryAdvance": true
+   },
+   "status": 400,
+   "message": [
+    "welfare must not be less than 0",
+    "welfare must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "phoneBill": "",
+    "otherDeductions": " 12 "
+   },
+   "ok": {
+    "phoneBill": 0,
+    "otherDeductions": 12
+   }
+  }
+ ],
+ "AddLineDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "employeeId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "employeeId": "x"
+   },
+   "status": 400,
+   "message": [
+    "employeeId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "employeeId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "junk": 1
+   },
+   "ok": {
+    "employeeId": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+   }
+  }
+ ],
+ "PayRunDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "paymentAccountId must be a UUID",
+    "payDate should not be empty",
+    "payDate must be a valid date in YYYY-MM-DD format"
+   ]
+  },
+  {
+   "input": {
+    "paymentAccountId": "x",
+    "payDate": ""
+   },
+   "status": 400,
+   "message": [
+    "paymentAccountId must be a UUID",
+    "payDate should not be empty",
+    "payDate must be a valid date in YYYY-MM-DD format"
+   ]
+  },
+  {
+   "input": {
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "payDate": "2026-04-30"
+   },
+   "ok": {
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "payDate": "2026-04-30"
+   }
+  },
+  {
+   "input": {
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "payDate": "2026-02-30"
+   },
+   "status": 400,
+   "message": [
+    "payDate must be a valid date in YYYY-MM-DD format"
+   ]
+  }
+ ],
+ "RemitDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "type must be one of the following values: EPF, ETF, PAYE, STAMP_DUTY, WELFARE",
+    "paymentAccountId must be a UUID",
+    "date should not be empty",
+    "date must be a valid date in YYYY-MM-DD format"
+   ]
+  },
+  {
+   "input": {
+    "type": "EPF",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-05-15"
+   },
+   "ok": {
+    "type": "EPF",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-05-15"
+   }
+  },
+  {
+   "input": {
+    "type": "NHT",
+    "paymentAccountId": "x",
+    "date": "x",
+    "amount": 0,
+    "reference": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+   },
+   "status": 400,
+   "message": [
+    "type must be one of the following values: EPF, ETF, PAYE, STAMP_DUTY, WELFARE",
+    "paymentAccountId must be a UUID",
+    "date must be a valid date in YYYY-MM-DD format",
+    "amount must not be less than 0.01",
+    "reference must be shorter than or equal to 100 characters"
+   ]
+  },
+  {
+   "input": {
+    "type": "STAMP_DUTY",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-05-15",
+    "amount": "100.5",
+    "reference": "  "
+   },
+   "ok": {
+    "type": "STAMP_DUTY",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-05-15",
+    "amount": 100.5,
+    "reference": null
+   }
+  },
+  {
+   "input": {
+    "type": "ETF",
+    "paymentAccountId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "date": "2026-05-15",
+    "amount": 0.001,
+    "reference": " C-1 "
+   },
+   "status": 400,
+   "message": [
+    "amount must not be less than 0.01",
+    "amount must be a number conforming to the specified constraints"
+   ]
+  }
+ ],
+ "CompanyDetailsDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "companyName": " Cenango ",
+    "epfRegNo": "",
+    "telephone": null
+   },
+   "ok": {
+    "companyName": "Cenango",
+    "epfRegNo": null,
+    "telephone": null
+   }
+  },
+  {
+   "input": {
+    "companyName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "epfRegNo": 5,
+    "hrSignatory": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"
+   },
+   "status": 400,
+   "message": [
+    "companyName must be shorter than or equal to 120 characters",
+    "epfRegNo must be shorter than or equal to 40 characters",
+    "epfRegNo must be a string",
+    "hrSignatory must be shorter than or equal to 120 characters"
+   ]
+  }
+ ],
+ "UpdateRatesDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "epfEmployeeRate": "0.085",
+    "stampDuty": "25.5",
+    "daysInMonth": "31"
+   },
+   "ok": {
+    "epfEmployeeRate": 0.085,
+    "stampDuty": 25.5,
+    "daysInMonth": 31
+   }
+  },
+  {
+   "input": {
+    "epfEmployeeRate": 1.5,
+    "etfRate": -0.1,
+    "employerWelfare": 1.234
+   },
+   "status": 400,
+   "message": [
+    "epfEmployeeRate must not be greater than 1",
+    "etfRate must not be less than 0",
+    "employerWelfare must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "daysInMonth": 27
+   },
+   "status": 400,
+   "message": [
+    "daysInMonth must not be less than 28"
+   ]
+  },
+  {
+   "input": {
+    "daysInMonth": 30.5
+   },
+   "status": 400,
+   "message": [
+    "daysInMonth must be an integer number"
+   ]
+  },
+  {
+   "input": {
+    "daysInMonth": "x"
+   },
+   "status": 400,
+   "message": [
+    "daysInMonth must not be greater than 31",
+    "daysInMonth must not be less than 28",
+    "daysInMonth must be an integer number"
+   ]
+  },
+  {
+   "input": {
+    "payeSlabs": "x"
+   },
+   "status": 400,
+   "message": [
+    "payeSlabs must be an array"
+   ]
+  },
+  {
+   "input": {
+    "payeSlabs": [
+     [
+      100,
+      2
+     ]
+    ]
+   },
+   "ok": {
+    "payeSlabs": [
+     [
+      100,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "input": {
+    "epfEmployerRate": 0.123456789
+   },
+   "ok": {
+    "epfEmployerRate": 0.123456789
+   }
+  },
+  {
+   "input": {
+    "stampDuty": null
+   },
+   "ok": {
+    "stampDuty": null
+   }
+  },
+  {
+   "input": {
+    "epfEmployeeRate": true
+   },
+   "ok": {
+    "epfEmployeeRate": 1
+   }
+  }
+ ],
  "PaginationDto": [
   {
    "input": {},
