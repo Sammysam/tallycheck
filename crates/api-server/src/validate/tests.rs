@@ -279,3 +279,16 @@ fn bank_and_salaries_match_reference() {
     rules_check("CreateSalaryDto", |v| hr::salary_rules(v, false));
     rules_check("UpdateSalaryDto", |v| hr::salary_rules(v, true));
 }
+
+// ── W5 ───────────────────────────────────────────────────────────────────────
+
+#[test]
+fn payroll_runs_match_reference() {
+    rules_check("CreateRunDto", payroll::run_rules);
+    rules_check("UpdateLineDto", payroll::line_rules);
+    rules_check("AddLineDto", payroll::add_line_rules);
+    rules_check("PayRunDto", payroll::pay_rules);
+    rules_check("RemitDto", payroll::remit_rules);
+    rules_check("CompanyDetailsDto", payroll::company_rules);
+    rules_check("UpdateRatesDto", payroll::rates_rules);
+}

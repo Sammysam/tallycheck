@@ -155,6 +155,36 @@ const cases = {
   UpdateSalaryDto: [dto('modules/payroll/dto/update-salary.dto.ts', 'UpdateSalaryDto'), [
     {}, { basic: '45000' }, { effectiveFrom: 'x' }, { reason: '' },
   ]],
+  CreateRunDto: [dto('modules/payroll/dto/payroll-runs.dto.ts', 'CreateRunDto'), [
+    {}, { period: '2026-04' }, { period: '2026-4' }, { period: '2026-13' }, { period: '2026-00' }, { period: 202604 },
+    { period: '2026-04', notes: '  ' }, { period: '2026-04', notes: ' April ' }, { period: '2026-04', notes: 5, junk: 1 },
+  ]],
+  UpdateLineDto: [dto('modules/payroll/dto/payroll-runs.dto.ts', 'UpdateLineDto'), [
+    {}, { daysWorked: '15' }, { daysWorked: 17.5, projectBonus: 1000, arrears: '250.5' }, { daysWorked: -1 }, { medical: 1.234 },
+    { payeOverride: null }, { payeOverride: '1200' }, { payeOverride: -5 }, { notes: '  ' }, { notes: ' x ' },
+    { welfare: 'abc', loanRecovery: null, salaryAdvance: true }, { phoneBill: '', otherDeductions: ' 12 ' },
+  ]],
+  AddLineDto: [dto('modules/payroll/dto/payroll-runs.dto.ts', 'AddLineDto'), [
+    {}, { employeeId: 'x' }, { employeeId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', junk: 1 },
+  ]],
+  PayRunDto: [dto('modules/payroll/dto/payroll-runs.dto.ts', 'PayRunDto'), [
+    {}, { paymentAccountId: 'x', payDate: '' }, { paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', payDate: '2026-04-30' },
+    { paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', payDate: '2026-02-30' },
+  ]],
+  RemitDto: [dto('modules/payroll/dto/payroll-runs.dto.ts', 'RemitDto'), [
+    {}, { type: 'EPF', paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-05-15' },
+    { type: 'NHT', paymentAccountId: 'x', date: 'x', amount: 0, reference: 'r'.repeat(101) },
+    { type: 'STAMP_DUTY', paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-05-15', amount: '100.5', reference: '  ' },
+    { type: 'ETF', paymentAccountId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', date: '2026-05-15', amount: 0.001, reference: ' C-1 ' },
+  ]],
+  CompanyDetailsDto: [dto('modules/payroll/dto/payroll-runs.dto.ts', 'CompanyDetailsDto'), [
+    {}, { companyName: ' Cenango ', epfRegNo: '', telephone: null }, { companyName: 'x'.repeat(121), epfRegNo: 5, hrSignatory: 'h'.repeat(121) },
+  ]],
+  UpdateRatesDto: [dto('modules/payroll/dto/payroll-runs.dto.ts', 'UpdateRatesDto'), [
+    {}, { epfEmployeeRate: '0.085', stampDuty: '25.5', daysInMonth: '31' }, { epfEmployeeRate: 1.5, etfRate: -0.1, employerWelfare: 1.234 },
+    { daysInMonth: 27 }, { daysInMonth: 30.5 }, { daysInMonth: 'x' }, { payeSlabs: 'x' }, { payeSlabs: [[100, 2]] },
+    { epfEmployerRate: 0.123456789 }, { stampDuty: null }, { epfEmployeeRate: true },
+  ]],
   PaginationDto: [dto('common/dto/pagination.dto.ts', 'PaginationDto'), [
     {}, { page: '2', limit: '50' }, { page: '0' }, { limit: '101' }, { page: 'abc' }, { page: '1.5' }, { page: '' }, { limit: '0' },
     { page: ['1', '2'] }, { page: '-1', limit: 'x' }, { other: 'y' }, { page: ' 3 ' }, { page: '1e1' },

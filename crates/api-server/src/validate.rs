@@ -14,6 +14,7 @@
 pub mod email;
 pub mod hr;
 pub mod ops;
+pub mod payroll;
 
 use app_core::ids::is_uuid;
 use app_core::permissions;
@@ -49,6 +50,12 @@ pub enum Rule {
     IsStringEach,
     /// `@MaxLength(n, { each: true })`.
     MaxLengthEach(usize),
+    /// `@IsNumber()` without options: any finite JSON number.
+    IsFiniteNumber,
+    /// `@Max(x)` on a number; the text is how JavaScript prints x.
+    MaxNum(f64, &'static str),
+    /// `@IsInt()`.
+    IsInt,
     /// Any rule with a custom `{ message }`.
     Msg(&'static Rule, &'static str),
 }
@@ -62,6 +69,9 @@ impl Rule {
     fn passes(&self, v: &Value) -> bool {
         match self {
             Rule::Msg(inner, _) => inner.passes(v),
+            Rule::IsFiniteNumber => v.as_f64().is_some_and(f64::is_finite),
+            Rule::MaxNum(max, _) => v.as_f64().is_some_and(|x| x <= *max),
+            Rule::IsInt => v.as_f64().is_some_and(|x| x.is_finite() && x.fract() == 0.0),
             Rule::IsString => v.is_string(),
             Rule::IsNotEmpty => !matches!(v, Value::Null) && v.as_str() != Some(""),
             Rule::MinLength(n) => v.as_str().is_some_and(|s| js_length(s) >= *n),
@@ -102,6 +112,9 @@ impl Rule {
     pub(crate) fn message(&self, prop: &str) -> String {
         match self {
             Rule::Msg(_, msg) => (*msg).to_string(),
+            Rule::IsFiniteNumber => format!("{prop} must be a number conforming to the specified constraints"),
+            Rule::MaxNum(_, text) => format!("{prop} must not be greater than {text}"),
+            Rule::IsInt => format!("{prop} must be an integer number"),
             Rule::IsString => format!("{prop} must be a string"),
             Rule::IsNotEmpty => format!("{prop} should not be empty"),
             Rule::MinLength(n) => format!("{prop} must be longer than or equal to {n} characters"),
@@ -195,41 +208,7 @@ impl Validator {
 
 // ─── JS Number() and query parameters ───────────────────────────────────────
 
-/// JavaScript `Number(string)`. `None` stands for NaN.
-pub fn js_number(raw: &str) -> Option<f64> {
-    let s = raw.trim_matches(|c: char| c.is_whitespace() || c == '\u{FEFF}');
-    if s.is_empty() {
-        return Some(0.0);
-    }
-    match s {
-        "Infinity" | "+Infinity" => return Some(f64::INFINITY),
-        "-Infinity" => return Some(f64::NEG_INFINITY),
-        _ => {}
-    }
-    for (prefix, radix) in [("0x", 16), ("0X", 16), ("0o", 8), ("0O", 8), ("0b", 2), ("0B", 2)] {
-        if let Some(digits) = s.strip_prefix(prefix) {
-            return u64::from_str_radix(digits, radix).ok().map(|n| n as f64);
-        }
-    }
-    let unsigned = s.strip_prefix(['+', '-']).unwrap_or(s);
-    let (mantissa, exponent) = match unsigned.find(['e', 'E']) {
-        Some(i) => (&unsigned[..i], Some(&unsigned[i + 1..])),
-        None => (unsigned, None),
-    };
-    let mantissa_ok = {
-        let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-        let digits = |x: &str| x.bytes().all(|b| b.is_ascii_digit());
-        digits(int) && digits(frac) && !(int.is_empty() && frac.is_empty())
-    };
-    let exponent_ok = exponent.is_none_or(|e| {
-        let e = e.strip_prefix(['+', '-']).unwrap_or(e);
-        !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit())
-    });
-    if !(mantissa_ok && exponent_ok) {
-        return None;
-    }
-    s.parse::<f64>().ok()
-}
+pub use app_core::jsnum::js_number;
 
 fn is_integer(n: Option<f64>) -> bool {
     n.is_some_and(|x| x.is_finite() && x.fract() == 0.0)

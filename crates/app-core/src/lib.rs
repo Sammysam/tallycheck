@@ -4,6 +4,7 @@
 pub mod config;
 pub mod error;
 pub mod ids;
+pub mod jsnum;
 pub mod money;
 pub mod permissions;
 pub mod secrets;
