@@ -12,6 +12,7 @@
 //! * query values are converted with JavaScript `Number()` (`@Type(() => Number)`).
 
 pub mod email;
+pub mod hr;
 pub mod ops;
 
 use app_core::ids::is_uuid;
@@ -48,6 +49,8 @@ pub enum Rule {
     IsStringEach,
     /// `@MaxLength(n, { each: true })`.
     MaxLengthEach(usize),
+    /// Any rule with a custom `{ message }`.
+    Msg(&'static Rule, &'static str),
 }
 
 /// validator.js `isLength`: surrogate pairs count once, variation selectors not at all.
@@ -58,6 +61,7 @@ fn js_length(s: &str) -> usize {
 impl Rule {
     fn passes(&self, v: &Value) -> bool {
         match self {
+            Rule::Msg(inner, _) => inner.passes(v),
             Rule::IsString => v.is_string(),
             Rule::IsNotEmpty => !matches!(v, Value::Null) && v.as_str() != Some(""),
             Rule::MinLength(n) => v.as_str().is_some_and(|s| js_length(s) >= *n),
@@ -97,6 +101,7 @@ impl Rule {
 
     pub(crate) fn message(&self, prop: &str) -> String {
         match self {
+            Rule::Msg(_, msg) => (*msg).to_string(),
             Rule::IsString => format!("{prop} must be a string"),
             Rule::IsNotEmpty => format!("{prop} should not be empty"),
             Rule::MinLength(n) => format!("{prop} must be longer than or equal to {n} characters"),
@@ -249,7 +254,7 @@ pub fn query_map(pairs: Vec<(String, String)>) -> Map<String, Value> {
 }
 
 /// The value `@Type(() => Number)` produces: strings through `Number()`, arrays become NaN.
-fn as_js_number(v: &Value) -> Option<f64> {
+pub(crate) fn as_js_number(v: &Value) -> Option<f64> {
     match v {
         Value::String(s) => js_number(s),
         Value::Number(n) => n.as_f64(),

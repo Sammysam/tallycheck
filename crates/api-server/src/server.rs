@@ -11,6 +11,7 @@ use axum::middleware::from_fn;
 use axum::middleware::from_fn_with_state;
 use axum::Router;
 use database::Db;
+use documents::{FileStore, StorageKey};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use tokio::net::TcpListener;
@@ -23,6 +24,16 @@ use tracing::Level;
 
 const JWT_SECRET_FILE: &str = "jwt-secret.dpapi";
 const JWT_SECRET_LEN: usize = 64;
+/// AES-256 key for employee photos and documents, DPAPI-protected like the JWT secret.
+pub const STORAGE_KEY_FILE: &str = "storage-key.dpapi";
+
+/// The encrypted file store under `<data_dir>/files`, creating its key on first run.
+pub fn open_file_store(config: &AppConfig) -> anyhow::Result<FileStore> {
+    let key = app_core::secrets::load_or_create(&config.secrets_dir().join(STORAGE_KEY_FILE), 32)
+        .context("loading the file-encryption key")?;
+    let key = StorageKey::from_bytes(&key).map_err(|e| anyhow::anyhow!("file-encryption key: {e}"))?;
+    Ok(FileStore::new(config.data_dir.join("files"), key))
+}
 
 /// The whole application: `/api` plus, when a frontend build is given, the static app with
 /// SPA fallback to `index.html`.
@@ -89,11 +100,12 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
     let db = Db::open(&config.database_path()).await.context("opening the database")?;
     let secret = app_core::secrets::load_or_create(&config.secrets_dir().join(JWT_SECRET_FILE), JWT_SECRET_LEN)
         .context("loading the JWT signing key")?;
+    let files = open_file_store(config)?;
     bootstrap_admin_from_env(&db).await?;
 
     let listener = TcpListener::bind(config.bind).await.with_context(|| format!("binding {}", config.bind))?;
     let addr = listener.local_addr()?;
-    let state = AppState::new(db.clone(), JwtKeys::new(&secret), config.lan_enabled, addr.port());
+    let state = AppState::new(db.clone(), JwtKeys::new(&secret), files, config.lan_enabled, addr.port());
     let frontend = resolve_frontend_dir(config.frontend_dir.as_deref());
     match &frontend {
         Some(d) => tracing::info!("serving frontend from {}", d.display()),

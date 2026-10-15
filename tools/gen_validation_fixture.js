@@ -125,6 +125,36 @@ const cases = {
     {}, { q: ' INV ', status: 'POSTED', customerId: '7c9e6679-7425-40de-944b-e07fc1f90ae7', dateFrom: '2026-04-01', dateTo: '2026-04-30', page: '2', limit: '10' },
     { q: 'x'.repeat(121), status: 'OPEN', customerId: 'x', dateFrom: 'x' }, { page: '0' }, { status: 'OPEN', limit: '500', page: 'x' },
   ]],
+  CreateEmployeeDto: [dto('modules/employees/dto/create-employee.dto.ts', 'CreateEmployeeDto'), [
+    {}, { employeeId: '   ', name: '  ' }, { employeeId: ' CEN-001 ', name: ' Asha Perera ', junk: 1 },
+    { employeeId: 'CEN-001', name: 'A', jobTitle: '  ', department: ' Ops ', email: ' a@b.lk ', phone: '', joinDate: ' 2024-01-15 ', notes: '  ', epfNumber: ' 12 ', nationalId: '', resignedDate: '', userId: '' },
+    { employeeId: 'x'.repeat(51), name: 'y'.repeat(201), jobTitle: 5, email: 'bad', phone: 'p'.repeat(51), joinDate: '2024-02-30', status: 'GONE', employmentType: 'TEMP', userId: 'nope' },
+    { employeeId: 'CEN-2', name: 'B', status: 'ON_LEAVE', employmentType: 'CONTRACT', email: null, joinDate: null },
+    { employeeId: 5, name: 6 },
+  ]],
+  UpdateEmployeeDto: [dto('modules/employees/dto/update-employee.dto.ts', 'UpdateEmployeeDto'), [
+    {}, { name: '  ' }, { jobTitle: '' }, { employeeId: ' cen-9 ', status: 'LEFT', resignedDate: '2026-03-31' }, { bankName: 'x', staffLoanBalance: 5 },
+  ]],
+  QueryEmployeesDto: [dto('modules/employees/dto/query-employees.dto.ts', 'QueryEmployeesDto'), [
+    {}, { q: ' asha ', status: 'ACTIVE' }, { status: 'x' }, { q: ['a', 'b'] },
+  ]],
+  UploadDocumentDto: [dto('modules/employees/dto/upload-document.dto.ts', 'UploadDocumentDto'), [
+    {}, { title: '  ' }, { title: ' Degree ', category: 'CERTIFICATE', expiryDate: ' 2030-01-01 ', notes: ' n ' },
+    { title: 'x'.repeat(201), category: 'PASSPORT', expiryDate: 'soon', notes: 5 }, { title: 'T', expiryDate: '', notes: '' },
+  ]],
+  UpdateBankDto: [dto('modules/payroll/dto/update-bank.dto.ts', 'UpdateBankDto'), [
+    {}, { bankName: ' BOC ', bankBranch: '', bankAccountNo: ' 0071 ', staffLoanBalance: '25000.5' },
+    { bankName: 'x'.repeat(101), bankAccountNo: 'y'.repeat(51), staffLoanBalance: -1 }, { staffLoanBalance: 'abc' }, { staffLoanBalance: 1.005 },
+    { bankName: null, staffLoanBalance: null },
+  ]],
+  CreateSalaryDto: [dto('modules/payroll/dto/create-salary.dto.ts', 'CreateSalaryDto'), [
+    {}, { effectiveFrom: '', basic: '' }, { effectiveFrom: '2026-04-01', basic: '40500', bra2005: 1000, bra2016: '2500', vehicleAllowance: 15000, otherAllowance: 24850, junk: 1 },
+    { effectiveFrom: '2026-04-01', basic: 40500, epfApplicable: 'yes', welfareDeduction: -1, loanInstallment: 1.234, reason: ' Joined ', notes: '  ' },
+    { effectiveFrom: '2026-04-01', basic: 100, epfApplicable: false, reason: 'r'.repeat(201) }, { effectiveFrom: '2026-04-01', basic: null },
+  ]],
+  UpdateSalaryDto: [dto('modules/payroll/dto/update-salary.dto.ts', 'UpdateSalaryDto'), [
+    {}, { basic: '45000' }, { effectiveFrom: 'x' }, { reason: '' },
+  ]],
   PaginationDto: [dto('common/dto/pagination.dto.ts', 'PaginationDto'), [
     {}, { page: '2', limit: '50' }, { page: '0' }, { limit: '101' }, { page: 'abc' }, { page: '1.5' }, { page: '' }, { limit: '0' },
     { page: ['1', '2'] }, { page: '-1', limit: 'x' }, { other: 'y' }, { page: ' 3 ' }, { page: '1e1' },
@@ -136,7 +166,7 @@ const cases = {
   for (const [name, [cls, inputs]] of Object.entries(cases)) {
     out[name] = [];
     for (const input of inputs) {
-      const type = ['PaginationDto', 'LedgerFilterDto', 'QueryInvoicesDto'].includes(name) ? 'query' : 'body';
+      const type = ['PaginationDto', 'LedgerFilterDto', 'QueryInvoicesDto', 'QueryEmployeesDto'].includes(name) ? 'query' : 'body';
       try {
         const value = await pipe.transform(JSON.parse(JSON.stringify(input)), { type, metatype: cls });
         out[name].push({ input, ok: JSON.parse(JSON.stringify(value)) });

@@ -1,8 +1,9 @@
-//! `/api` routes implemented so far (W0–W3). Routes of later waves answer 404 like any unknown path.
+//! `/api` routes implemented so far (W0–W4). Routes of later waves answer 404 like any unknown path.
 
 pub mod accounts;
 pub mod audit_logs;
 pub mod auth;
+pub mod employees;
 pub mod ledger;
 pub mod operations;
 pub mod reports;
@@ -10,8 +11,11 @@ pub mod roles;
 pub mod settings;
 pub mod users;
 
+use self::employees as hr;
 use crate::errors::unknown_route;
 use crate::state::AppState;
+use crate::upload::UPLOAD_BODY_LIMIT;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post};
 use axum::Router;
 use operations as op;
@@ -68,5 +72,28 @@ pub fn api_router() -> Router<AppState> {
         .route("/reports/balance-sheet", get(reports::balance_sheet))
         .route("/reports/ar-aging", get(reports::ar_aging))
         .route("/reports/ap-aging", get(reports::ap_aging))
+        .route("/employees", get(hr::list).post(hr::create))
+        .route("/employees/{id}", get(hr::get).patch(hr::update).delete(hr::remove))
+        .route(
+            "/employees/{id}/photo",
+            get(hr::photo_get)
+                .post(hr::photo_set)
+                .delete(hr::photo_remove)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        .route(
+            "/employees/{id}/documents",
+            get(hr::docs_list).post(hr::docs_add).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        .route("/employees/{id}/documents/{doc_id}", patch(hr::docs_update).delete(hr::docs_remove))
+        .route(
+            "/employees/{id}/documents/{doc_id}/replace",
+            post(hr::docs_replace).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        .route("/employees/{id}/documents/{doc_id}/download", get(hr::docs_download))
+        .route("/payroll/employees/{id}", get(hr::payroll_get))
+        .route("/payroll/employees/{id}/bank", patch(hr::payroll_bank))
+        .route("/payroll/employees/{id}/salaries", post(hr::salary_add))
+        .route("/payroll/employees/{id}/salaries/{salary_id}", patch(hr::salary_update).delete(hr::salary_remove))
         .fallback(unknown_route)
 }

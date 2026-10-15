@@ -99,4 +99,15 @@ pub mod perm {
     permission!(Expenses, "expenses");
     permission!(Payments, "payments");
     permission!(Reports, "reports");
+    permission!(Employees, "employees");
+    permission!(Payroll, "payroll");
+}
+
+/// Nest's `ParseUUIDPipe`: 400 `Validation failed (uuid is expected)`.
+pub fn parse_uuid(value: &str) -> Result<(), AppError> {
+    if app_core::ids::is_uuid(value) {
+        Ok(())
+    } else {
+        Err(AppError::bad_request("Validation failed (uuid is expected)"))
+    }
 }

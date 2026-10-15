@@ -44,7 +44,14 @@ pub fn load_or_create(path: &Path, len: usize) -> Result<Vec<u8>, SecretError> {
         return Ok(secret);
     }
     let secret = random_bytes(len)?;
-    let blob = dpapi::protect(&secret, ENTROPY)?;
+    store(path, &secret)?;
+    Ok(secret)
+}
+
+/// Protects `secret` with DPAPI and writes it to `path`, replacing any existing file
+/// (used when an administrator restores a key from its offline recovery copy).
+pub fn store(path: &Path, secret: &[u8]) -> Result<(), SecretError> {
+    let blob = dpapi::protect(secret, ENTROPY)?;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -52,7 +59,7 @@ pub fn load_or_create(path: &Path, len: usize) -> Result<Vec<u8>, SecretError> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, &blob)?;
     fs::rename(&tmp, path)?;
-    Ok(secret)
+    Ok(())
 }
 
 #[cfg(windows)]

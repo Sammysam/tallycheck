@@ -114,7 +114,13 @@ still needed (§10). Never change a formula to make a test pass; report the disc
 - Never log passwords, hashes, TOTP secrets, tokens, keys or document contents. No request
   bodies in logs.
 - Encrypted files (W4): reference format `"QBE1" | IV(12) | TAG(16) | ciphertext`,
-  AES-256-GCM, raw 32-byte key; key protected with DPAPI plus an offline recovery copy.
+  AES-256-GCM, raw 32-byte key, fresh random IV per file. Files live under
+  `<data_dir>/files/<storage key>` with a `.meta` content-type sidecar (the reference's local
+  driver layout). The key is `secrets/storage-key.dpapi` (DPAPI, current user) and is created
+  on first start. `accounting-server export-storage-key` prints it for an offline recovery
+  copy; `import-storage-key` installs one and refuses to replace a different key. Without the
+  recovery copy, files cannot be opened after a reinstall or on another PC.
+- Downloads go through the server only, with `Cache-Control: private, no-store`.
 
 ## 8. Database & migrations
 
@@ -210,6 +216,21 @@ recommendations without answering each one individually; revisit any of them on 
   - Report dates: absent → default (1 January of the current local year / today, D5), empty →
     no bound (as the reference), malformed → 400 (the reference crashed with 500).
 
+- W4 employees (verified by the contract suite, 304 steps; awaiting approval with W4):
+  - Salary states use the local date (D5); the reference used the UTC date.
+  - `employees.userId` must name an existing user (D6 adds the foreign key): 404
+    `User <id> not found` instead of a stored dangling id.
+  - Replace and PATCH of a document validate the UploadDocumentDto rules as optional. The
+    reference left those bodies unvalidated, so a bad category or date was a database 500.
+    A blank title on replace keeps the previous title, as in the reference.
+  - Null for a NOT NULL column (employee name / staff number / status / type, document
+    title / category, staff loan balance, salary amounts) means "not changing it" instead of
+    a database 500.
+  - Uploaded file names are kept as real UTF-8 (multer decoded them as Latin-1, so Sinhala or
+    Tamil names were garbled). `Content-Disposition` reduces the plain `filename=` part to
+    ASCII; `filename*` carries the exact name, byte for byte as the reference.
+  - Amounts beyond numeric(15,2) are a 400 `Amount is too large` (the reference: 500).
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
@@ -219,7 +240,9 @@ answer 201.
 
 - April 2026 regression: need the real employee's salary row (basic / BRA2005 / BRA2016 /
   vehicle / other split). Until then the fixture is reverse-engineered and marked as such.
-- Production files live in S3 + key in the reference `.env`; W6 needs an export procedure.
+- Production files live in S3 and their key in the reference `.env`. The container format is
+  identical, so W6 can copy the encrypted objects unchanged; the administrator installs the
+  production key with `import-storage-key` (typed in by them, never copied from the `.env`).
 - Reference quirks to decide in their wave: bills never accumulate partial AP payments; a
   part-paid bill can be voided; `POST /accounts/seed` does nothing after the payroll migration
   seeded 11 accounts.
@@ -245,6 +268,8 @@ cargo test --workspace
 cd frontend && npm ci && npm run build && npm run lint
 cargo run -p api-server --bin accounting-server -- serve
 cargo run -p api-server --bin accounting-server -- create-admin <username>
+cargo run -p api-server --bin accounting-server -- export-storage-key   # offline recovery copy
+cargo run -p api-server --bin accounting-server -- import-storage-key   # restore on a new PC
 cargo run -p accounting-desktop
 ```
 Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).

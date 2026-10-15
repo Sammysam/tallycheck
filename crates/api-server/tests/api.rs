@@ -34,7 +34,12 @@ impl App {
     async fn with_frontend(frontend: Option<&std::path::Path>) -> Result<App, AppError> {
         let dir = tempfile::tempdir().map_err(AppError::internal)?;
         let db = Db::open(&dir.path().join("t.db")).await?;
-        let state = AppState::new(db.clone(), JwtKeys::new(b"test-secret-test-secret-test-secret!"), false, 47800);
+        let files = documents::FileStore::new(
+            dir.path().join("files"),
+            documents::StorageKey::from_bytes(&[5u8; 32]).map_err(AppError::internal)?,
+        );
+        let state =
+            AppState::new(db.clone(), JwtKeys::new(b"test-secret-test-secret-test-secret!"), files, false, 47800);
         let router = build_router(state, frontend);
         Ok(App { _dir: dir, db, router })
     }
@@ -850,5 +855,240 @@ async fn reports_follow_reference_query_rules_and_permissions() -> TestResult {
     app.call(Method::PATCH, &format!("/api/users/{viewer_id}"), Some(&admin), Some(json!({"roleId": role_id}))).await?;
     let denied = app.call(Method::GET, "/api/reports/ap-aging", Some(&viewer), None).await?;
     assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+// ── W4: employees, photos, documents, salaries ──────────────────────────────
+
+const BOUNDARY: &str = "----w4testboundary";
+
+/// A multipart/form-data body: text fields plus an optional `(field, filename, type, bytes)` file.
+fn multipart(fields: &[(&str, &str)], file: Option<(&str, &str, &str, &[u8])>) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (k, v) in fields {
+        out.extend_from_slice(
+            format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes(),
+        );
+    }
+    if let Some((field, name, mime, bytes)) = file {
+        out.extend_from_slice(
+            format!(
+                "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{name}\"\r\nContent-Type: {mime}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        out.extend_from_slice(bytes);
+        out.extend_from_slice(b"\r\n");
+    }
+    out.extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+    out
+}
+
+impl App {
+    async fn upload(&self, uri: &str, token: &str, body: Vec<u8>) -> Result<Resp, Box<dyn std::error::Error>> {
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header("host", HOST)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", format!("multipart/form-data; boundary={BOUNDARY}"))
+            .body(Body::from(body))?;
+        let res = self.router.clone().oneshot(req).await?;
+        let status = res.status();
+        let headers = res.headers().clone();
+        let bytes = res.into_body().collect().await?.to_bytes();
+        let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        Ok(Resp { status, headers, body })
+    }
+
+    async fn download(
+        &self,
+        uri: &str,
+        token: &str,
+    ) -> Result<(StatusCode, axum::http::HeaderMap, Vec<u8>), Box<dyn std::error::Error>> {
+        let req = Request::builder()
+            .uri(uri)
+            .header("host", HOST)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())?;
+        let res = self.router.clone().oneshot(req).await?;
+        let status = res.status();
+        let headers = res.headers().clone();
+        let bytes = res.into_body().collect().await?.to_bytes().to_vec();
+        Ok((status, headers, bytes))
+    }
+}
+
+#[tokio::test]
+async fn employee_files_upload_encrypted_and_download_with_reference_headers() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let created = app
+        .call(
+            Method::POST,
+            "/api/employees",
+            Some(&admin),
+            Some(json!({"employeeId": " CEN-001 ", "name": "Asha", "phone": ""})),
+        )
+        .await?;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    assert_eq!(created.body["employeeId"], "CEN-001");
+    assert_eq!(created.body["phone"], Value::Null);
+    assert_eq!(created.body["staffLoanBalance"], "0.00");
+    let id = created.body["id"].as_str().ok_or("id")?.to_string();
+
+    // Photo: stored encrypted, served with no-store and no disposition.
+    let png = b"\x89PNG\r\n\x1a\n fake image";
+    let up = app
+        .upload(
+            &format!("/api/employees/{id}/photo"),
+            &admin,
+            multipart(&[], Some(("file", "Me.PNG", "image/png", png))),
+        )
+        .await?;
+    assert_eq!(up.status, StatusCode::CREATED, "{}", up.body);
+    let key = up.body["photoKey"].as_str().ok_or("photoKey")?.to_string();
+    assert!(key.starts_with(&format!("employees/{id}/photo/")) && key.ends_with(".png"), "{key}");
+    let on_disk = std::fs::read(app._dir.path().join("files").join(&key))?;
+    assert_eq!(&on_disk[..4], b"QBE1");
+    let (status, headers, bytes) = app.download(&format!("/api/employees/{id}/photo"), &admin).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, png);
+    assert_eq!(headers["content-type"], "image/png");
+    assert_eq!(headers["cache-control"], "private, no-store");
+    assert!(headers.get("content-disposition").is_none());
+
+    let wrong = app
+        .upload(
+            &format!("/api/employees/{id}/photo"),
+            &admin,
+            multipart(&[], Some(("file", "a.txt", "text/plain", b"x"))),
+        )
+        .await?;
+    assert_nest_error(
+        &wrong,
+        400,
+        json!("Profile photo must be a JPG, PNG or WebP image"),
+        &format!("/api/employees/{id}/photo"),
+    );
+    let big = vec![0u8; 5 * 1024 * 1024 + 1];
+    let too_large = app
+        .upload(
+            &format!("/api/employees/{id}/photo"),
+            &admin,
+            multipart(&[], Some(("file", "big.jpg", "image/jpeg", &big))),
+        )
+        .await?;
+    assert_nest_error(&too_large, 413, json!("File too large"), &format!("/api/employees/{id}/photo"));
+    let other_field = app
+        .upload(
+            &format!("/api/employees/{id}/photo"),
+            &admin,
+            multipart(&[], Some(("avatar", "a.png", "image/png", b"x"))),
+        )
+        .await?;
+    assert_nest_error(&other_field, 400, json!("Unexpected field"), &format!("/api/employees/{id}/photo"));
+
+    // Documents: validation before the file check; download headers as the reference.
+    let docs = format!("/api/employees/{id}/documents");
+    let no_title =
+        app.upload(&docs, &admin, multipart(&[], Some(("file", "a.pdf", "application/pdf", b"%PDF")))).await?;
+    assert_eq!(no_title.status, StatusCode::BAD_REQUEST);
+    assert_eq!(no_title.body["message"][1], "Give the document a title");
+    let doc = app
+        .upload(
+            &docs,
+            &admin,
+            multipart(
+                &[("title", " Visa copy "), ("category", "VISA")],
+                Some(("file", "Visa 2026 (copy).pdf", "application/pdf", b"%PDF-1.4 visa")),
+            ),
+        )
+        .await?;
+    assert_eq!(doc.status, StatusCode::CREATED, "{}", doc.body);
+    assert_eq!(doc.body["title"], "Visa copy");
+    assert_eq!(doc.body["size"], json!(13));
+    assert_eq!(doc.body["uploadedByName"], "boss");
+    let doc_id = doc.body["id"].as_str().ok_or("doc id")?.to_string();
+    let (status, headers, bytes) = app.download(&format!("{docs}/{doc_id}/download"), &admin).await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(bytes, b"%PDF-1.4 visa");
+    assert_eq!(
+        headers["content-disposition"],
+        "attachment; filename=\"Visa 2026 (copy).pdf\"; filename*=UTF-8''Visa%202026%20(copy).pdf"
+    );
+    let (_, headers, _) = app.download(&format!("{docs}/{doc_id}/download?inline=1"), &admin).await?;
+    assert!(headers["content-disposition"].to_str()?.starts_with("inline; "));
+
+    let listed = app.call(Method::GET, &docs, Some(&admin), None).await?;
+    assert_eq!(listed.body[0]["size"], "13", "bigint reads back as a string");
+    let bad_uuid = app.call(Method::GET, "/api/employees/abc/documents", Some(&admin), None).await?;
+    assert_nest_error(&bad_uuid, 400, json!("Validation failed (uuid is expected)"), "/api/employees/abc/documents");
+
+    // Deleting the employee removes its files.
+    let gone = app.call(Method::DELETE, &format!("/api/employees/{id}"), Some(&admin), None).await?;
+    assert_eq!(gone.status, StatusCode::NO_CONTENT);
+    assert!(!app._dir.path().join("files").join(&key).exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn bank_details_and_salaries_need_payroll_permission() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let hr_role = app
+        .call(Method::POST, "/api/roles", Some(&admin), Some(json!({"name": "HR", "permissions": ["employees"]})))
+        .await?;
+    assert_eq!(hr_role.status, StatusCode::CREATED);
+    let hr = app.signed_in("hr1", "HR").await?;
+    let viewer = app.signed_in("viewer1", "Viewer").await?;
+
+    let e = app
+        .call(Method::POST, "/api/employees", Some(&hr), Some(json!({"employeeId": "CEN-9", "name": "Kamal"})))
+        .await?;
+    assert_eq!(e.status, StatusCode::CREATED);
+    assert!(e.body.get("bankName").is_none() && e.body.get("staffLoanBalance").is_none(), "redacted for HR");
+    let id = e.body["id"].as_str().ok_or("id")?.to_string();
+
+    let bank = app
+        .call(
+            Method::PATCH,
+            &format!("/api/payroll/employees/{id}/bank"),
+            Some(&admin),
+            Some(json!({"bankName": " BOC ", "staffLoanBalance": "1500.25"})),
+        )
+        .await?;
+    assert_eq!(bank.status, StatusCode::OK, "{}", bank.body);
+    assert_eq!(bank.body["bank"]["bankName"], "BOC");
+    assert_eq!(bank.body["staffLoanBalance"], json!(1500.25));
+
+    let sal = app
+        .call(
+            Method::POST,
+            &format!("/api/payroll/employees/{id}/salaries"),
+            Some(&admin),
+            Some(json!({"effectiveFrom": "2026-04-01", "basic": "50000", "bra2005": 1000})),
+        )
+        .await?;
+    assert_eq!(sal.status, StatusCode::CREATED, "{}", sal.body);
+    assert_eq!(sal.body["monthlyTotal"], json!(51000));
+    assert_eq!(sal.body["welfareDeduction"], json!(300));
+    assert_eq!(sal.body["createdByName"], "boss");
+
+    let as_admin = app.call(Method::GET, &format!("/api/employees/{id}"), Some(&admin), None).await?;
+    assert_eq!(as_admin.body["staffLoanBalance"], "1500.25");
+    let as_hr = app.call(Method::GET, &format!("/api/employees/{id}"), Some(&hr), None).await?;
+    assert!(as_hr.body.get("bankName").is_none());
+    assert_eq!(as_hr.body["documents"], json!([]));
+    let payroll_hr = app.call(Method::GET, &format!("/api/payroll/employees/{id}"), Some(&hr), None).await?;
+    assert_nest_error(&payroll_hr, 403, json!("Insufficient permissions"), &format!("/api/payroll/employees/{id}"));
+    let viewer_list = app.call(Method::GET, "/api/employees", Some(&viewer), None).await?;
+    assert_nest_error(&viewer_list, 403, json!("Insufficient permissions"), "/api/employees");
+
+    let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
+    let actions: Vec<&str> =
+        log.body["data"].as_array().ok_or("data")?.iter().filter_map(|x| x["action"].as_str()).collect();
+    assert!(actions.contains(&"Added a salary / increment"), "{actions:?}");
+    assert!(actions.contains(&"Updated an employee's bank details"), "{actions:?}");
     Ok(())
 }
