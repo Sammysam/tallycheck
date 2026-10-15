@@ -5,6 +5,7 @@
 use api_server::ServerHandle;
 use app_core::config::AppConfig;
 use std::sync::Mutex;
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 struct Server(Mutex<Option<ServerHandle>>);
@@ -32,14 +33,54 @@ fn start_server(app: &tauri::App) -> anyhow::Result<String> {
     Ok(url)
 }
 
+/// A desktop user never sees stderr: show why the app cannot start (already running, data
+/// folder on a network drive, a restore that could not be finished, …).
+fn startup_error_box(message: &str) {
+    #[cfg(windows)]
+    #[allow(unsafe_code)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let text = wide(&format!("Cenango Accounting could not start.\n\n{message}"));
+        let title = wide("Cenango Accounting");
+        // SAFETY: both buffers are NUL-terminated UTF-16 and outlive the call; no owner window.
+        unsafe {
+            MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = message;
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         .setup(|app| {
             let url = start_server(app).map_err(|e| {
                 tracing::error!("startup failed: {e:#}");
+                startup_error_box(&format!("{e:#}"));
                 e
             })?;
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+            let base: tauri::Url = url.parse()?;
+            let home = MenuItemBuilder::with_id("home", "Accounting").build(app)?;
+            let backup = MenuItemBuilder::with_id("backup", "Backup and restore…").build(app)?;
+            let reload = MenuItemBuilder::with_id("reload", "Reload").accelerator("F5").build(app)?;
+            let tools = SubmenuBuilder::new(app, "Tools").items(&[&home, &backup, &reload]).build()?;
+            let menu = MenuBuilder::new(app).items(&[&tools]).build()?;
+            let targets = (base.clone(), base.join("system/backup")?);
+            app.on_menu_event(move |app, event| {
+                let Some(window) = app.get_webview_window("main") else { return };
+                let result = match event.id().as_ref() {
+                    "home" => window.navigate(targets.0.clone()),
+                    "backup" => window.navigate(targets.1.clone()),
+                    "reload" => window.reload(),
+                    _ => Ok(()),
+                };
+                if let Err(e) = result {
+                    tracing::error!("menu action failed: {e}");
+                }
+            });
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(base))
+                .menu(menu)
                 .title("Cenango Accounting")
                 .inner_size(1366.0, 860.0)
                 .min_inner_size(1024.0, 700.0)
@@ -52,6 +93,7 @@ pub fn run() {
         Ok(app) => app,
         Err(e) => {
             eprintln!("Cenango Accounting could not start: {e}");
+            startup_error_box(&e.to_string());
             std::process::exit(1);
         }
     };

@@ -22,5 +22,8 @@ tauri = { version = "2", features = [] }
 tracing.workspace = true
 tracing-appender.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
+
 [lints]
 workspace = true

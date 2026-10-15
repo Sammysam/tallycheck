@@ -5,6 +5,12 @@
 //! accounting-server create-admin <username>  password from ACCOUNTING_ADMIN_PASSWORD or stdin
 //! accounting-server export-storage-key        print the file-encryption key (hex) for an offline copy
 //! accounting-server import-storage-key        read a key (hex or base64) from stdin and install it
+//! accounting-server set-backup-password       set or change the backup password (stdin)
+//! accounting-server backup <folder>           write a verified, encrypted backup into <folder>
+//! accounting-server verify-backup <file>      check a backup completely
+//! accounting-server restore <file>            restore a backup (the app must be closed)
+//!
+//! Backup passwords are read from ACCOUNTING_BACKUP_PASSWORD or typed on stdin.
 //! ```
 //! The file-encryption key is DPAPI-protected and tied to this Windows account. Without its
 //! recovery copy, encrypted employee files cannot be opened on a new PC or after a reinstall.
@@ -28,9 +34,20 @@ async fn main() -> anyhow::Result<()> {
         }
         Some("export-storage-key") => export_storage_key(&config),
         Some("import-storage-key") => import_storage_key(&config),
-        Some(other) => bail!(
-            "unknown command {other:?}; expected serve, create-admin <username>, export-storage-key or import-storage-key"
-        ),
+        Some("set-backup-password") => set_backup_password(&config),
+        Some("backup") => {
+            let folder = args.get(1).context("usage: accounting-server backup <folder>")?;
+            run_backup(&config, folder).await
+        }
+        Some("verify-backup") => {
+            let file = args.get(1).context("usage: accounting-server verify-backup <file>")?;
+            verify(&config, file).await
+        }
+        Some("restore") => {
+            let file = args.get(1).context("usage: accounting-server restore <file>")?;
+            restore(&config, file).await
+        }
+        Some(other) => bail!("unknown command {other:?}; see the header of accounting-server.rs for the commands"),
     }
 }
 
@@ -40,6 +57,99 @@ async fn serve(config: &AppConfig) -> anyhow::Result<()> {
     tokio::signal::ctrl_c().await?;
     tracing::info!("shutting down");
     handle.shutdown().await;
+    Ok(())
+}
+
+fn read_line(prompt: &str) -> anyhow::Result<String> {
+    eprintln!("{prompt}");
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    Ok(line.trim_end_matches(['\r', '\n']).to_string())
+}
+
+fn backup_password(prompt: &str) -> anyhow::Result<String> {
+    match std::env::var("ACCOUNTING_BACKUP_PASSWORD") {
+        Ok(p) if !p.is_empty() => Ok(p),
+        _ => read_line(prompt),
+    }
+}
+
+fn set_backup_password(config: &AppConfig) -> anyhow::Result<()> {
+    let secrets = config.secrets_dir();
+    if backup::keys::load(&secrets)?.is_some() {
+        let current = read_line("Current backup password, then Enter:")?;
+        if !backup::keys::verify(&secrets, &current)? {
+            bail!("the current backup password is not correct");
+        }
+    }
+    let password = backup_password("New backup password (at least 10 characters), then Enter:")?;
+    backup::keys::save(&secrets, &backup::Kek::from_new_password(&password)?)?;
+    eprintln!("Backup password saved. Write it down: without it a backup cannot be opened on another PC.");
+    Ok(())
+}
+
+async fn run_backup(config: &AppConfig, folder: &str) -> anyhow::Result<()> {
+    let kek =
+        backup::keys::load(&config.secrets_dir())?.context("set a backup password first (set-backup-password)")?;
+    let _lock = api_server::server::lock_data_dir(&config.data_dir)?;
+    let db = database::Db::open(&config.database_path()).await?;
+    let result = backup::create_backup(&db, &config.data_dir, std::path::Path::new(folder), &kek).await;
+    db.close().await;
+    backup::schedule::record(&config.data_dir, &result.as_ref().map(Clone::clone).map_err(ToString::to_string));
+    let info = result?;
+    eprintln!("Backup written and verified: {} ({} bytes, {} stored files)", info.file, info.size, info.files);
+    if !info.missing_files.is_empty() {
+        eprintln!("Warning: {} files referred to by the records were already missing.", info.missing_files.len());
+    }
+    Ok(())
+}
+
+fn key_for(config: &AppConfig, file: &std::path::Path) -> anyhow::Result<backup::BackupKey> {
+    match backup::restore::key_for(file, &config.secrets_dir(), None) {
+        Ok(k) => Ok(k),
+        Err(_) => Ok(backup::BackupKey::Password(backup_password("Backup password for this file, then Enter:")?)),
+    }
+}
+
+async fn verify(config: &AppConfig, file: &str) -> anyhow::Result<()> {
+    let path = std::path::Path::new(file);
+    let m = backup::verify_backup(path, &key_for(config, path)?).await?;
+    eprintln!(
+        "The backup is complete and readable: made {} by version {}, {} entries.",
+        m.created_at,
+        m.app_version,
+        m.entries.len()
+    );
+    for (table, n) in &m.counts {
+        eprintln!("  {table}: {n}");
+    }
+    Ok(())
+}
+
+async fn restore(config: &AppConfig, file: &str) -> anyhow::Result<()> {
+    let path = std::path::Path::new(file);
+    let key = key_for(config, path)?;
+    std::fs::create_dir_all(&config.data_dir)?;
+    let _lock = api_server::server::lock_data_dir(&config.data_dir)
+        .context("close Cenango Accounting before restoring from the command line")?;
+    let answer = match std::env::var("ACCOUNTING_RESTORE_CONFIRM") {
+        Ok(v) => v,
+        Err(_) => {
+            read_line(&format!("This replaces all data in {}. Type RESTORE to continue:", config.data_dir.display()))?
+        }
+    };
+    if answer.trim() != "RESTORE" {
+        bail!("restore cancelled");
+    }
+    let m = backup::stage_restore(path, &key, &config.data_dir).await?;
+    let previous = backup::apply_pending_restore(&config.data_dir)?;
+    eprintln!("Restored the backup made {}.", m.created_at);
+    for (table, n) in &m.counts {
+        eprintln!("  {table}: {n}");
+    }
+    if let Some(prev) = previous {
+        eprintln!("The replaced data was kept in {}", prev.display());
+    }
     Ok(())
 }
 

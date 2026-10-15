@@ -21,6 +21,7 @@ ledger.workspace = true
 operations.workspace = true
 employees.workspace = true
 payroll.workspace = true
+backup.workspace = true
 documents.workspace = true
 reports.workspace = true
 chrono.workspace = true

@@ -595,6 +595,27 @@ try {
     await shot('25-payroll-void');
   });
 
+  // ── W6: backup and restore page ─────────────────────────────────────────────
+  await check('Backup page sets a password, writes a verified backup and checks it', async () => {
+    await go('/system/backup');
+    await waitFor(`!document.getElementById('password-card').hidden`, 'backup page loaded');
+    await type('#pw-new', 'office backup 2026');
+    await type('#pw-again', 'office backup 2026');
+    await evaluate(`document.getElementById('pw-save').click()`);
+    await waitFor(`document.getElementById('pw-msg').textContent.includes('Backup password saved')`, 'password saved');
+    const folder = join(SHOTS, 'backups');
+    await evaluate(`document.getElementById('bk-folder').value = ''`);
+    await type('#bk-folder', folder);
+    await evaluate(`document.getElementById('bk-run').click()`);
+    await waitFor(`document.getElementById('bk-msg').textContent.includes('Backup written and verified')`, 'backup written', 60000);
+    const made = readdirSync(folder).filter((f) => f.endsWith('.qbak'));
+    if (made.length !== 1) throw new Error('backup files: ' + made.join(', '));
+    await type('#rs-file', join(folder, made[0]));
+    await evaluate(`document.getElementById('rs-verify').click()`);
+    await waitFor(`document.getElementById('rs-msg').textContent.includes('complete and readable')`, 'backup checked', 60000);
+    await shot('26-backup');
+  });
+
   await check('second login goes through 2FA verify', async () => {
     await evaluate(`localStorage.removeItem('accessToken')`);
     await go('/login');

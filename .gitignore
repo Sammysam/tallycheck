@@ -14,3 +14,4 @@
 /tests/contract/node_modules
 /tests/contract/.scratch
 /src-tauri/gen
+/node_modules

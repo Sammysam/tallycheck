@@ -7,6 +7,7 @@
 // ADMIN_PASSWORD=admin12345 (see README.md). No dependencies beyond Node 24.
 
 import { createHash, createHmac } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 
 const [REF, NEW] = process.argv.slice(2);
 if (!REF || !NEW) {
@@ -127,7 +128,9 @@ async function scenario(base) {
   s.temp2 = r.body.tempToken;
   await step('2fa.verify.wrong-code', 'POST', '/api/auth/2fa/verify', { token: s.temp2, body: { code: wrongCode(s.secret) } });
   await step('2fa.verify.ok', 'POST', '/api/auth/2fa/verify', { token: s.temp2, body: { code: totp(s.secret) } });
-  await step('2fa.setup.after-enabled', 'GET', '/api/auth/2fa/setup', { token: s.temp2 });
+  r = await step('2fa.setup.after-enabled', 'GET', '/api/auth/2fa/setup', { token: s.temp2 });
+  // The reference replaces the stored secret here (the re-enrolment D2 blocks); keep the latest.
+  s.latestSecret = r.body?.secret ?? s.secret;
 
   // Users
   r = await step('roles.list', 'GET', '/api/roles', { token: s.admin });
@@ -649,6 +652,7 @@ async function scenario(base) {
   // D10 last: its extra accounts would shift the UUID numbering of everything after it.
   await step('accounts.seed', 'POST', '/api/accounts/seed', { token: s.admin });
   await step('accounts.list.after-seed', 'GET', '/api/accounts', { token: s.admin });
+  out.adminSecret = s.latestSecret ?? s.secret;
   return out;
 }
 
@@ -742,6 +746,8 @@ function sortLines(v) {
 }
 
 const [ref, neu] = await Promise.all([scenario(REF), scenario(NEW)]);
+// For the importer's side-by-side check (test-only secret, scratch folder, never committed).
+writeFileSync(new URL('./.scratch/contract-state.json', import.meta.url), JSON.stringify({ adminSecret: ref.adminSecret }));
 const nr = normaliser();
 const nn = normaliser();
 let failures = 0;

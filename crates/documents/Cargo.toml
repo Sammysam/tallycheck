@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-aes-gcm = "0.10"
+aes-gcm.workspace = true
 app-core.workspace = true
 tracing.workspace = true
 

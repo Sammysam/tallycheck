@@ -392,3 +392,39 @@ async fn every_earlier_schema_version_upgrades_cleanly() -> AppResult<()> {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn an_older_database_is_copied_before_it_is_upgraded() -> AppResult<()> {
+    let all: Vec<sqlx::migrate::Migration> = MIGRATOR.iter().cloned().collect();
+    let dir = tempfile::tempdir().map_err(AppError::internal)?;
+    let path = dir.path().join("accounting.db");
+    let copies = dir.path().join("pre-upgrade");
+    assert!(Db::snapshot_before_upgrade(&path, &copies).await?.is_none(), "no database yet");
+
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(base_options(&path).create_if_missing(true))
+        .await?;
+    let older = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(all[..1].to_vec()),
+        ignore_missing: false,
+        locking: true,
+        no_tx: false,
+    };
+    older.run(&pool).await?;
+    sqlx::query(r#"INSERT INTO "vendors" ("id","name") VALUES ('v1','Paper Co')"#).execute(&pool).await?;
+    pool.close().await;
+
+    let copy = Db::snapshot_before_upgrade(&path, &copies).await?.ok_or_else(|| AppError::internal("no copy"))?;
+    let check = sqlx::sqlite::SqlitePoolOptions::new()
+        .connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&copy).read_only(true))
+        .await?;
+    let name: String = sqlx::query_scalar(r#"SELECT "name" FROM "vendors""#).fetch_one(&check).await?;
+    assert_eq!(name, "Paper Co");
+    check.close().await;
+
+    let db = Db::open(&path).await?;
+    db.close().await;
+    assert!(Db::snapshot_before_upgrade(&path, &copies).await?.is_none(), "up to date: nothing copied");
+    Ok(())
+}

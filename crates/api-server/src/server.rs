@@ -25,7 +25,7 @@ use tracing::Level;
 const JWT_SECRET_FILE: &str = "jwt-secret.dpapi";
 const JWT_SECRET_LEN: usize = 64;
 /// AES-256 key for employee photos and documents, DPAPI-protected like the JWT secret.
-pub const STORAGE_KEY_FILE: &str = "storage-key.dpapi";
+pub use app_core::secrets::STORAGE_KEY_FILE;
 
 /// The encrypted file store under `<data_dir>/files`, creating its key on first run.
 pub fn open_file_store(config: &AppConfig) -> anyhow::Result<FileStore> {
@@ -38,7 +38,9 @@ pub fn open_file_store(config: &AppConfig) -> anyhow::Result<FileStore> {
 /// The whole application: `/api` plus, when a frontend build is given, the static app with
 /// SPA fallback to `index.html`.
 pub fn build_router(state: AppState, frontend_dir: Option<&Path>) -> Router {
-    let mut router = Router::new().nest("/api", api_router());
+    let mut router = Router::new()
+        .nest("/api", api_router())
+        .route("/system/backup", axum::routing::get(crate::routes::system::page));
     router = match frontend_dir {
         Some(dir) => {
             let index = dir.join("index.html");
@@ -74,11 +76,15 @@ pub struct ServerHandle {
     pub db: Db,
     shutdown: Option<oneshot::Sender<()>>,
     join: JoinHandle<()>,
+    scheduler: JoinHandle<()>,
+    /// Held for the server's lifetime: one server per data folder.
+    _lock: std::fs::File,
 }
 
 impl ServerHandle {
     /// Stops accepting connections, lets in-flight requests finish, and closes the database.
     pub async fn shutdown(mut self) {
+        self.scheduler.abort();
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
@@ -97,6 +103,18 @@ impl ServerHandle {
 /// first admin from `ADMIN_USERNAME` / `ADMIN_PASSWORD` if set (reference `onModuleInit`),
 /// binds the configured address and serves until `shutdown`.
 pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
+    config.check_local_data_dir()?;
+    std::fs::create_dir_all(&config.data_dir).context("creating the data folder")?;
+    let lock = lock_data_dir(&config.data_dir)?;
+    if let Some(previous) = backup::apply_pending_restore(&config.data_dir).context("finishing a restore")? {
+        tracing::warn!(kept = %previous.display(), "restore applied; the replaced data was kept");
+    }
+    if let Some(copy) = Db::snapshot_before_upgrade(&config.database_path(), &config.data_dir.join("pre-upgrade"))
+        .await
+        .context("copying the database before upgrading it")?
+    {
+        tracing::info!(copy = %copy.display(), "database copied before the schema upgrade");
+    }
     let db = Db::open(&config.database_path()).await.context("opening the database")?;
     let secret = app_core::secrets::load_or_create(&config.secrets_dir().join(JWT_SECRET_FILE), JWT_SECRET_LEN)
         .context("loading the JWT signing key")?;
@@ -105,7 +123,9 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
 
     let listener = TcpListener::bind(config.bind).await.with_context(|| format!("binding {}", config.bind))?;
     let addr = listener.local_addr()?;
-    let state = AppState::new(db.clone(), JwtKeys::new(&secret), files, config.lan_enabled, addr.port());
+    let state = AppState::new(db.clone(), JwtKeys::new(&secret), files, config.lan_enabled, addr.port())
+        .with_data_dir(config.data_dir.clone())
+        .with_lan_policy(config.lan_allowed.clone(), config.lan_host_names.clone());
     let frontend = resolve_frontend_dir(config.frontend_dir.as_deref());
     match &frontend {
         Some(d) => tracing::info!("serving frontend from {}", d.display()),
@@ -115,7 +135,7 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
 
     let (tx, rx) = oneshot::channel::<()>();
     let join = tokio::spawn(async move {
-        let result = axum::serve(listener, app)
+        let result = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
             .with_graceful_shutdown(async {
                 let _ = rx.await;
             })
@@ -124,8 +144,22 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
             tracing::error!("server error: {e}");
         }
     });
+    let scheduler = backup::schedule::spawn(db.clone(), config.data_dir.clone());
     tracing::info!(%addr, lan = config.lan_enabled, "accounting server listening");
-    Ok(ServerHandle { addr, db, shutdown: Some(tx), join })
+    Ok(ServerHandle { addr, db, shutdown: Some(tx), join, scheduler, _lock: lock })
+}
+
+/// An exclusive lock on `<data_dir>/.lock`: a second server (or a CLI restore) on the same
+/// data folder is refused instead of sharing the database.
+pub fn lock_data_dir(dir: &Path) -> anyhow::Result<std::fs::File> {
+    let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(".lock"))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            anyhow::bail!("Cenango Accounting is already running with the data folder {}", dir.display())
+        }
+        Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
+    }
 }
 
 async fn bootstrap_admin_from_env(db: &Db) -> anyhow::Result<()> {
