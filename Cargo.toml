@@ -8,6 +8,8 @@ members = [
     "crates/ledger",
     "crates/operations",
     "crates/reports",
+    "crates/documents",
+    "crates/employees",
     "crates/api-server",
     "src-tauri",
 ]
@@ -27,11 +29,13 @@ audit = { path = "crates/audit" }
 ledger = { path = "crates/ledger" }
 operations = { path = "crates/operations" }
 reports = { path = "crates/reports" }
+documents = { path = "crates/documents" }
+employees = { path = "crates/employees" }
 api-server = { path = "crates/api-server" }
 
 anyhow = "1"
 argon2 = "0.5"
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"
 bcrypt = "0.17"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

@@ -16,6 +16,7 @@ const SHOTS = process.argv[3] ?? join(tmpdir(), 'accounting-ui-smoke');
 mkdirSync(SHOTS, { recursive: true });
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const PORT = 9333;
+const fs_size = (path) => statSync(path).size;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function totp(secret) {
@@ -427,6 +428,92 @@ try {
     await shot('20-ap-aging');
     await go('/reports/ar-aging');
     await waitFor(`document.body.innerText.includes('Grand Total Outstanding')`, 'AR ageing');
+  });
+
+  // ── W4: employees ──────────────────────────────────────────────────────────
+  /** Puts a local file into a file input the way a user picking it would (fires change). */
+  const pickFile = async (selector, path) => {
+    const { result } = await send('Runtime.evaluate', { expression: `document.querySelector(${JSON.stringify(selector)})` });
+    if (!result.objectId) throw new Error('no file input ' + selector);
+    await send('DOM.setFileInputFiles', { objectId: result.objectId, files: [path] });
+  };
+  /** Types into the input inside the <label> whose caption is `caption`. */
+  const typeLabeled = async (caption, text) => {
+    await evaluate(`(() => {
+      const l = [...document.querySelectorAll('label')].find((x) => x.querySelector('span')?.textContent.trim() === ${JSON.stringify(caption)});
+      if (!l) throw new Error('no field ' + ${JSON.stringify(caption)});
+      const el = l.querySelector('input,textarea'); el.focus(); el.select?.(); return true; })()`);
+    await send('Input.insertText', { text });
+  };
+  const PHOTO = join(SHOTS, 'photo.png');
+  writeFileSync(PHOTO, Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex'));
+  const DOC = join(SHOTS, 'Degree certificate.pdf');
+  writeFileSync(DOC, '%PDF-1.4\n% smoke test document\n%%EOF\n');
+  let empId = '';
+
+  await check('Employees page creates an employee and opens the profile', async () => {
+    await go('/employees');
+    await clickText('+ New Employee');
+    await type('input[placeholder="e.g. CEN-042"]', 'CEN-042');
+    await type('input[placeholder="Full name"]', 'Asha Perera');
+    await type('input[placeholder="Department"]', 'Operations');
+    await clickText('Save & open profile');
+    await waitFor(`/^\\/employees\\/[0-9a-f-]{36}$/.test(location.pathname) && document.body.innerText.includes('Asha Perera')`, 'profile page');
+    empId = await evaluate('location.pathname.split("/").pop()');
+    await go('/employees');
+    await type('input[placeholder="Search by ID, name, department, title or email"]', 'operations');
+    await waitFor(`document.body.innerText.includes('CEN-042')`, 'search result');
+    await shot('20-employees');
+  });
+
+  await check('Profile photo uploads, displays and is stored encrypted', async () => {
+    await go('/employees/' + empId);
+    await waitFor(`document.body.innerText.includes('Add photo')`, 'photo controls');
+    await pickFile('input[type=file][accept^="image/"]', PHOTO);
+    await waitFor(`document.body.innerText.includes('Change photo')`, 'photo saved');
+    await waitFor(`[...document.querySelectorAll('img')].some((i) => i.src.startsWith('blob:') && i.complete && i.naturalWidth > 0)`, 'photo shown');
+    const r = await api('GET', '/api/employees/' + empId);
+    if (!/^employees\/.+\/photo\/.+\.png$/.test(r.body.photoKey ?? '')) throw new Error('photoKey ' + r.body.photoKey);
+  });
+
+  await check('Documents upload through the form and download intact', async () => {
+    await clickText('+ Upload document');
+    await pickFile('form input[type=file]', DOC);
+    await type('input[placeholder="e.g. Office Safety Certificate"]', 'Degree certificate');
+    await clickText('Upload');
+    await waitFor(`document.body.innerText.includes('Degree certificate.pdf') || document.querySelectorAll('tr').length > 1 && document.body.innerText.includes('Degree certificate')`, 'document row');
+    const docs = (await api('GET', `/api/employees/${empId}/documents`)).body;
+    if (docs.length !== 1 || docs[0].size !== String(fs_size(DOC))) throw new Error('documents ' + JSON.stringify(docs));
+    const got = await evaluate(`(async () => {
+      const r = await fetch('/api/employees/${empId}/documents/' + ${JSON.stringify(docs[0].id)} + '/download',
+        { headers: { authorization: 'Bearer ' + localStorage.getItem('accessToken') } });
+      return { status: r.status, cd: r.headers.get('content-disposition'), text: await r.text() };
+    })()`);
+    if (got.status !== 200 || !got.text.includes('smoke test document') || !got.cd.startsWith('attachment; filename="Degree certificate.pdf"'))
+      throw new Error('download ' + JSON.stringify(got));
+    await shot('21-employee-profile');
+  });
+
+  await check('Salary section sets a salary and bank details (payroll)', async () => {
+    await clickText('+ Set salary');
+    await fillDates('2026-04-01');
+    await typeLabeled('Basic *', '50000');
+    await typeLabeled('BRA 2005', '1000');
+    await evaluate(`(() => {
+      const f = [...document.querySelectorAll('form')].find((x) => x.innerText.includes('Effective from'));
+      f.querySelector('button[type=submit]').click(); return true; })()`);
+    await waitFor(`document.body.innerText.includes('+ Add increment')`, 'salary saved');
+    await clickText('Bank details');
+    await typeLabeled('Bank', 'Bank of Ceylon');
+    await typeLabeled('Staff loan balance (Rs.)', '1500.50');
+    await evaluate(`(() => {
+      const f = [...document.querySelectorAll('form')].find((x) => x.innerText.includes('Account number'));
+      f.querySelector('button[type=submit]').click(); return true; })()`);
+    await waitFor(`document.body.innerText.includes('Bank of Ceylon')`, 'bank saved');
+    const v = (await api('GET', '/api/payroll/employees/' + empId)).body;
+    if (v.current?.basic !== 50000 || v.current?.monthlyTotal !== 51000 || v.staffLoanBalance !== 1500.5)
+      throw new Error('payroll view ' + JSON.stringify(v));
+    await shot('22-salary');
   });
 
   await check('second login goes through 2FA verify', async () => {

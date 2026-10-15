@@ -6,7 +6,7 @@
 // Both servers must start from a fresh database with ADMIN_USERNAME=admin and
 // ADMIN_PASSWORD=admin12345 (see README.md). No dependencies beyond Node 24.
 
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 const [REF, NEW] = process.argv.slice(2);
 if (!REF || !NEW) {
@@ -53,6 +53,48 @@ async function call(base, method, path, { token, body, rawAuth } = {}) {
   try { json = text ? JSON.parse(text) : null; } catch { json = text; }
   return { status: res.status, body: json };
 }
+
+// Multipart upload, as the frontend's FormData posts do.
+async function upload(base, method, path, { token, fields = {}, file } = {}) {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  if (file) form.append('file', new Blob([file.bytes], { type: file.type }), file.name);
+  let res;
+  try {
+    res = await fetch(base + path, { method, headers: token ? { authorization: `Bearer ${token}` } : {}, body: form });
+  } catch (e) {
+    // A server may answer an oversized upload and close the connection before the body is sent.
+    return { status: 0, body: `connection closed during upload (${e.cause?.code ?? e.message})` };
+  }
+  const text = await res.text();
+  let json;
+  try { json = text ? JSON.parse(text) : null; } catch { json = text; }
+  return { status: res.status, body: json };
+}
+
+// Binary download: compared by status, the headers the frontend relies on, size and hash.
+async function download(base, path, token) {
+  const res = await fetch(base + path, { headers: { authorization: `Bearer ${token}` } });
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (res.status >= 400) {
+    let body; try { body = JSON.parse(bytes.toString()); } catch { body = bytes.toString(); }
+    return { status: res.status, body };
+  }
+  return {
+    status: res.status,
+    body: {
+      contentType: res.headers.get('content-type'),
+      contentDisposition: res.headers.get('content-disposition'),
+      cacheControl: res.headers.get('cache-control'),
+      size: bytes.length,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    },
+  };
+}
+
+const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex');
+const PDF = Buffer.from('%PDF-1.4\n% test document for the contract suite\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n');
+const PDF2 = Buffer.from('%PDF-1.4\n% second version\n%%EOF\n');
 
 // ── Scenario ─────────────────────────────────────────────────────────────────
 const FIXED_UUID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
@@ -389,6 +431,90 @@ async function scenario(base) {
   await step('reports.profit-loss.bad-date', 'GET', '/api/reports/profit-loss?dateFrom=2026-13-01', { token: s.admin });
   await step('viewer.reports', 'GET', '/api/reports/ar-aging', { token: s.viewer });
   await step('viewer.reports.anonymous', 'GET', '/api/reports/ar-aging');
+
+  // ── W4: employees ──────────────────────────────────────────────────────────
+  const E = (body) => ({ token: s.admin, body });
+  await step('employees.create.empty', 'POST', '/api/employees', E({}));
+  r = await step('employees.create', 'POST', '/api/employees', E({ employeeId: ' CEN-001 ', name: ' Asha Perera ', jobTitle: 'Engineer', department: 'Ops',
+    email: ' asha@cenango.lk ', phone: '', joinDate: '2024-01-15', notes: '  ', epfNumber: ' 101 ', nationalId: '199012345678', junk: 1 }));
+  s.emp1 = r.body?.id;
+  await step('employees.create.duplicate-case', 'POST', '/api/employees', E({ employeeId: 'cen-001', name: 'Other' }));
+  r = await step('employees.create.contract', 'POST', '/api/employees', E({ employeeId: 'CEN-002', name: 'Nimal Silva', employmentType: 'CONTRACT', status: 'ACTIVE' }));
+  s.emp2 = r.body?.id;
+  await step('employees.list', 'GET', '/api/employees', { token: s.admin });
+  await step('employees.list.search', 'GET', '/api/employees?q=%20ops%20', { token: s.admin });
+  await step('employees.list.status', 'GET', '/api/employees?status=ON_LEAVE', { token: s.admin });
+  await step('employees.list.bad-status', 'GET', '/api/employees?status=GONE', { token: s.admin });
+  await step('employees.get', 'GET', `/api/employees/${s.emp1}`, { token: s.admin });
+  await step('employees.get.not-uuid', 'GET', '/api/employees/not-a-uuid', { token: s.admin });
+  await step('employees.get.unknown', 'GET', `/api/employees/${FIXED_UUID}`, { token: s.admin });
+  await step('employees.update', 'PATCH', `/api/employees/${s.emp2}`, E({ status: 'ON_LEAVE', jobTitle: '', bankName: 'ignored' }));
+  await step('employees.update.id-clash', 'PATCH', `/api/employees/${s.emp2}`, E({ employeeId: 'Cen-001' }));
+  await step('employees.update.invalid', 'PATCH', `/api/employees/${s.emp2}`, E({ name: '  ', email: 'nope' }));
+
+  // Photo
+  const shoot = (label, path, opts) => { const t = upload(base, 'POST', path, { token: s.admin, ...opts }).then((x) => { out.push({ label, method: 'POST', path, ...x }); return x; }); return t; };
+  await step('employees.photo.none', 'GET', `/api/employees/${s.emp1}/photo`, { token: s.admin });
+  await shoot('employees.photo.upload', `/api/employees/${s.emp1}/photo`, { file: { name: 'Face.PNG', type: 'image/png', bytes: PNG } });
+  out.push({ label: 'employees.photo.download', method: 'GET', path: '/photo', ...(await download(base, `/api/employees/${s.emp1}/photo`, s.admin)) });
+  await shoot('employees.photo.wrong-type', `/api/employees/${s.emp1}/photo`, { file: { name: 'notes.txt', type: 'text/plain', bytes: Buffer.from('hello') } });
+  await shoot('employees.photo.no-file', `/api/employees/${s.emp1}/photo`, {});
+  await shoot('employees.photo.too-large', `/api/employees/${s.emp1}/photo`, { file: { name: 'big.jpg', type: 'image/jpeg', bytes: Buffer.alloc(5 * 1024 * 1024 + 1) } });
+  await step('employees.photo.remove', 'DELETE', `/api/employees/${s.emp2}/photo`, { token: s.admin });
+
+  // Documents
+  const docPath = `/api/employees/${s.emp1}/documents`;
+  await shoot('documents.add.no-title', docPath, { file: { name: 'cv.pdf', type: 'application/pdf', bytes: PDF } });
+  await shoot('documents.add.no-file', docPath, { fields: { title: 'Degree' } });
+  await shoot('documents.add.wrong-type', docPath, { fields: { title: 'Zip' }, file: { name: 'a.zip', type: 'application/zip', bytes: Buffer.from('PK') } });
+  await shoot('documents.add.too-large', docPath, { fields: { title: 'Huge' }, file: { name: 'h.pdf', type: 'application/pdf', bytes: Buffer.alloc(10 * 1024 * 1024 + 1) } });
+  r = await shoot('documents.add', docPath, { fields: { title: ' Degree certificate ', category: 'CERTIFICATE', expiryDate: '2030-12-31', notes: ' BSc ' }, file: { name: 'Degree.pdf', type: 'application/pdf', bytes: PDF } });
+  s.doc1 = r.body?.id;
+  await step('documents.list', 'GET', docPath, { token: s.admin });
+  out.push({ label: 'documents.download', method: 'GET', path: '/download', ...(await download(base, `${docPath}/${s.doc1}/download`, s.admin)) });
+  out.push({ label: 'documents.download.inline', method: 'GET', path: '/download?inline=1', ...(await download(base, `${docPath}/${s.doc1}/download?inline=1`, s.admin)) });
+  r = await shoot('documents.replace', `${docPath}/${s.doc1}/replace`, { fields: { notes: 'Re-issued' }, file: { name: 'Degree v2.pdf', type: 'application/pdf', bytes: PDF2 } });
+  s.doc2 = r.body?.id;
+  await shoot('documents.replace.old-version', `${docPath}/${s.doc1}/replace`, { file: { name: 'x.pdf', type: 'application/pdf', bytes: PDF2 } });
+  await step('documents.update', 'PATCH', `${docPath}/${s.doc2}`, E({ title: 'Degree (certified)', category: 'OTHER' }));
+  await step('employees.get.with-documents', 'GET', `/api/employees/${s.emp1}`, { token: s.admin });
+  await step('documents.delete.current', 'DELETE', `${docPath}/${s.doc2}`, { token: s.admin });
+  await step('documents.list.after-delete', 'GET', docPath, { token: s.admin });
+  await step('documents.delete.unknown', 'DELETE', `${docPath}/${FIXED_UUID}`, { token: s.admin });
+
+  // Salaries, increments and bank details (payroll permission)
+  const P = (body) => ({ token: s.admin, body });
+  const pe = `/api/payroll/employees/${s.emp1}`;
+  await step('payroll.employee.empty', 'GET', pe, { token: s.admin });
+  await step('salaries.create.invalid', 'POST', `${pe}/salaries`, P({ effectiveFrom: '', basic: 'abc' }));
+  r = await step('salaries.create', 'POST', `${pe}/salaries`, P({ effectiveFrom: '2026-04-01', basic: '40500', bra2005: 1000, bra2016: 2500, vehicleAllowance: 15000, otherAllowance: 24850, reason: ' Joined ' }));
+  s.sal1 = r.body?.id;
+  await step('salaries.create.clash', 'POST', `${pe}/salaries`, P({ effectiveFrom: '2026-04-01', basic: 1 }));
+  r = await step('salaries.create.increment', 'POST', `${pe}/salaries`, P({ effectiveFrom: '2027-01-01', basic: 45000, bra2005: 1000, bra2016: 2500, vehicleAllowance: 15000, otherAllowance: 24850, reason: 'Annual increment 2027' }));
+  s.sal2 = r.body?.id;
+  await step('salaries.update', 'PATCH', `${pe}/salaries/${s.sal2}`, P({ loanInstallment: 2500, notes: 'approved' }));
+  await step('salaries.create.contract-default', 'POST', `/api/payroll/employees/${s.emp2}/salaries`, P({ effectiveFrom: '2026-04-01', basic: 30000 }));
+  await step('payroll.bank', 'PATCH', `${pe}/bank`, P({ bankName: ' Bank of Ceylon ', bankBranch: '', bankAccountNo: '0071234', staffLoanBalance: '25000.5' }));
+  await step('payroll.employee', 'GET', pe, { token: s.admin });
+  await step('payroll.employee.as-of', 'GET', `${pe}?asOf=2027-02-01`, { token: s.admin });
+  await step('payroll.employee.not-uuid', 'GET', '/api/payroll/employees/abc', { token: s.admin });
+  await step('salaries.delete', 'DELETE', `${pe}/salaries/${s.sal2}`, { token: s.admin });
+  await step('salaries.delete.unknown', 'DELETE', `${pe}/salaries/${FIXED_UUID}`, { token: s.admin });
+  await step('employees.get.with-bank', 'GET', `/api/employees/${s.emp1}`, { token: s.admin });
+
+  // An HR user with `employees` but not `payroll` never sees bank details or salaries.
+  r = await call(base, 'POST', '/api/roles', A({ name: 'HR', permissions: ['employees'] }));
+  await call(base, 'POST', '/api/users', A({ username: 'hr1', password: 'hrpass123', roleId: r.body?.id }));
+  r = await call(base, 'POST', '/api/auth/login', { body: { username: 'hr1', password: 'hrpass123' } });
+  const ht = r.body.tempToken;
+  const hs = (await call(base, 'GET', '/api/auth/2fa/setup', { token: ht })).body.secret;
+  s.hr = (await call(base, 'POST', '/api/auth/2fa/enable', { token: ht, body: { code: totp(hs) } })).body.accessToken;
+  await step('hr.employee.redacted', 'GET', `/api/employees/${s.emp1}`, { token: s.hr });
+  await step('hr.employees.list.redacted', 'GET', '/api/employees', { token: s.hr });
+  await step('hr.payroll.forbidden', 'GET', pe, { token: s.hr });
+  await step('viewer.employees.forbidden', 'GET', '/api/employees', { token: s.viewer });
+  await step('employees.delete', 'DELETE', `/api/employees/${s.emp2}`, { token: s.admin });
+  await step('employees.list.after-delete', 'GET', '/api/employees', { token: s.admin });
 
   // ── W2: own-invoices-only scope ────────────────────────────────────────────
   r = await call(base, 'POST', '/api/roles', A({ name: 'Sales', permissions: ['invoices'] }));

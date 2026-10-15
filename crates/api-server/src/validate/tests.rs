@@ -262,3 +262,20 @@ fn bills_expenses_payments_match_reference() {
     rules_check("CreateExpenseDto", ops::expense_rules);
     rules_check("CreatePaymentDto", ops::payment_rules);
 }
+
+// ── W4 ───────────────────────────────────────────────────────────────────────
+
+#[test]
+fn employees_match_reference() {
+    rules_check("CreateEmployeeDto", |v| hr::employee_rules(v, false));
+    rules_check("UpdateEmployeeDto", |v| hr::employee_rules(v, true));
+    rules_check("QueryEmployeesDto", hr::employee_query_rules);
+    rules_check("UploadDocumentDto", |v| hr::document_rules(v, false));
+}
+
+#[test]
+fn bank_and_salaries_match_reference() {
+    rules_check("UpdateBankDto", hr::bank_rules);
+    rules_check("CreateSalaryDto", |v| hr::salary_rules(v, false));
+    rules_check("UpdateSalaryDto", |v| hr::salary_rules(v, true));
+}

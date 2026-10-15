@@ -1700,6 +1700,444 @@
    ]
   }
  ],
+ "CreateEmployeeDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "employeeId must be shorter than or equal to 50 characters",
+    "Employee ID is required",
+    "employeeId must be a string",
+    "name must be shorter than or equal to 200 characters",
+    "Name is required",
+    "name must be a string"
+   ]
+  },
+  {
+   "input": {
+    "employeeId": "   ",
+    "name": "  "
+   },
+   "status": 400,
+   "message": [
+    "Employee ID is required",
+    "Name is required"
+   ]
+  },
+  {
+   "input": {
+    "employeeId": " CEN-001 ",
+    "name": " Asha Perera ",
+    "junk": 1
+   },
+   "ok": {
+    "employeeId": "CEN-001",
+    "name": "Asha Perera"
+   }
+  },
+  {
+   "input": {
+    "employeeId": "CEN-001",
+    "name": "A",
+    "jobTitle": "  ",
+    "department": " Ops ",
+    "email": " a@b.lk ",
+    "phone": "",
+    "joinDate": " 2024-01-15 ",
+    "notes": "  ",
+    "epfNumber": " 12 ",
+    "nationalId": "",
+    "resignedDate": "",
+    "userId": ""
+   },
+   "ok": {
+    "employeeId": "CEN-001",
+    "name": "A",
+    "jobTitle": null,
+    "department": "Ops",
+    "email": "a@b.lk",
+    "phone": null,
+    "joinDate": "2024-01-15",
+    "notes": null,
+    "epfNumber": "12",
+    "nationalId": null,
+    "resignedDate": null,
+    "userId": null
+   }
+  },
+  {
+   "input": {
+    "employeeId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "name": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "jobTitle": 5,
+    "email": "bad",
+    "phone": "ppppppppppppppppppppppppppppppppppppppppppppppppppp",
+    "joinDate": "2024-02-30",
+    "status": "GONE",
+    "employmentType": "TEMP",
+    "userId": "nope"
+   },
+   "status": 400,
+   "message": [
+    "employeeId must be shorter than or equal to 50 characters",
+    "name must be shorter than or equal to 200 characters",
+    "jobTitle must be shorter than or equal to 200 characters",
+    "jobTitle must be a string",
+    "Email is not valid",
+    "phone must be shorter than or equal to 50 characters",
+    "joinDate must be a valid date in YYYY-MM-DD format",
+    "status must be one of the following values: ACTIVE, ON_LEAVE, LEFT",
+    "employmentType must be one of the following values: PERMANENT, CONTRACT",
+    "userId must be a UUID"
+   ]
+  },
+  {
+   "input": {
+    "employeeId": "CEN-2",
+    "name": "B",
+    "status": "ON_LEAVE",
+    "employmentType": "CONTRACT",
+    "email": null,
+    "joinDate": null
+   },
+   "ok": {
+    "employeeId": "CEN-2",
+    "name": "B",
+    "status": "ON_LEAVE",
+    "employmentType": "CONTRACT",
+    "email": null,
+    "joinDate": null
+   }
+  },
+  {
+   "input": {
+    "employeeId": 5,
+    "name": 6
+   },
+   "status": 400,
+   "message": [
+    "employeeId must be shorter than or equal to 50 characters",
+    "employeeId must be a string",
+    "name must be shorter than or equal to 200 characters",
+    "name must be a string"
+   ]
+  }
+ ],
+ "UpdateEmployeeDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "name": "  "
+   },
+   "status": 400,
+   "message": [
+    "Name is required"
+   ]
+  },
+  {
+   "input": {
+    "jobTitle": ""
+   },
+   "ok": {
+    "jobTitle": null
+   }
+  },
+  {
+   "input": {
+    "employeeId": " cen-9 ",
+    "status": "LEFT",
+    "resignedDate": "2026-03-31"
+   },
+   "ok": {
+    "employeeId": "cen-9",
+    "status": "LEFT",
+    "resignedDate": "2026-03-31"
+   }
+  },
+  {
+   "input": {
+    "bankName": "x",
+    "staffLoanBalance": 5
+   },
+   "ok": {}
+  }
+ ],
+ "QueryEmployeesDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "q": " asha ",
+    "status": "ACTIVE"
+   },
+   "ok": {
+    "q": " asha ",
+    "status": "ACTIVE"
+   }
+  },
+  {
+   "input": {
+    "status": "x"
+   },
+   "status": 400,
+   "message": [
+    "status must be one of the following values: ACTIVE, ON_LEAVE, LEFT"
+   ]
+  },
+  {
+   "input": {
+    "q": [
+     "a",
+     "b"
+    ]
+   },
+   "status": 400,
+   "message": [
+    "q must be a string"
+   ]
+  }
+ ],
+ "UploadDocumentDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "title must be shorter than or equal to 200 characters",
+    "Give the document a title",
+    "title must be a string"
+   ]
+  },
+  {
+   "input": {
+    "title": "  "
+   },
+   "status": 400,
+   "message": [
+    "Give the document a title"
+   ]
+  },
+  {
+   "input": {
+    "title": " Degree ",
+    "category": "CERTIFICATE",
+    "expiryDate": " 2030-01-01 ",
+    "notes": " n "
+   },
+   "ok": {
+    "title": "Degree",
+    "category": "CERTIFICATE",
+    "expiryDate": "2030-01-01",
+    "notes": "n"
+   }
+  },
+  {
+   "input": {
+    "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "category": "PASSPORT",
+    "expiryDate": "soon",
+    "notes": 5
+   },
+   "status": 400,
+   "message": [
+    "title must be shorter than or equal to 200 characters",
+    "category must be one of the following values: CERTIFICATE, ID, CONTRACT, VISA, PAYSLIP, OTHER",
+    "expiryDate must be a valid date in YYYY-MM-DD format",
+    "notes must be a string"
+   ]
+  },
+  {
+   "input": {
+    "title": "T",
+    "expiryDate": "",
+    "notes": ""
+   },
+   "ok": {
+    "title": "T",
+    "expiryDate": null,
+    "notes": null
+   }
+  }
+ ],
+ "UpdateBankDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "bankName": " BOC ",
+    "bankBranch": "",
+    "bankAccountNo": " 0071 ",
+    "staffLoanBalance": "25000.5"
+   },
+   "ok": {
+    "bankName": "BOC",
+    "bankBranch": null,
+    "bankAccountNo": "0071",
+    "staffLoanBalance": 25000.5
+   }
+  },
+  {
+   "input": {
+    "bankName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "bankAccountNo": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+    "staffLoanBalance": -1
+   },
+   "status": 400,
+   "message": [
+    "bankName must be shorter than or equal to 100 characters",
+    "bankAccountNo must be shorter than or equal to 50 characters",
+    "staffLoanBalance must not be less than 0"
+   ]
+  },
+  {
+   "input": {
+    "staffLoanBalance": "abc"
+   },
+   "status": 400,
+   "message": [
+    "staffLoanBalance must not be less than 0",
+    "staffLoanBalance must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "staffLoanBalance": 1.005
+   },
+   "status": 400,
+   "message": [
+    "staffLoanBalance must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "bankName": null,
+    "staffLoanBalance": null
+   },
+   "ok": {
+    "bankName": null,
+    "staffLoanBalance": null
+   }
+  }
+ ],
+ "CreateSalaryDto": [
+  {
+   "input": {},
+   "status": 400,
+   "message": [
+    "Effective date is required",
+    "effectiveFrom must be a valid date in YYYY-MM-DD format",
+    "basic must not be less than 0",
+    "basic must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "effectiveFrom": "",
+    "basic": ""
+   },
+   "status": 400,
+   "message": [
+    "Effective date is required",
+    "effectiveFrom must be a valid date in YYYY-MM-DD format"
+   ]
+  },
+  {
+   "input": {
+    "effectiveFrom": "2026-04-01",
+    "basic": "40500",
+    "bra2005": 1000,
+    "bra2016": "2500",
+    "vehicleAllowance": 15000,
+    "otherAllowance": 24850,
+    "junk": 1
+   },
+   "ok": {
+    "effectiveFrom": "2026-04-01",
+    "basic": 40500,
+    "bra2005": 1000,
+    "bra2016": 2500,
+    "vehicleAllowance": 15000,
+    "otherAllowance": 24850
+   }
+  },
+  {
+   "input": {
+    "effectiveFrom": "2026-04-01",
+    "basic": 40500,
+    "epfApplicable": "yes",
+    "welfareDeduction": -1,
+    "loanInstallment": 1.234,
+    "reason": " Joined ",
+    "notes": "  "
+   },
+   "status": 400,
+   "message": [
+    "epfApplicable must be a boolean value",
+    "welfareDeduction must not be less than 0",
+    "loanInstallment must be a number conforming to the specified constraints"
+   ]
+  },
+  {
+   "input": {
+    "effectiveFrom": "2026-04-01",
+    "basic": 100,
+    "epfApplicable": false,
+    "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+   },
+   "status": 400,
+   "message": [
+    "reason must be shorter than or equal to 200 characters"
+   ]
+  },
+  {
+   "input": {
+    "effectiveFrom": "2026-04-01",
+    "basic": null
+   },
+   "status": 400,
+   "message": [
+    "basic must not be less than 0",
+    "basic must be a number conforming to the specified constraints"
+   ]
+  }
+ ],
+ "UpdateSalaryDto": [
+  {
+   "input": {},
+   "ok": {}
+  },
+  {
+   "input": {
+    "basic": "45000"
+   },
+   "ok": {
+    "basic": 45000
+   }
+  },
+  {
+   "input": {
+    "effectiveFrom": "x"
+   },
+   "status": 400,
+   "message": [
+    "effectiveFrom must be a valid date in YYYY-MM-DD format"
+   ]
+  },
+  {
+   "input": {
+    "reason": ""
+   },
+   "ok": {
+    "reason": null
+   }
+  }
+ ],
  "PaginationDto": [
   {
    "input": {},
