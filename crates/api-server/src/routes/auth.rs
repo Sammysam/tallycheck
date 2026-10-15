@@ -79,10 +79,17 @@ pub async fn login(State(state): State<AppState>, JsonBody(body): JsonBody) -> A
     audit_login(&state, Some(&user.id), &user.username, "Logged in", 200).await;
 
     let temp_token = state.jwt.sign(&user.id, &user.username, Stage::Pre2fa)?;
+    if user.is_two_factor_enabled {
+        return Ok(Json(json!({ "tempToken": temp_token, "requiresTwoFactor": true, "isNewUser": false })));
+    }
+    // D16: two-factor sign-in is optional. Without it the password step signs the user in;
+    // the user can turn it on later (setup/enable accept the signed-in token).
+    let access = state.jwt.sign(&user.id, &user.username, Stage::Authenticated)?;
     Ok(Json(json!({
         "tempToken": temp_token,
-        "requiresTwoFactor": user.is_two_factor_enabled,
-        "isNewUser": !user.is_two_factor_enabled,
+        "requiresTwoFactor": false,
+        "isNewUser": false,
+        "accessToken": access,
     })))
 }
 

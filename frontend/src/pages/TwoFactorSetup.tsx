@@ -5,7 +5,9 @@ import { useAuth } from '../contexts/AuthContext';
 
 export default function TwoFactorSetup() {
   const { tempToken, completeAuth } = useAuth();
-  const [localToken] = useState(() => tempToken);
+  // During sign-in this is the temporary token; a signed-in user turning 2FA on uses their own.
+  const [localToken] = useState(() => tempToken ?? localStorage.getItem('accessToken'));
+  const optional = !tempToken;
   const [qrCode, setQrCode] = useState('');
   const [secret, setSecret] = useState('');
   const [code, setCode] = useState('');
@@ -54,6 +56,11 @@ export default function TwoFactorSetup() {
           <div className="mb-6 text-center">
             <h1 className="text-xl font-bold text-gray-900 tracking-tight">Set up 2FA</h1>
             <p className="text-sm text-gray-400 mt-1">Scan the QR code with Google Authenticator</p>
+            {optional && (
+              <button type="button" onClick={() => navigate('/')} className="text-xs text-gray-500 hover:text-gray-700 mt-2">
+                Not now — back to the app
+              </button>
+            )}
           </div>
 
           {loadingQr ? (

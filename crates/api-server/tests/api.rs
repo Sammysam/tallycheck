@@ -123,7 +123,12 @@ async fn full_login_and_two_factor_flow() -> TestResult {
         .await?;
     assert_eq!(login.status, StatusCode::OK);
     assert_eq!(login.body["requiresTwoFactor"], json!(false));
-    assert_eq!(login.body["isNewUser"], json!(true));
+    // D16: without 2FA turned on, the password step signs the user in.
+    assert_eq!(login.body["isNewUser"], json!(false));
+    let direct = login.body["accessToken"].as_str().ok_or("accessToken")?.to_string();
+    let me_direct = app.call(Method::GET, "/api/auth/me", Some(&direct), None).await?;
+    assert_eq!(me_direct.status, StatusCode::OK);
+    assert_eq!(me_direct.body["isTwoFactorEnabled"], json!(false));
     let temp = login.body["tempToken"].as_str().ok_or("tempToken")?.to_string();
 
     let early = app.call(Method::GET, "/api/auth/me", Some(&temp), None).await?;

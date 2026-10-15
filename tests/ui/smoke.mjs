@@ -135,10 +135,16 @@ try {
     await shot('01-login');
   });
 
-  await check('password login leads to 2FA setup with QR and secret', async () => {
+  await check('without 2FA the password alone signs in (D16)', async () => {
     await type('input[type=text]', 'admin');
     await type('input[type=password]', 'admin12345');
     await clickText('Sign In').catch(() => evaluate(`document.querySelector('button[type=submit]').click()`));
+    await waitFor(`location.pathname === '/' && !!localStorage.getItem('accessToken')`, 'dashboard without 2FA');
+    await waitFor(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Turn on 2FA')`, 'Turn on 2FA offer');
+  });
+
+  await check('a signed-in user can turn 2FA on from the top bar (QR and secret)', async () => {
+    await clickText('Turn on 2FA');
     await waitFor(`location.pathname === '/2fa/setup'`, '2FA setup page');
     await waitFor(`!!document.querySelector('p.font-mono')?.textContent.trim()`, 'secret text');
     await waitFor(`!!document.querySelector('img[src^="data:image/png"]')`, 'QR image');
@@ -146,10 +152,11 @@ try {
     await shot('02-2fa-setup');
   });
 
-  await check('TOTP code enables 2FA and opens the app', async () => {
+  await check('TOTP code enables 2FA and returns to the app', async () => {
     await type('input[inputmode=numeric]', totp(secret));
     await evaluate(`document.querySelector('button[type=submit]').click()`);
     await waitFor(`location.pathname === '/' && !!localStorage.getItem('accessToken')`, 'dashboard');
+    await waitFor(`![...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Turn on 2FA')`, 'offer gone once 2FA is on');
     await sleep(1200);
     await shot('03-dashboard');
   });
