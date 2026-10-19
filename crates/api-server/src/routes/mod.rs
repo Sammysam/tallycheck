@@ -26,6 +26,7 @@ use operations as op;
 pub fn api_router() -> Router<AppState> {
     Router::new()
         .route("/auth/login", post(auth::login))
+        .route("/auth/first-run", get(auth::first_run_status).post(auth::first_run_create))
         .route("/auth/2fa/setup", get(auth::setup_2fa))
         .route("/auth/2fa/enable", post(auth::enable_2fa))
         .route("/auth/2fa/verify", post(auth::verify_2fa))

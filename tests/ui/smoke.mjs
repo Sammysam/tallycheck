@@ -3,7 +3,8 @@
 //
 //   node tests/ui/smoke.mjs http://127.0.0.1:47800 <screenshot-dir>
 //
-// The server must have a fresh database with ADMIN_USERNAME=admin / ADMIN_PASSWORD=admin12345.
+// The server must have a fresh, empty database (no ADMIN_USERNAME / ADMIN_PASSWORD): the test
+// creates admin / admin12345 through the first-run screen (D17).
 
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
@@ -129,9 +130,32 @@ try {
   await send('Network.enable');
   let secret = '';
 
-  await check('login page loads from the Rust server', async () => {
+  await check('a fresh install opens the create-administrator screen (D17)', async () => {
+    await send('Page.navigate', { url: BASE + '/login' });
+    await waitFor(`location.pathname === '/setup' && document.querySelectorAll('input[type=password]').length === 2`, 'first-run form');
+    await shot('00-first-run');
+  });
+
+  await check('first-run screen checks the passwords match, then creates the admin', async () => {
+    await type('input[type=text]', 'admin');
+    const pw = (i, v) => evaluate(`(() => { const el = document.querySelectorAll('input[type=password]')[${i}];
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(v)});
+      el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await pw(0, 'admin12345');
+    await pw(1, 'admin12346');
+    await evaluate(`document.querySelector('button[type=submit]').click()`);
+    await waitFor(`document.body.innerText.includes('The two passwords do not match')`, 'mismatch error');
+    await pw(1, 'admin12345');
+    await evaluate(`document.querySelector('button[type=submit]').click()`);
+    await waitFor(`location.pathname === '/' && !!localStorage.getItem('accessToken')`, 'dashboard after setup');
+    await evaluate(`localStorage.clear()`);
+  });
+
+  await check('login page loads from the Rust server (no first-run screen once set up)', async () => {
     await go('/login');
     await waitFor(`!!document.querySelector('input[type=password]')`, 'login form');
+    await sleep(800);
+    if ((await evaluate('location.pathname')) !== '/login') throw new Error('left the login page');
     await shot('01-login');
   });
 

@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../api/client';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -9,6 +10,13 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login, completeAuth } = useAuth();
   const navigate = useNavigate();
+
+  // D17: a fresh install has no users yet; offer to create the first administrator.
+  useEffect(() => {
+    api.get<{ needsSetup: boolean }>('/auth/first-run')
+      .then(({ data }) => { if (data.needsSetup) navigate('/setup', { replace: true }); })
+      .catch(() => {});
+  }, [navigate]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

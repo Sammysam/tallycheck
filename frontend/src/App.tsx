@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import TwoFactorSetup from './pages/TwoFactorSetup';
+import FirstRunSetup from './pages/FirstRunSetup';
 import TwoFactorVerify from './pages/TwoFactorVerify';
 import Dashboard from './pages/Dashboard';
 import Accounts from './pages/Accounts';
@@ -36,6 +37,7 @@ export default function App() {
         <Routes>
           {/* Public auth routes */}
           <Route path="/login"      element={<Login />} />
+          <Route path="/setup"      element={<FirstRunSetup />} />
           <Route path="/2fa/setup"  element={<TwoFactorSetup />} />
           <Route path="/2fa/verify" element={<TwoFactorVerify />} />
 

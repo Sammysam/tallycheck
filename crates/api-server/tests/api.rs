@@ -1327,3 +1327,64 @@ async fn lan_mode_accepts_office_clients_and_refuses_the_rest() -> TestResult {
     assert_eq!(local.status, StatusCode::UNAUTHORIZED);
     Ok(())
 }
+
+// ── D17: first-run administrator ────────────────────────────────────────────
+
+#[tokio::test]
+async fn first_administrator_is_created_once_and_only_on_this_pc() -> TestResult {
+    let app = App::new().await?;
+    let path = "/api/auth/first-run";
+    let status = app.call_from("127.0.0.1:50000", HOST, Method::GET, path, None, None).await?;
+    assert_eq!(status.body, json!({"needsSetup": true, "canSetUpHere": true}));
+    let remote_status = app.call_from("192.168.1.50:50000", HOST, Method::GET, path, None, None).await?;
+    assert_ne!(remote_status.body["canSetUpHere"], json!(true));
+
+    let good = json!({"username": "owner", "password": "a-long-password"});
+    // Another PC (or an unknown origin) can never claim a fresh install.
+    let remote = app.call_from("192.168.1.50:50000", HOST, Method::POST, path, None, Some(good.clone())).await?;
+    assert_eq!(remote.status, StatusCode::FORBIDDEN);
+    let no_peer = app.call(Method::POST, path, None, Some(good.clone())).await?;
+    assert_eq!(no_peer.status, StatusCode::FORBIDDEN);
+    assert!(!auth::users::any_users(&app.db).await?);
+
+    let short = app
+        .call_from(
+            "127.0.0.1:50000",
+            HOST,
+            Method::POST,
+            path,
+            None,
+            Some(json!({"username": "owner", "password": "short"})),
+        )
+        .await?;
+    assert_eq!(short.status, StatusCode::BAD_REQUEST, "{}", short.body);
+
+    let created = app.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, Some(good.clone())).await?;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    let token = created.body["accessToken"].as_str().ok_or("no accessToken")?.to_string();
+    let me = app.call(Method::GET, "/api/auth/me", Some(&token), None).await?;
+    assert_eq!(me.body["username"], json!("owner"));
+    assert_eq!(me.body["role"]["name"], json!("Admin"));
+    assert_eq!(me.body["isTwoFactorEnabled"], json!(false));
+
+    let again = app
+        .call_from(
+            "127.0.0.1:50000",
+            HOST,
+            Method::POST,
+            path,
+            None,
+            Some(json!({"username": "second", "password": "a-long-password"})),
+        )
+        .await?;
+    assert_nest_error(&again, 403, json!("The app is already set up. Sign in instead."), path);
+    let after = app.call_from("127.0.0.1:50000", HOST, Method::GET, path, None, None).await?;
+    assert_eq!(after.body, json!({"needsSetup": false, "canSetUpHere": false}));
+
+    let login = app.call(Method::POST, "/api/auth/login", None, Some(good)).await?;
+    assert!(login.body["accessToken"].is_string(), "{}", login.body);
+    let actions: Vec<String> =
+        sqlx::query_scalar(r#"SELECT "action" FROM "audit_logs""#).fetch_all(app.db.read()).await?;
+    assert!(actions.iter().any(|a| a == "Created the first administrator"), "{actions:?}");
+    Ok(())
+}
