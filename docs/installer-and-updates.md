@@ -11,6 +11,7 @@ npm run installer      # = tauri build
 The result is `target\release\bundle\nsis\Cenango Accounting_<version>_x64-setup.exe`:
 
 * An NSIS installer for the current Windows user, so no administrator rights are needed. The React app ships as a resource; the API server is inside the executable.
+* First start on a new PC: the app has no users, so it shows **Create administrator**. That screen works only on the PC itself and disappears once the first account exists (D17).
 * The WebView2 bootstrapper is embedded. On Windows 10/11, WebView2 is normally present already. On a PC without it and without internet, use Microsoft's offline WebView2 installer once.
 * The data folder `%LOCALAPPDATA%\CenangoAccounting` is **not** touched by install, upgrade or uninstall.
 

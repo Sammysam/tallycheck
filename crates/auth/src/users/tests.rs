@@ -108,6 +108,18 @@ async fn bootstrap_admin_is_idempotent() -> AppResult<()> {
 }
 
 #[tokio::test]
+async fn first_admin_only_while_no_users_exist() -> AppResult<()> {
+    let (_d, db) = fresh().await?;
+    assert!(!any_users(&db).await?);
+    let u = create_first_admin(&db, "owner", "long-password").await?.ok_or_else(|| AppError::internal("none"))?;
+    assert!(u.is_admin());
+    assert!(any_users(&db).await?);
+    assert!(create_first_admin(&db, "intruder", "long-password").await?.is_none());
+    assert!(get_by_username(&db, "intruder").await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
 async fn permissions_follow_role_and_admin_bypasses() -> AppResult<()> {
     let (_d, db) = fresh().await?;
     let viewer = create_user(&db, create("v", Some(role_id(&db, "Viewer").await?))).await?;

@@ -267,6 +267,14 @@ recommendations without answering each one individually; revisit any of them on 
   Risk accepted: such accounts are protected by the password alone (throttling and failed-login
   audit still apply) — matters most in LAN mode.
 
+- **D17 First-run administrator** (requested by the user 2026-10-19): a fresh install has no
+  users, so the sign-in page sends the browser to `/setup` to create the first administrator.
+  `GET /api/auth/first-run` → `{needsSetup, canSetUpHere}`; `POST /api/auth/first-run`
+  `{username, password}` (same rules as creating a user) → 201 `{accessToken}`. Refused (403)
+  once any user exists and from any address that is not loopback, so a LAN client can never
+  claim a fresh install. The check and insert share the writer transaction. Audited as
+  "Created the first administrator". `ADMIN_USERNAME`/`ADMIN_PASSWORD` and `create-admin` still work.
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
@@ -318,7 +326,8 @@ cargo run -p importer -- --source postgres://… --source-tz +05:30 --target <ne
 npm ci && npm run installer                       # Windows installer (frontend/dist must be built)
 ```
 Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
-UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh database.
+UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh, empty database
+(no ADMIN_* variables; the test creates the admin on the first-run screen).
 Reference-derived fixtures are regenerated with the scripts in `tools/`; never hand-edit them.
 
 ## 12. Waves and approval gates

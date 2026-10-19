@@ -11,11 +11,13 @@ use crate::state::AppState;
 use app_core::{AppError, AppResult};
 use auth::password::Verified;
 use auth::{totp, users, Stage, User};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, FromRequestParts, State};
 use axum::http::header::AUTHORIZATION;
-use axum::http::HeaderMap;
+use axum::http::request::Parts;
+use axum::http::{HeaderMap, StatusCode};
 use axum::Json;
 use serde_json::{json, Value};
+use std::net::SocketAddr;
 
 const LOGIN_PATH: &str = "/api/auth/login";
 
@@ -173,6 +175,58 @@ pub async fn verify_2fa(
     check_code(&state, &user, &secret, &code_of(&body))?;
     let access = state.jwt.sign(&user.id, &user.username, Stage::Authenticated)?;
     Ok(Json(json!({ "accessToken": access })))
+}
+
+/// Whether the request comes from this PC (what `into_make_service_with_connect_info` records).
+pub struct FromThisPc(bool);
+
+impl FromRequestParts<AppState> for FromThisPc {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &AppState) -> Result<Self, Self::Rejection> {
+        Ok(FromThisPc(parts.extensions.get::<ConnectInfo<SocketAddr>>().is_some_and(|c| c.0.ip().is_loopback())))
+    }
+}
+
+/// `GET /api/auth/first-run` (public, D17): whether the app still needs its first
+/// administrator, and whether this browser may create it (only on the main PC).
+pub async fn first_run_status(State(state): State<AppState>, FromThisPc(local): FromThisPc) -> AppResult<Json<Value>> {
+    let needs_setup = !users::any_users(&state.db).await?;
+    Ok(Json(json!({ "needsSetup": needs_setup, "canSetUpHere": needs_setup && local })))
+}
+
+/// `POST /api/auth/first-run` (public, D17): creates the first administrator. Refused once any
+/// user exists, and refused from other PCs, so a LAN client can never claim a fresh install.
+pub async fn first_run_create(
+    State(state): State<AppState>,
+    FromThisPc(local): FromThisPc,
+    body: JsonBody,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    if !local {
+        return Err(AppError::Forbidden("The first administrator can only be created on the main PC".into()));
+    }
+    if users::any_users(&state.db).await? {
+        return Err(AppError::Forbidden("The app is already set up. Sign in instead.".into()));
+    }
+    let dto = crate::validate::create_user(body.object())?;
+    let user = users::create_first_admin(&state.db, &dto.username, &dto.password)
+        .await?
+        .ok_or_else(|| AppError::Forbidden("The app is already set up. Sign in instead.".into()))?;
+    audit::record(
+        &state.db,
+        audit::NewEntry {
+            user_id: Some(user.id.clone()),
+            username: Some(user.username.clone()),
+            action: "Created the first administrator".into(),
+            method: Some("POST".into()),
+            path: Some("/api/auth/first-run".into()),
+            status_code: Some(201),
+            detail: None,
+        },
+    )
+    .await;
+    let access = state.jwt.sign(&user.id, &user.username, Stage::Authenticated)?;
+    Ok((StatusCode::CREATED, Json(json!({ "accessToken": access }))))
 }
 
 /// `GET /api/auth/me`.

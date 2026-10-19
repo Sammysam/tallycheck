@@ -345,5 +345,32 @@ pub async fn bootstrap_admin(db: &Db, username: &str, password: &str) -> AppResu
     Ok(true)
 }
 
+pub async fn any_users(db: &Db) -> AppResult<bool> {
+    let n: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "users""#).fetch_one(db.read()).await?;
+    Ok(n > 0)
+}
+
+/// First-run setup (D17): creates the first user with the Admin role, but only while the
+/// database has no users at all. The check and the insert share the writer transaction, so two
+/// simultaneous requests cannot both succeed. Returns the new user, or `None` if users exist.
+pub async fn create_first_admin(db: &Db, username: &str, password: &str) -> AppResult<Option<User>> {
+    if any_users(db).await? {
+        return Ok(None);
+    }
+    let hash = hash_password(password).await?;
+    let mut tx = db.begin().await?;
+    let n: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "users""#).fetch_one(&mut *tx).await?;
+    if n > 0 {
+        return Ok(None);
+    }
+    let admin = roles::find_by_name(&mut tx, app_core::permissions::ADMIN_ROLE)
+        .await?
+        .ok_or_else(|| AppError::internal("Admin role missing"))?;
+    let id = insert(&mut tx, username, &hash, Some(admin.id.as_str())).await?;
+    let user = require(&mut tx, &id).await?;
+    tx.commit().await?;
+    Ok(Some(user))
+}
+
 #[cfg(test)]
 mod tests;
