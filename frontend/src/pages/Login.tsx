@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AuthShell, { PasswordInput } from '../components/AuthShell';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/client';
+import { signInError } from '../lib/signInError';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -34,8 +35,8 @@ export default function Login() {
       } else if (result.requiresTwoFactor) {
         navigate('/2fa/verify');
       }
-    } catch {
-      setError('Invalid username or password');
+    } catch (err) {
+      setError(signInError(err, 'password'));
     } finally {
       setLoading(false);
     }

@@ -223,3 +223,87 @@ async fn aging_buckets_outstanding_amounts_by_days_past_due() -> AppResult<()> {
 fn bucket_edges_match_the_reference() {
     assert_eq!([0, 1, 30, 31, 60, 61, 90, 91, -5].map(bucket_of), [0, 1, 1, 2, 2, 3, 3, 4, 0]);
 }
+
+#[tokio::test]
+async fn cash_flow_explains_every_movement_of_cash() -> AppResult<()> {
+    let b = books().await?;
+    // A van bought for cash and a bank loan, to fill the investing and financing sections.
+    for (code, t, sub) in
+        [("1500", AccountType::Asset, "fixed_asset"), ("2500", AccountType::Liability, "long_term_loan")]
+    {
+        let a = accounts::create(
+            &b.db,
+            CreateAccount {
+                code: code.into(),
+                name: code.into(),
+                account_type: t,
+                subtype: Some(sub.into()),
+                description: None,
+                parent_id: None,
+            },
+        )
+        .await?;
+        let cash_line = |debit: bool| ledger::NewLine {
+            account_id: b.acct["1000"].clone(),
+            debit: if debit { m("3000") } else { Money::ZERO },
+            credit: if debit { Money::ZERO } else { m("3000") },
+            description: None,
+        };
+        let other = |debit: bool| ledger::NewLine {
+            account_id: a.id.clone(),
+            debit: if debit { m("3000") } else { Money::ZERO },
+            credit: if debit { Money::ZERO } else { m("3000") },
+            description: None,
+        };
+        // The van: cash out. The loan: cash in.
+        let lines =
+            if code == "1500" { vec![other(true), cash_line(false)] } else { vec![cash_line(true), other(false)] };
+        let mut tx = b.db.begin().await?;
+        ledger::entries::post(
+            &mut tx,
+            ledger::NewEntry {
+                date: "2026-04-15".into(),
+                description: code.into(),
+                reference: None,
+                source_type: None,
+                source_id: None,
+                lines,
+            },
+        )
+        .await?;
+        tx.commit().await?;
+    }
+    let cash = vec![b.acct["1000"].clone()];
+    let mut c = b.db.read().acquire().await?;
+    let cf = cash_flow::cash_flow(&mut c, "2026-04-02", "2026-04-30", &cash).await?;
+    // Capital (1 April) is before the period; then +1,000 from the customer, −400 to the
+    // supplier, −500 rent (the voided 77 nets out), −3,000 van, +3,000 loan.
+    assert_eq!(cf["openingCash"], serde_json::json!(10000));
+    assert_eq!(cf["operating"]["total"], serde_json::json!(100));
+    assert_eq!(cf["investing"]["total"], serde_json::json!(-3000));
+    assert_eq!(cf["financing"]["total"], serde_json::json!(3000));
+    assert_eq!(
+        (cf["netChange"].clone(), cf["closingCash"].clone()),
+        (serde_json::json!(100), serde_json::json!(10100))
+    );
+    let operating: Vec<(&str, f64)> = cf["operating"]["lines"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|l| (l["account"]["code"].as_str().unwrap_or(""), l["amount"].as_f64().unwrap_or(0.0)))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(operating, vec![("1100", 1000.0), ("2000", -400.0), ("6000", -500.0)]);
+
+    // Over all dates the capital is a financing inflow and the cash ends where the ledger says.
+    let all = cash_flow::cash_flow(&mut c, "", "", &cash).await?;
+    assert_eq!(
+        (all["openingCash"].clone(), all["financing"]["total"].clone()),
+        (serde_json::json!(0), serde_json::json!(13000))
+    );
+    assert_eq!(all["closingCash"], serde_json::json!(10100));
+    let not_cash = cash_flow::cash_flow(&mut c, "", "", &[b.acct["4000"].clone()]).await;
+    assert!(matches!(not_cash, Err(AppError::BadRequest(_))));
+    Ok(())
+}

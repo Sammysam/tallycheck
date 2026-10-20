@@ -89,6 +89,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/reconciliations/{id}/undo", post(reconciliation::undo))
         .route("/reports/profit-loss", get(reports::profit_loss))
         .route("/reports/balance-sheet", get(reports::balance_sheet))
+        .route("/reports/cash-flow", get(reports::cash_flow))
         .route("/reports/ar-aging", get(reports::ar_aging))
         .route("/reports/ap-aging", get(reports::ap_aging))
         .route("/employees", get(hr::list).post(hr::create))

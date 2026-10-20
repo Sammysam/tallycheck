@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { signInError } from '../lib/signInError';
 
 export default function TwoFactorSetup() {
   const { tempToken, completeAuth } = useAuth();
@@ -43,8 +44,8 @@ export default function TwoFactorSetup() {
       done.current = true;
       completeAuth(data.accessToken);
       navigate('/');
-    } catch {
-      setError('Invalid code — check the 6-digit number in your authenticator app');
+    } catch (err) {
+      setError(signInError(err, 'code'));
     } finally {
       setLoading(false);
     }

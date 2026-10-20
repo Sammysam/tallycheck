@@ -64,6 +64,7 @@ export const navigation = [
       { label: 'Trial Balance', to: '/reports/trial-balance', permission: 'reports' },
       { label: 'Profit & Loss', to: '/reports/profit-loss',   permission: 'reports' },
       { label: 'Balance Sheet', to: '/reports/balance-sheet', permission: 'reports' },
+      { label: 'Cash Flow',     to: '/reports/cash-flow',     permission: 'reports' },
       { label: 'AR Aging',      to: '/reports/ar-aging',      permission: 'reports' },
       { label: 'AP Aging',      to: '/reports/ap-aging',      permission: 'reports' },
     ],
