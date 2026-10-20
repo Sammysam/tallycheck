@@ -425,6 +425,13 @@ recommendations without answering each one individually; revisit any of them on 
   return use the as-booked home amounts. Not covered: bank accounts in a foreign currency,
   revaluing open items at period end, and foreign currencies with other than two decimals
   (foreign amounts are held in hundredths).
+- **D31 Company setup wizard** (requested by the user 2026-10-20). The first-run company screen
+  asks one thing per page (name, address, email, phone, website, country, tax number, logo, how
+  customers pay, invoice note, then a review). Each page saves on Next and can be skipped; "Set
+  up later" leaves it for this session (a sessionStorage flag) and it asks again at the next
+  sign-in until a company name is saved. Administration → Company Setup reopens it. The country
+  list now holds every ISO 3166 country with its ISO 4217 currency; those without a preset take
+  their name, currency word and symbol from the system's Intl data and a January year start.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

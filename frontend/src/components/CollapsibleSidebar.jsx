@@ -80,6 +80,7 @@ export const navigation = [
       { label: 'Activity Log', to: '/audit', permission: 'audit' },
       { label: 'Taxes', to: '/taxes', permission: 'settings' },
       { label: 'Settings', to: '/settings', permission: 'settings' },
+      { label: 'Company Setup', to: '/company-setup', permission: 'settings' },
     ],
   },
 ];

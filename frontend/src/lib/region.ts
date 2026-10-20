@@ -105,6 +105,9 @@ export function subscribeRegion(listener: () => void) {
 }
 
 /** True once the administrator has entered the company. */
+/** D31: the administrator chose "Set up later" in the company wizard; asked again next session. */
+export const SETUP_LATER = 'companySetupLater';
+
 export const companyIsSetUp = (s: Record<string, string>) => !!(s['company.name'] ?? '').trim();
 
 const lines = (v: string) => v.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);

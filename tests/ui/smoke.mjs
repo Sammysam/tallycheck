@@ -156,15 +156,51 @@ try {
     await pw(1, 'admin12345');
     await evaluate(`document.querySelector('button[type=submit]').click()`);
     // D25: no company ships with the app; the new administrator enters theirs first.
-    await waitFor(`location.pathname === '/company-setup' && !!document.querySelector('form[aria-label="Company details"]')`, 'company setup');
+    await waitFor(`location.pathname === '/company-setup' && !!document.querySelector('form[aria-label="Company setup"]')`, 'company setup');
     await shot('00b-company-setup');
-    await type('input[placeholder="Your company’s legal name"]', 'Acme Trading (Pvt) Ltd');
+    // D31: one question per page, with Next, Skip and Back.
+    const page = (title) => waitFor(`document.querySelector('form[aria-label="Company setup"] h1')?.innerText.includes(${JSON.stringify(title)})`, title);
+    await page('What is your company called?');
+    await clickText('Next');
+    await waitFor(`document.body.innerText.includes('Enter the company name')`, 'name is asked for');
+    await type('input[aria-label="Company name"]', 'Acme Trading (Pvt) Ltd');
+    await clickText('Next');
+    await page('address');
+    await clickText('Skip');
+    await page('email');
+    await type('input[aria-label="Email"]', 'not-an-email');
+    await clickText('Next');
+    await waitFor(`document.body.innerText.includes('does not look like an email')`, 'email checked');
+    await evaluate(`(() => { const el = document.querySelector('input[aria-label="Email"]'); el.select(); return true; })()`);
+    await send('Input.insertText', { text: 'accounts@acme.test' });
+    await clickText('Next');
+    await page('phone number');
+    await clickText('Back');
+    await page('email');
+    await clickText('Next');
+    await page('phone number');
+    await type('input[aria-label="Phone"]', '+94 11 234 5678');
+    await clickText('Next');
+    await page('website');
+    await clickText('Skip');
+    await page('Which country');
+    const countries = await evaluate(`document.querySelector('select[aria-label="Country"]').options.length`);
+    if (countries < 240) throw new Error('only ' + countries + ' countries listed');
     const choose = (label, value) => evaluate(`(() => { const sel = document.querySelector('select[aria-label="${label}"]');
       sel.value = ${JSON.stringify(value)}; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await choose('Country', 'LK');
     await waitFor(`document.querySelector('[data-testid=money-example]').innerText.includes('LKR')`, 'Sri Lanka preset');
     await choose('Financial year starts in', '1');
-    await clickText('Save and continue');
+    await shot('00c-company-country');
+    await clickText('Next');
+    for (const t of ['registered for tax', 'logo', 'How do customers pay', 'bottom of your invoices']) {
+      await page(t);
+      await clickText('Skip');
+    }
+    await page('check your details');
+    await waitFor(`document.body.innerText.includes('accounts@acme.test') && document.body.innerText.includes('Sri Lanka')`, 'review lists the answers');
+    await shot('00d-company-review');
+    await clickText('Finish');
     await waitFor(`location.pathname === '/' && !!localStorage.getItem('accessToken')`, 'dashboard after setup');
     const settings = await evaluate(`fetch('/api/settings', { headers: { authorization: 'Bearer ' + localStorage.getItem('accessToken') } }).then((r) => r.json())`);
     if (settings['company.name'] !== 'Acme Trading (Pvt) Ltd' || settings['region.currency'] !== 'LKR')
