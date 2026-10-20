@@ -109,7 +109,7 @@ still needed (§10). Never change a formula to make a test pass; report the disc
   The JWT secret is random per installation, stored DPAPI-protected in the data directory.
 - TOTP (SHA-1, 6 digits, 30 s, ±1 step) is **optional per user** (D16, requested by the user
   2026-10-15). Without it, login returns an `accessToken` straight away; a signed-in user can turn
-  it on from the top bar ("Turn on 2FA"); once on, every login needs the code. An administrator's
+  it on from the status bar ("Turn on 2FA") or the File menu; once on, every login needs the code. An administrator's
   "Reset 2FA" turns it off for that user.
 - Exact permission keys from the reference `permissions.ts`; Admin role bypasses checks.
 - LAN mode (W6, `docs/lan-mode.md`): clients must come from `lan_allowed_networks` (private
@@ -328,6 +328,10 @@ npm ci && npm run installer                       # Windows installer (frontend/
 Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
 UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh, empty database
 (no ADMIN_* variables; the test creates the admin on the first-run screen).
+Desktop shell (`components/Layout.tsx`): the page draws a Windows-style menu bar, toolbar,
+navigation pane and status bar; the Tauri window has no native menu. A list page registers what
+Ctrl+N and Esc do with `useCommand('new' | 'close', …)` from `lib/commands.ts`; Ctrl+S submits the
+open form, F5 remounts the screen, and browser keys (reload, zoom, right-click menu) are off.
 Reference-derived fixtures are regenerated with the scripts in `tools/`; never hand-edit them.
 
 ## 12. Waves and approval gates

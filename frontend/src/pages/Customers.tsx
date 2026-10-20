@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 
 interface Customer { id: string; name: string; email: string; phone: string; address: string }
@@ -8,6 +9,9 @@ interface Customer { id: string; name: string; email: string; phone: string; add
 export default function Customers() {
   const [rows, setRows] = useState<Customer[]>([]);
   const [showForm, setShowForm] = useState(false);
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', () => setShowForm(true));
+  useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState({ name: '', email: '', phone: '', address: '' });
 
   const load = () => api.get('/customers').then((r) => setRows(r.data));

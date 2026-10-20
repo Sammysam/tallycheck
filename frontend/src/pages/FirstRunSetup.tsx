@@ -51,7 +51,7 @@ export default function FirstRunSetup() {
   return (
     <AuthShell>
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Welcome</h1>
+            <h1 className="text-lg font-semibold text-gray-900">Welcome</h1>
             <p className="text-sm text-gray-400 mt-1">Create the administrator account to get started</p>
           </div>
 
@@ -80,7 +80,7 @@ export default function FirstRunSetup() {
               <button
                 type="submit"
                 disabled={loading || !status}
-                className="w-full py-3 px-4 bg-orange-600 shadow-sm shadow-orange-600/30 text-white text-sm font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full h-8 px-4 bg-orange-600 border border-orange-700 text-white text-sm rounded hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? 'Creating…' : 'Create administrator'}
               </button>

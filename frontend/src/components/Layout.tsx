@@ -1,119 +1,374 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
-import CollapsibleSidebar, { pageTrail, initialsOf } from './CollapsibleSidebar';
+import CollapsibleSidebar, { navigation, pageTrail } from './CollapsibleSidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CalendarDays, ChevronDown, ChevronRight, DatabaseBackup, LogOut, ShieldCheck } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BarChart2,
+  CreditCard,
+  FileText,
+  Home,
+  Printer,
+  Receipt,
+  RefreshCw,
+  Truck,
+  UserRound,
+  Users,
+  Wallet,
+} from 'lucide-react';
+import MenuBar, { type Menu, type MenuEntry } from './desktop/MenuBar';
+import Toolbar, { type ToolbarButton } from './desktop/Toolbar';
+import StatusBar from './desktop/StatusBar';
+import Dialog from './desktop/Dialog';
+import { hasCommand, isUnsaved, runCommand, setUnsaved, subscribeCommands } from '../lib/commands';
+
+declare const __APP_VERSION__: string;
+
+interface NavItem { label: string; to: string; permission: string }
+interface NavGroup { id: string; label: string; standalone?: boolean; items?: NavItem[] }
+
+const SHORTCUTS: [string, string][] = [
+  ['Ctrl+N', 'New record on this screen'],
+  ['Ctrl+S', 'Save the open form'],
+  ['Esc', 'Close the open form'],
+  ['Ctrl+F', 'Find (jump to the search box)'],
+  ['Ctrl+P', 'Print this screen'],
+  ['F5', 'Refresh this screen'],
+  ['Ctrl+B', 'Show or hide the navigation pane'],
+  ['Alt+Left / Alt+Right', 'Back / forward'],
+  ['Alt+letter', 'Open a menu (Alt+F opens File)'],
+  ['F1', 'This list'],
+];
+
+/** Browser keys that make no sense in a desktop window: zoom, view source, history, downloads… */
+const BROWSER_KEYS = ['+', '=', '-', '_', '0', 'u', 'g', 'h', 'j', 'l', 'd', 'o', 'e', 'k', 't', 'w'];
+
+const isTextField = (el: EventTarget | null) =>
+  el instanceof HTMLElement && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 
 export default function Layout({ children }: { children: ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
   const [section, page] = pageTrail(pathname) as [string | null, string];
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [paneOpen, setPaneOpen] = useState(() => {
+    try {
+      return localStorage.getItem('navPane') !== 'hidden';
+    } catch {
+      return true;
+    }
+  });
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [dialog, setDialog] = useState<'shortcuts' | 'about' | 'discard' | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  // Menu items grey out when the screen has no "New" / "Close".
+  const canNew = useSyncExternalStore(subscribeCommands, () => hasCommand('new'));
+  const canClose = useSyncExternalStore(subscribeCommands, () => hasCommand('close'));
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [menuOpen]);
+  const isAdmin = user?.role === 'Admin';
 
-  const handleLogout = () => {
+  // ── Actions shared by the menu bar, toolbar and keyboard ───────────────
+  const newRecord = useCallback(() => {
+    setUnsaved(false);
+    runCommand('new');
+  }, []);
+
+  /** Goes to a list and opens its "New" form, as the toolbar's Invoice/Bill/… buttons do. */
+  const openNew = (to: string) => {
+    if (pathname === to) newRecord();
+    else navigate(to, { state: { command: 'new' } });
+  };
+
+  const save = useCallback(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const focused = document.activeElement?.closest('form');
+    const form =
+      (focused && main.contains(focused) ? focused : null) ??
+      [...main.querySelectorAll('form')].find((f) => f.querySelector('button[type=submit], button:not([type])'));
+    form?.requestSubmit();
+  }, []);
+
+  const closeForm = useCallback(() => {
+    if (!hasCommand('close')) return;
+    if (isUnsaved()) setDialog('discard');
+    else runCommand('close');
+  }, []);
+
+  const find = useCallback(() => {
+    const box = mainRef.current?.querySelector<HTMLInputElement>(
+      'input[type=search], input[placeholder*="search" i], input[placeholder*="filter" i]',
+    );
+    box?.focus();
+    box?.select();
+  }, []);
+
+  const refresh = useCallback(() => {
+    setUnsaved(false);
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  const togglePane = useCallback(() => {
+    setPaneOpen((open) => {
+      try {
+        localStorage.setItem('navPane', open ? 'hidden' : 'shown');
+      } catch {
+        /* the pane state is only a convenience */
+      }
+      return !open;
+    });
+  }, []);
+
+  const signOut = () => {
     logout();
     navigate('/login');
   };
 
-  const today = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  // A "New …" asked for from another screen runs once that screen has mounted.
+  useEffect(() => {
+    setUnsaved(false);
+    const state = location.state as { command?: 'new' } | null;
+    if (state?.command === 'new') {
+      runCommand('new');
+      navigate(location.pathname + location.search, { replace: true, state: null });
+    }
+  }, [location, navigate]);
+
+  // Typing in a form marks it unsaved; saving it clears that.
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    const onInput = (e: Event) => {
+      if ((e.target as HTMLElement).closest('form')) setUnsaved(true);
+    };
+    const onSubmit = () => {
+      setUnsaved(false);
+    };
+    main.addEventListener('input', onInput);
+    main.addEventListener('submit', onSubmit);
+    return () => {
+      main.removeEventListener('input', onInput);
+      main.removeEventListener('submit', onSubmit);
+    };
+  }, [refreshKey]);
+
+  // ── Keyboard: desktop shortcuts on, browser shortcuts off ──────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const ctrl = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      const plain = ctrl && !e.shiftKey && !e.altKey;
+      const act = (fn: () => void) => {
+        e.preventDefault();
+        fn();
+      };
+      if (ctrl && e.shiftKey && k === 'r') return act(() => window.location.reload());
+      if (e.key === 'F5' || (plain && k === 'r')) return act(refresh);
+      if (plain && k === 'n') return act(newRecord);
+      if (plain && k === 's') return act(save);
+      if (plain && k === 'p') return act(() => window.print());
+      if (plain && k === 'f') return act(find);
+      if (plain && k === 'b') return act(togglePane);
+      if (e.key === 'F1') return act(() => setDialog('shortcuts'));
+      if (e.key === 'F3' || e.key === 'F7') return e.preventDefault();
+      if (e.altKey && e.key === 'ArrowLeft') return act(() => navigate(-1));
+      if (e.altKey && e.key === 'ArrowRight') return act(() => navigate(1));
+      if (e.key === 'Escape' && !document.querySelector('.action-menu')) return act(closeForm);
+      if (ctrl && !e.altKey && BROWSER_KEYS.includes(k)) e.preventDefault();
+    };
+    // Ctrl+wheel would zoom the page like a browser.
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    // Right-click keeps Cut/Copy/Paste in text boxes and on selected text, and nothing else.
+    const onContext = (e: MouseEvent) => {
+      if (isTextField(e.target) || String(window.getSelection() ?? '').trim()) return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('contextmenu', onContext);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('contextmenu', onContext);
+    };
+  }, [refresh, newRecord, save, find, togglePane, closeForm, navigate]);
+
+  // ── Menus ──────────────────────────────────────────────────────────────
+  const go = (to: string) => () => navigate(to);
+  const navMenus: Menu[] = (navigation as NavGroup[])
+    .filter((g) => !g.standalone)
+    .map((g) => ({
+      label: g.label === 'Master Data' ? 'Lists' : g.label === 'Administration' ? 'Admin' : g.label,
+      items: (g.items ?? [])
+        .filter((i) => hasPermission(i.permission))
+        .map((i): MenuEntry => ({ label: i.label, onSelect: go(i.to) })),
+    }))
+    .filter((m) => m.items.length > 0);
+
+  const fileItems: MenuEntry[] = [
+    { label: 'New', shortcut: 'Ctrl+N', onSelect: newRecord, disabled: !canNew },
+    { label: 'Save', shortcut: 'Ctrl+S', onSelect: save },
+    { label: 'Close form', shortcut: 'Esc', onSelect: closeForm, disabled: !canClose },
+    'separator',
+    { label: 'Print…', shortcut: 'Ctrl+P', onSelect: () => window.print() },
+    'separator',
+    ...(isAdmin
+      ? [{ label: 'Backup and restore…', onSelect: () => window.location.assign('/system/backup') }, 'separator' as const]
+      : []),
+    ...(user?.twoFactorEnabled === false ? [{ label: 'Turn on two-factor sign-in…', onSelect: go('/2fa/setup') }] : []),
+    { label: 'Sign out', onSelect: signOut },
+  ];
+
+  const viewItems: MenuEntry[] = [
+    ...(hasPermission('dashboard') ? [{ label: 'Dashboard', onSelect: go('/') }, 'separator' as const] : []),
+    { label: 'Back', shortcut: 'Alt+Left', onSelect: () => navigate(-1) },
+    { label: 'Forward', shortcut: 'Alt+Right', onSelect: () => navigate(1) },
+    { label: 'Refresh', shortcut: 'F5', onSelect: refresh },
+    'separator',
+    { label: paneOpen ? 'Hide navigation pane' : 'Show navigation pane', shortcut: 'Ctrl+B', onSelect: togglePane },
+    { label: 'Reload window', shortcut: 'Ctrl+Shift+R', onSelect: () => window.location.reload() },
+  ];
+
+  const menus: Menu[] = [
+    { label: 'File', items: fileItems },
+    {
+      label: 'Edit',
+      items: [
+        { label: 'Find', shortcut: 'Ctrl+F', onSelect: find },
+        'separator',
+        { label: 'Cut', shortcut: 'Ctrl+X', onSelect: () => document.execCommand('cut') },
+        { label: 'Copy', shortcut: 'Ctrl+C', onSelect: () => document.execCommand('copy') },
+        { label: 'Select all', shortcut: 'Ctrl+A', onSelect: () => document.execCommand('selectAll') },
+      ],
+    },
+    { label: 'View', items: viewItems },
+    ...navMenus,
+    {
+      label: 'Help',
+      items: [
+        { label: 'Keyboard shortcuts', shortcut: 'F1', onSelect: () => setDialog('shortcuts') },
+        'separator',
+        { label: 'About Cenango Accounting', onSelect: () => setDialog('about') },
+      ],
+    },
+  ];
+
+  // ── Toolbar ────────────────────────────────────────────────────────────
+  const tool = (permission: string, b: ToolbarButton) => (hasPermission(permission) ? [b] : []);
+  const toolbar: (ToolbarButton | null)[] = [
+    { label: 'Back', title: 'Back (Alt+Left)', icon: ArrowLeft, onClick: () => navigate(-1) },
+    { label: 'Forward', title: 'Forward (Alt+Right)', icon: ArrowRight, onClick: () => navigate(1) },
+    ...tool('dashboard', { label: 'Home', title: 'Dashboard', icon: Home, onClick: go('/') }),
+    null,
+    ...tool('invoices', { label: 'Invoice', title: 'Create an invoice', icon: FileText, onClick: () => openNew('/invoices') }),
+    ...tool('bills', { label: 'Bill', title: 'Enter a vendor bill', icon: Receipt, onClick: () => openNew('/bills') }),
+    ...tool('expenses', { label: 'Expense', title: 'Record an expense', icon: Wallet, onClick: () => openNew('/expenses') }),
+    ...tool('payments', { label: 'Payment', title: 'Record a payment', icon: CreditCard, onClick: () => openNew('/payments') }),
+    null,
+    ...tool('customers', { label: 'Customers', title: 'Customer list', icon: Users, onClick: go('/customers') }),
+    ...tool('vendors', { label: 'Vendors', title: 'Vendor list', icon: Truck, onClick: go('/vendors') }),
+    ...tool('employees', { label: 'Employees', title: 'Employee list', icon: UserRound, onClick: go('/employees') }),
+    ...tool('reports', { label: 'Reports', title: 'Profit & Loss', icon: BarChart2, onClick: go('/reports/profit-loss') }),
+    null,
+    { label: 'Refresh', title: 'Refresh (F5)', icon: RefreshCw, onClick: refresh },
+    { label: 'Print', title: 'Print (Ctrl+P)', icon: Printer, onClick: () => window.print() },
+  ];
+  // No divider twice in a row when a whole group is hidden by permissions.
+  const tools = toolbar.filter((b, i, all) => b !== null || (i > 0 && all[i - 1] !== null));
+
+  const closeDialog = () => setDialog(null);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f4f6fa]">
-      <CollapsibleSidebar />
+    <div className="desk-shell">
+      <div className="desk-chrome">
+        <MenuBar menus={menus} />
+        <Toolbar buttons={tools} />
+      </div>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="h-16 bg-white/80 backdrop-blur border-b border-gray-200/80 flex items-center justify-between px-8 shrink-0">
-          <nav className="flex items-center gap-1.5 text-sm min-w-0" aria-label="Breadcrumb">
-            {section && (
-              <>
-                <span className="text-gray-400">{section}</span>
-                <ChevronRight size={14} className="text-gray-300 shrink-0" />
-              </>
-            )}
-            <span className="font-semibold text-gray-800 truncate">{page}</span>
-          </nav>
-
-          <div className="flex items-center gap-3">
-            <span className="hidden lg:flex items-center gap-1.5 text-xs text-gray-500 px-3 py-1.5 rounded-full bg-gray-100">
-              <CalendarDays size={13} />
-              {today}
-            </span>
-            {user?.twoFactorEnabled === false && (
-              <button
-                onClick={() => navigate('/2fa/setup')}
-                className="flex items-center gap-1.5 text-xs font-medium text-orange-700 bg-orange-50 border border-orange-200 hover:bg-orange-100 transition-colors px-3 py-1.5 rounded-full"
-                title="Optional: ask for a code from your phone at every sign-in"
-              >
-                <ShieldCheck size={13} />
-                Turn on 2FA
-              </button>
-            )}
-
-            <div className="relative" ref={menuRef}>
-              <button
-                type="button"
-                onClick={() => setMenuOpen((o) => !o)}
-                className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-              >
-                <span className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white text-xs font-bold">
-                  {initialsOf(user?.username)}
-                </span>
-                <span className="hidden md:block text-sm font-medium text-gray-700">{user?.username}</span>
-                <ChevronDown size={14} className="text-gray-400" />
-              </button>
-
-              {menuOpen && (
-                <div role="menu" className="absolute right-0 mt-2 w-56 bg-white rounded-xl border border-gray-200 shadow-xl shadow-gray-900/10 p-1.5 z-40">
-                  <div className="px-3 py-2 border-b border-gray-100 mb-1">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{user?.username}</p>
-                    <p className="text-xs text-gray-500">{user?.role || 'No role'}</p>
-                  </div>
-                  {user?.role === 'Admin' && (
-                    <a
-                      href="/system/backup"
-                      role="menuitem"
-                      className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-gray-50"
-                    >
-                      <DatabaseBackup size={15} className="text-gray-400" />
-                      Backup and restore
-                    </a>
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-600 rounded-lg hover:bg-red-50"
-                  >
-                    <LogOut size={15} />
-                    Sign out
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </header>
-
-        {/* Page content */}
-        <main className="flex-1 overflow-y-auto px-8 py-7">
-          <div className="max-w-[1400px] mx-auto">{children}</div>
+      <div className="flex-1 flex min-h-0">
+        {paneOpen && <CollapsibleSidebar />}
+        <main ref={mainRef} className="desk-main" key={refreshKey}>
+          {children}
         </main>
       </div>
+
+      <StatusBar
+        location={section ? `${section}  ›  ${page}` : page}
+        user={user?.username ?? ''}
+        role={user?.role ?? ''}
+        offerTwoFactor={user?.twoFactorEnabled === false}
+        onTwoFactor={go('/2fa/setup')}
+      />
+
+      {dialog === 'shortcuts' && (
+        <Dialog
+          title="Keyboard shortcuts"
+          onClose={closeDialog}
+          width={460}
+          buttons={<button type="button" className="btn btn-primary" onClick={closeDialog}>OK</button>}
+        >
+          <table className="w-full text-sm">
+            <tbody>
+              {SHORTCUTS.map(([keys, what]) => (
+                <tr key={keys} className="border-b border-gray-100 last:border-0">
+                  <td className="py-1.5 pr-4 whitespace-nowrap"><kbd className="desk-kbd">{keys}</kbd></td>
+                  <td className="py-1.5 text-gray-700">{what}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Dialog>
+      )}
+
+      {dialog === 'about' && (
+        <Dialog
+          title="About Cenango Accounting"
+          onClose={closeDialog}
+          buttons={<button type="button" className="btn btn-primary" onClick={closeDialog}>OK</button>}
+        >
+          <div className="flex items-center gap-4">
+            <img src="/favicon-96x96.png" alt="" className="w-12 h-12" />
+            <div className="text-sm">
+              <p className="font-semibold text-gray-900">Cenango Accounting</p>
+              <p className="text-gray-600">Version {__APP_VERSION__}</p>
+              <p className="text-gray-500 mt-1">Offline accounting, employees and payroll.</p>
+              <p className="text-gray-500">© Cenango (Pvt) Ltd</p>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {dialog === 'discard' && (
+        <Dialog
+          title="Cenango Accounting"
+          onClose={closeDialog}
+          buttons={
+            <>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setDialog(null);
+                  setUnsaved(false);
+                  runCommand('close');
+                }}
+              >
+                Close without saving
+              </button>
+              <button type="button" className="btn btn-secondary" onClick={closeDialog}>Keep editing</button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-700">This form has changes that are not saved. Close it anyway?</p>
+        </Dialog>
+      )}
     </div>
   );
 }

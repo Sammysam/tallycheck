@@ -43,8 +43,8 @@ export default function Login() {
 
   return (
     <AuthShell>
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Welcome back</h1>
+          <div className="mb-5">
+            <h1 className="text-lg font-semibold text-gray-900">Welcome back</h1>
             <p className="text-sm text-gray-500 mt-1">Sign in to Cenango Accounting</p>
           </div>
 
@@ -79,7 +79,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 bg-orange-600 shadow-sm shadow-orange-600/30 text-white text-sm font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              className="w-full h-8 px-4 bg-orange-600 border border-orange-700 text-white text-sm rounded hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
               {loading && (
                 <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />

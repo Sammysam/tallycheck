@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -6,19 +6,16 @@ import {
   ArrowUpRight,
   Banknote,
   CheckCircle2,
-  FileText,
   Landmark,
-  Plus,
-  Receipt,
   TrendingUp,
   Wallet,
-  CreditCard,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import PageHeader from '../components/PageHeader';
 
-type Icon = ComponentType<{ size?: number; className?: string }>;
-interface Metric { label: string; value: number; note: string; icon: Icon; tone: string; accent: string }
+type Icon = ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+interface Metric { label: string; value: number; note: string; icon: Icon; tone: string }
 interface Month { label: string; revenue: number; expenses: number }
 interface Aging { total: number; overdue: number; overdueCount: number }
 
@@ -41,8 +38,21 @@ function agingOf(data: Record<string, unknown>): Aging {
   return { total: Number(data?.grandTotal ?? 0), overdue, overdueCount };
 }
 
+/** A titled group box, the desktop way of framing a block of information. */
+function Panel({ title, note, children, className = '' }: { title: string; note?: string; children: ReactNode; className?: string }) {
+  return (
+    <section className={`bg-white border border-[#e0e0e0] rounded-md ${className}`}>
+      <header className="flex items-baseline justify-between gap-3 px-3 py-2 border-b border-[#ececec] bg-[#fafafa] rounded-t-md">
+        <h2 className="text-sm font-semibold text-[#1b1b1b]">{title}</h2>
+        {note && <span className="text-xs text-gray-500">{note}</span>}
+      </header>
+      <div className="p-3">{children}</div>
+    </section>
+  );
+}
+
 export default function Dashboard() {
-  const { user, hasPermission } = useAuth();
+  const { hasPermission } = useAuth();
   // The year-to-date figures are company-wide reporting data, so they follow
   // the reports permission — a user without it never sees or fetches them.
   const showOverview = hasPermission('reports');
@@ -51,11 +61,11 @@ export default function Dashboard() {
   const [ar, setAr] = useState<Aging | null>(null);
   const [ap, setAp] = useState<Aging | null>(null);
   const [loading, setLoading] = useState(true);
+  const year = new Date().getFullYear();
 
   const loadMetrics = () => {
     const now = new Date();
     const today = isoDate(now);
-    const year = now.getFullYear();
     const yearStart = `${year}-01-01`;
     const monthRanges = Array.from({ length: now.getMonth() + 1 }, (_, m) => ({
       label: MONTHS[m],
@@ -78,12 +88,12 @@ export default function Dashboard() {
         setAr(arA);
         setAp(apA);
         setMetrics([
-          { label: 'Total Revenue', value: revenue, note: 'Income this year', icon: TrendingUp, tone: 'bg-blue-50 text-blue-600', accent: 'from-blue-500 to-blue-400' },
-          { label: 'Total Expenses', value: revenue - net, note: 'Costs this year', icon: Wallet, tone: 'bg-rose-50 text-rose-600', accent: 'from-rose-500 to-rose-400' },
-          { label: 'Net Income', value: net, note: net >= 0 ? 'Profit this year' : 'Loss this year', icon: Banknote, tone: 'bg-emerald-50 text-emerald-600', accent: 'from-emerald-500 to-emerald-400' },
-          { label: 'Total Assets', value: Number(bs.data.totalAssets ?? 0), note: 'As of today', icon: Landmark, tone: 'bg-violet-50 text-violet-600', accent: 'from-violet-500 to-violet-400' },
-          { label: 'Receivables (AR)', value: arA.total, note: 'Customers owe you', icon: ArrowDownRight, tone: 'bg-amber-50 text-amber-600', accent: 'from-amber-500 to-amber-400' },
-          { label: 'Payables (AP)', value: apA.total, note: 'You owe vendors', icon: ArrowUpRight, tone: 'bg-orange-50 text-orange-600', accent: 'from-orange-500 to-orange-400' },
+          { label: 'Total Revenue', value: revenue, note: 'Income this year', icon: TrendingUp, tone: 'text-blue-600' },
+          { label: 'Total Expenses', value: revenue - net, note: 'Costs this year', icon: Wallet, tone: 'text-rose-600' },
+          { label: 'Net Income', value: net, note: net >= 0 ? 'Profit this year' : 'Loss this year', icon: Banknote, tone: 'text-emerald-600' },
+          { label: 'Total Assets', value: Number(bs.data.totalAssets ?? 0), note: 'As of today', icon: Landmark, tone: 'text-violet-600' },
+          { label: 'Receivables (AR)', value: arA.total, note: 'Customers owe you', icon: ArrowDownRight, tone: 'text-amber-600' },
+          { label: 'Payables (AP)', value: apA.total, note: 'You owe vendors', icon: ArrowUpRight, tone: 'text-orange-600' },
         ]);
         setMonths(monthly.map((r, i) => {
           const rev = Number(r.data.totalRevenue ?? 0);
@@ -96,169 +106,94 @@ export default function Dashboard() {
 
   useEffect(() => { if (showOverview) loadMetrics(); }, [showOverview]);
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const peak = Math.max(1, ...months.flatMap((m) => [m.revenue, m.expenses]));
 
-  const quick = [
-    { label: 'New Invoice', href: '/invoices', permission: 'invoices', icon: FileText,   tone: 'bg-blue-50 text-blue-600' },
-    { label: 'New Bill',    href: '/bills',    permission: 'bills',    icon: Receipt,    tone: 'bg-orange-50 text-orange-600' },
-    { label: 'New Expense', href: '/expenses', permission: 'expenses', icon: Wallet,     tone: 'bg-violet-50 text-violet-600' },
-    { label: 'New Payment', href: '/payments', permission: 'payments', icon: CreditCard, tone: 'bg-emerald-50 text-emerald-600' },
-  ].filter((q) => hasPermission(q.permission));
+  if (!showOverview) {
+    return (
+      <div>
+        <PageHeader title="Dashboard" />
+        <p className="text-sm text-gray-600">Use the menu bar, the toolbar or the navigation pane to open a screen.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Welcome banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-slate-900 px-7 py-6 text-white">
-        <div className="absolute -right-10 -top-16 w-64 h-64 rounded-full bg-orange-500/25 blur-3xl" />
-        <div className="absolute right-40 -bottom-20 w-56 h-56 rounded-full bg-blue-500/20 blur-3xl" />
-        <div className="relative flex items-center justify-between gap-6">
-          <div>
-            <p className="text-sm text-orange-300 font-medium">{greeting},</p>
-            <h1 className="text-2xl font-bold tracking-tight mt-0.5">{user?.username}</h1>
-            <p className="text-sm text-slate-300 mt-1">
-              {showOverview ? `Here is how the business is doing in ${new Date().getFullYear()}.` : 'Welcome back.'}
-            </p>
-          </div>
-          {quick.length > 0 && (
-            <Link
-              to={quick[0].href}
-              className="hidden md:inline-flex items-center gap-2 rounded-xl bg-orange-500 hover:bg-orange-600 px-4 py-2.5 text-sm font-semibold shadow-lg shadow-orange-900/30 transition-colors"
-            >
-              <Plus size={16} /> {quick[0].label}
-            </Link>
-          )}
-        </div>
+    <div>
+      <PageHeader title="Dashboard" subtitle={`Company snapshot for ${year}. Press F5 to refresh.`} />
+
+      {/* Key figures */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-2 mb-3">
+        {(loading ? Array.from({ length: 6 }, () => null) : metrics).map((m, i) =>
+          m === null ? (
+            <div key={i} className="bg-white border border-[#e0e0e0] rounded-md px-3 py-2.5 h-[74px] animate-pulse" />
+          ) : (
+            <div key={m.label} className="bg-white border border-[#e0e0e0] rounded-md px-3 py-2.5">
+              <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                <m.icon size={14} strokeWidth={2} className={m.tone} />
+                {m.label}
+              </div>
+              <p className={`mt-1 text-lg font-semibold tabular-nums ${m.value < 0 ? 'text-red-600' : 'text-[#1b1b1b]'}`}>{fmt(m.value)}</p>
+              <p className="text-[11px] text-gray-500">{m.note}</p>
+            </div>
+          ),
+        )}
       </div>
 
-      {/* Metric cards */}
-      {showOverview && (loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-gray-200/80 p-5 animate-pulse">
-              <div className="w-10 h-10 bg-gray-100 rounded-xl mb-4" />
-              <div className="h-3 bg-gray-100 rounded w-1/3 mb-3" />
-              <div className="h-7 bg-gray-100 rounded w-1/2" />
+      {!loading && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+          <Panel title="Revenue and expenses" note={`By month, ${year} · highest ${compact(peak)} LKR`} className="xl:col-span-2">
+            <div className="flex items-center gap-4 text-xs text-gray-600 mb-2">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-orange-500" />Revenue</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-slate-400" />Expenses</span>
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {metrics.map((m) => (
-            <div key={m.label} className="relative overflow-hidden bg-white rounded-2xl border border-gray-200/80 p-5 shadow-sm hover:shadow-md transition-shadow">
-              <span className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${m.accent}`} />
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500">{m.label}</p>
-                  <p className={`mt-2 text-[26px] leading-tight font-bold tracking-tight tabular-nums ${m.value < 0 ? 'text-red-600' : 'text-gray-900'}`}>
-                    {fmt(m.value)}
-                  </p>
-                  <p className="mt-1 text-xs text-gray-400">{m.note}</p>
-                </div>
-                <span className={`w-11 h-11 rounded-xl flex items-center justify-center ${m.tone}`}>
-                  <m.icon size={20} />
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-
-      {showOverview && !loading && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          {/* Monthly chart */}
-          <div className="xl:col-span-2 bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-base font-semibold text-gray-900">Revenue and expenses</h2>
-                <p className="text-xs text-gray-400 mt-0.5">By month, {new Date().getFullYear()}</p>
-              </div>
-              <div className="flex items-center gap-4 text-xs text-gray-500">
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-orange-500" />Revenue</span>
-                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-slate-300" />Expenses</span>
-              </div>
-            </div>
-            <div className="flex items-end gap-2 h-56 border-b border-gray-100">
+            <div className="flex items-end gap-2 h-48 border-b border-l border-[#d9d9d9] px-1">
               {months.map((m) => (
-                <div key={m.label} className="group flex-1 h-full flex flex-col justify-end items-center">
-                  <div className="relative w-full flex-1 flex items-end justify-center gap-1">
-                    <div className="pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1.5 text-[11px] text-white opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                      <div>Revenue {fmt(m.revenue)}</div>
-                      <div className="text-slate-300">Expenses {fmt(m.expenses)}</div>
-                    </div>
-                    <div className="w-1/3 max-w-5 rounded-t-md bg-gradient-to-t from-orange-600 to-orange-400 transition-all" style={{ height: `${Math.max(0, (m.revenue / peak) * 100)}%`, minHeight: m.revenue > 0 ? 3 : 0 }} />
-                    <div className="w-1/3 max-w-5 rounded-t-md bg-slate-300 transition-all" style={{ height: `${Math.max(0, (m.expenses / peak) * 100)}%`, minHeight: m.expenses > 0 ? 3 : 0 }} />
-                  </div>
+                <div
+                  key={m.label}
+                  className="flex-1 h-full flex items-end justify-center gap-0.5"
+                  title={`${m.label}: revenue ${fmt(m.revenue)}, expenses ${fmt(m.expenses)}`}
+                >
+                  <div className="w-1/3 max-w-4 bg-orange-500" style={{ height: `${Math.max(0, (m.revenue / peak) * 100)}%`, minHeight: m.revenue > 0 ? 2 : 0 }} />
+                  <div className="w-1/3 max-w-4 bg-slate-400" style={{ height: `${Math.max(0, (m.expenses / peak) * 100)}%`, minHeight: m.expenses > 0 ? 2 : 0 }} />
                 </div>
               ))}
             </div>
-            <div className="flex gap-2 mt-2">
+            <div className="flex gap-2 mt-1 px-1">
               {months.map((m) => (
-                <span key={m.label} className="flex-1 text-center text-[11px] text-gray-400">{m.label}</span>
+                <span key={m.label} className="flex-1 text-center text-[11px] text-gray-500">{m.label}</span>
               ))}
             </div>
-            <p className="mt-3 text-[11px] text-gray-400">Highest month: {compact(peak)} LKR</p>
-          </div>
+          </Panel>
 
-          {/* Needs attention */}
-          <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm">
-            <h2 className="text-base font-semibold text-gray-900">Needs attention</h2>
-            <p className="text-xs text-gray-400 mt-0.5 mb-5">Overdue amounts from the ageing reports</p>
-            <div className="space-y-3">
+          <Panel title="Needs attention" note="From the ageing reports">
+            <div className="divide-y divide-[#efefef]">
               {[
-                { label: 'Overdue customer invoices', a: ar, to: '/reports/ar-aging', tone: 'amber' },
-                { label: 'Overdue vendor bills', a: ap, to: '/reports/ap-aging', tone: 'red' },
-              ].map(({ label, a, to, tone }) => (
-                <Link key={label} to={to} className="block rounded-xl border border-gray-100 p-4 hover:border-gray-200 hover:bg-gray-50/60 transition-colors">
+                { label: 'Overdue customer invoices', a: ar, to: '/reports/ar-aging' },
+                { label: 'Overdue vendor bills', a: ap, to: '/reports/ap-aging' },
+              ].map(({ label, a, to }) => (
+                <Link key={label} to={to} className="flex items-start gap-2.5 py-2.5 first:pt-0 last:pb-0 hover:bg-[#f7f7f7] -mx-1 px-1 rounded">
                   {a && a.overdue > 0 ? (
-                    <div className="flex items-start gap-3">
-                      <span className={`mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center ${tone === 'amber' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
-                        <AlertTriangle size={16} />
-                      </span>
+                    <>
+                      <AlertTriangle size={16} className="mt-0.5 text-amber-600 shrink-0" />
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-800">{label}</p>
-                        <p className="text-lg font-bold text-gray-900 tabular-nums">{fmt(a.overdue)}</p>
-                        <p className="text-xs text-gray-400">{a.overdueCount} item{a.overdueCount === 1 ? '' : 's'} past due · of {fmt(a.total)} outstanding</p>
+                        <p className="text-sm text-[#1b1b1b]">{label}</p>
+                        <p className="text-base font-semibold tabular-nums">{fmt(a.overdue)}</p>
+                        <p className="text-xs text-gray-500">{a.overdueCount} item{a.overdueCount === 1 ? '' : 's'} past due · of {fmt(a.total)} outstanding</p>
                       </div>
-                    </div>
+                    </>
                   ) : (
-                    <div className="flex items-center gap-3">
-                      <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-50 text-emerald-600">
-                        <CheckCircle2 size={16} />
-                      </span>
+                    <>
+                      <CheckCircle2 size={16} className="mt-0.5 text-emerald-600 shrink-0" />
                       <div>
-                        <p className="text-sm font-medium text-gray-800">{label}</p>
-                        <p className="text-xs text-gray-400">Nothing overdue</p>
+                        <p className="text-sm text-[#1b1b1b]">{label}</p>
+                        <p className="text-xs text-gray-500">Nothing overdue</p>
                       </div>
-                    </div>
+                    </>
                   )}
                 </Link>
               ))}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Quick actions */}
-      {quick.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">Quick actions</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {quick.map((q) => (
-              <Link
-                key={q.label}
-                to={q.href}
-                className="group flex items-center gap-3 bg-white rounded-2xl border border-gray-200/80 p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
-              >
-                <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${q.tone}`}>
-                  <q.icon size={18} />
-                </span>
-                <span className="text-sm font-semibold text-gray-800">{q.label}</span>
-                <Plus size={16} className="ml-auto text-gray-300 group-hover:text-orange-500 transition-colors" />
-              </Link>
-            ))}
-          </div>
+          </Panel>
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 
 interface Permission { key: string; label: string }
@@ -37,6 +38,10 @@ export default function Roles() {
     setError('');
     setShowForm(true);
   };
+
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', startCreate);
+  useCommand('close', () => setShowForm(false));
 
   const startEdit = (role: Role) => {
     setEditingId(role.id);

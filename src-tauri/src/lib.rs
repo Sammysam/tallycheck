@@ -5,7 +5,6 @@
 use api_server::ServerHandle;
 use app_core::config::AppConfig;
 use std::sync::Mutex;
-use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 struct Server(Mutex<Option<ServerHandle>>);
@@ -61,26 +60,9 @@ pub fn run() {
                 e
             })?;
             let base: tauri::Url = url.parse()?;
-            let home = MenuItemBuilder::with_id("home", "Accounting").build(app)?;
-            let backup = MenuItemBuilder::with_id("backup", "Backup and restore…").build(app)?;
-            let reload = MenuItemBuilder::with_id("reload", "Reload").accelerator("F5").build(app)?;
-            let tools = SubmenuBuilder::new(app, "Tools").items(&[&home, &backup, &reload]).build()?;
-            let menu = MenuBuilder::new(app).items(&[&tools]).build()?;
-            let targets = (base.clone(), base.join("system/backup")?);
-            app.on_menu_event(move |app, event| {
-                let Some(window) = app.get_webview_window("main") else { return };
-                let result = match event.id().as_ref() {
-                    "home" => window.navigate(targets.0.clone()),
-                    "backup" => window.navigate(targets.1.clone()),
-                    "reload" => window.reload(),
-                    _ => Ok(()),
-                };
-                if let Err(e) = result {
-                    tracing::error!("menu action failed: {e}");
-                }
-            });
+            // The page draws its own menu bar, toolbar and status bar (File, Edit, View, …), so
+            // the window has no native menu.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(base))
-                .menu(menu)
                 .title("Cenango Accounting")
                 .inner_size(1366.0, 860.0)
                 .min_inner_size(1024.0, 700.0)

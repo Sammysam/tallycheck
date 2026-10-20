@@ -19,14 +19,14 @@ Every write in the app goes through one SQLite writer connection. A backup holds
 
 ## Making backups
 
-* **Back up now**: *Tools → Backup and restore…* in the desktop app, or `accounting-server backup <folder>`.
+* **Back up now**: *File → Backup and restore…* (administrators) in the desktop app, or `accounting-server backup <folder>`.
 * **Daily**: set a folder on the same page. While the app runs it checks every hour. It backs up when the last good backup is more than a day old, so an office PC that is off at night still gets one backup a day. Daily backups go to `<folder>\scheduled`, and only the newest *N* are kept (14 by default). Files you made by hand are never deleted.
 * A backup is written as `*.qbak.partial`, read back completely and checked against its manifest, and only then renamed to `*.qbak`. A backup interrupted by a power cut or a full disk never looks finished, and its leftover `.partial` is removed by the next run. The page shows the last success and the last error.
 * Only an Administrator **on the main PC** can use backup and restore. Requests from other PCs are refused even in LAN mode.
 
 ## Restoring
 
-1. *Tools → Backup and restore… → Restore*, choose the `.qbak` file and type `RESTORE`. For a backup made with a different password, or on another PC, enter its password.
+1. *File → Backup and restore… → Restore*, choose the `.qbak` file and type `RESTORE`. For a backup made with a different password, or on another PC, enter its password.
 2. The backup is decrypted into `<data>\restore-staging` and every entry is checked against the manifest. The database is integrity-checked, and a backup from a *newer* app version is refused. Nothing live changes yet.
 3. Close and reopen the app. Before the database opens, the staged data replaces the live data. The replaced data is kept in `<data>\pre-restore-<time>`. If the PC loses power during the swap, the next start completes it.
 4. An older backup is upgraded by the normal database migrations. A copy of the database is taken first (see below).

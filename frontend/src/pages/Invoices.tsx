@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
@@ -99,6 +100,9 @@ export default function Invoices() {
   }, []);
 
   const closeForm = () => { setShowForm(false); setEditDraft(null); };
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', () => { setEditDraft(null); setShowForm(true); setShowSignatory(false); });
+  useCommand('close', closeForm);
 
   // Saves the sheet form. Throws back to the form so it can show the message.
   const saveInvoice = async (payload: SheetPayload) => {
