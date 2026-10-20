@@ -3,6 +3,7 @@ import api, { errMsg } from '../../api/client';
 import PageHeader from '../../components/PageHeader';
 import { AccountLink, ReportTable, type ReportRow } from '../../components/ReportTable';
 import type { AccountRef } from '../../lib/reportRows';
+import { fiscalYearStart, todayIso } from '../../lib/region';
 
 /**
  * D24: where the cash came from and went, straight from the ledger. Each cash movement is
@@ -23,8 +24,8 @@ interface CashFlowData {
 }
 
 export default function CashFlow() {
-  const today = new Date().toISOString().split('T')[0];
-  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const today = todayIso();
+  const yearStart = fiscalYearStart();
   const [dateFrom, setDateFrom] = useState(yearStart);
   const [dateTo, setDateTo] = useState(today);
   const [ran, setRan] = useState({ dateFrom: yearStart, dateTo: today });

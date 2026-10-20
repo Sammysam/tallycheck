@@ -6,6 +6,7 @@ import Table from '../components/Table';
 import Pagination from '../components/Pagination';
 import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
+import { money } from '../lib/money';
 
 interface Payment { id: string; paymentNumber: string; type: string; date: string; amount: number; paymentMethod: string; status: string }
 
@@ -83,7 +84,7 @@ export default function Payments() {
     }
   };
 
-  const fmt = (v: number) => new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(Number(v));
+  const fmt = (v: number) => money(Number(v));
 
   return (
     <div>

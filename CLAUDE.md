@@ -350,6 +350,25 @@ recommendations without answering each one individually; revisit any of them on 
   * Sign-in screens show the server's reason for 429 (too many attempts), a turned-off account
     (403, only after the right password), an unreachable server and server errors; a wrong
     username or password stays one message (`lib/signInError.ts`).
+- **D25 Any company, any country** (requested by the user 2026-10-20). The app is a product
+  sold to many companies, so **no customer's own details ship with it** — never add a company
+  name, address, bank account, signatory, registration number or logo to code or seed data.
+  * Company and region are settings (`company.name/address/phone/fax/email/website/taxNumber/
+    logo/paymentInstructions/footerNote`, `region.country/currency/currencySymbol/currencyWord/
+    currencyMinorWord/locale/fiscalYearStart`), validated in `validate::update_settings` (ISO
+    codes, BCP-47 locale, month 1–12, logo a PNG/JPEG/WebP data URL ≤ 400k chars). The
+    reference's signatory defaults are gone (`settings::DEFAULTS` is empty); migration
+    `20261020000004` blanks the baseline's seeded signatory and payroll company details on a
+    fresh install (an installation already in use keeps what its owner saved).
+  * The administrator is sent to `/company-setup` after the first sign-in until `company.name`
+    is set; also editable under Settings → Company. Country presets (`lib/countries.ts`) fill
+    currency, number format, currency words and financial year; only 2-decimal currencies.
+  * The frontend formats every amount with `lib/money.ts` (company locale and currency) and
+    prints letterheads from `lib/region.ts` (`company()`); invoices, statements, payslips and
+    CSV export follow it. The Sri Lankan EPF/ETF statutory forms keep "Rs.".
+  * "Today" is the main PC's own local date (`chrono::Local`), replacing the fixed +05:30 of D5.
+  * Report defaults (P&L, cash flow, dashboard, statements) start at the financial year start.
+  * "Cenango Accounting" remains the product's own name (window title, installer, data folder).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

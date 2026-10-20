@@ -1,21 +1,49 @@
+import { region } from './region';
+
 /**
  * D23: "Export to Excel". Every table on the screen goes into one CSV file (UTF-8 with a BOM,
  * so Excel reads it straight away), one block per table with the table's heading above it.
  *
- * Amounts shown as "LKR 2,500.63" or "1,000.50" are written as plain numbers (2500.63) so
- * Excel can add them up. Action columns (no heading, or "Actions") and checkbox columns are
- * left out, and so are "nothing here" placeholder rows.
+ * Amounts shown in the company's currency and number format ("LKR 2,500.63", "£2,500.63",
+ * "2.500,63 €") are written as plain numbers (2500.63) so Excel can add them up. Action columns
+ * (no heading, or "Actions") and checkbox columns are left out, and so are "nothing here"
+ * placeholder rows.
  */
 
-const MONEY = /^(-)?\s*(?:LKR|Rs\.?)?\s*(-)?\s*([\d,]+(?:\.\d+)?)$/;
+/** Thin and no-break spaces (used as group separators by some locales) as plain spaces. */
+const plainSpaces = (s: string) => s.replace(/[\u00a0\u202f]/g, ' ');
+
+/** The amount in a cell as a plain number string, or null when the cell is not an amount. */
+function plainAmount(text: string): string | null {
+  const r = region();
+  let parts: Intl.NumberFormatPart[] = [];
+  try {
+    parts = new Intl.NumberFormat(r.locale).formatToParts(12345.6);
+  } catch {
+    /* fall back to "," and "." */
+  }
+  const group = plainSpaces(parts.find((p) => p.type === 'group')?.value ?? ',');
+  const decimal = parts.find((p) => p.type === 'decimal')?.value ?? '.';
+  let t = plainSpaces(text).trim();
+  let marked = false;
+  for (const m of [r.currency, r.currencySymbol].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    if (t.includes(m)) {
+      t = t.replace(m, '').trim();
+      marked = true;
+      break;
+    }
+  }
+  // A bare "1000" (an account code) or "2026" stays text; amounts carry a separator or a currency.
+  if (!marked && !t.includes(decimal) && !t.includes(group)) return null;
+  const normal = t.split(group).join('').split(decimal).join('.');
+  const m = /^(-)?\s*(\d+)(?:\.(\d+))?\s*(-)?$/.exec(normal);
+  if (!m) return null;
+  return `${m[1] || m[4] ? '-' : ''}${m[2]}${m[3] ? `.${m[3]}` : ''}`;
+}
 
 function cellValue(cell: HTMLTableCellElement): string {
   const text = (cell.innerText ?? cell.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const m = MONEY.exec(text);
-  if (m && /[\d]/.test(m[3]) && (text.includes('LKR') || text.includes('Rs') || text.includes(',') || text.includes('.'))) {
-    return `${m[1] || m[2] ? '-' : ''}${m[3].replace(/,/g, '')}`;
-  }
-  return text;
+  return plainAmount(text) ?? text;
 }
 
 function csvField(raw: string): string {

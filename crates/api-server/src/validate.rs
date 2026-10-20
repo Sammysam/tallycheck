@@ -370,6 +370,27 @@ pub fn update_role(body: Map<String, Value>) -> Result<RoleDto, AppError> {
     Ok(RoleDto { name: opt_string(&m, "name"), permissions: string_list(&m, "permissions") })
 }
 
+/// D25: company details and region, kept as settings. Each key with its maximum length.
+const COMPANY_SETTINGS: &[(&str, usize)] = &[
+    ("company.name", 120),
+    ("company.address", 500),
+    ("company.phone", 40),
+    ("company.fax", 40),
+    ("company.email", 120),
+    ("company.website", 120),
+    ("company.taxNumber", 60),
+    ("company.logo", 400_000),
+    ("company.paymentInstructions", 2000),
+    ("company.footerNote", 300),
+    ("region.country", 2),
+    ("region.currency", 3),
+    ("region.currencySymbol", 8),
+    ("region.currencyWord", 30),
+    ("region.currencyMinorWord", 30),
+    ("region.locale", 20),
+    ("region.fiscalYearStart", 2),
+];
+
 /// Returns the provided (non-null) settings in declaration order.
 pub fn update_settings(body: Map<String, Value>) -> Result<Vec<(String, String)>, AppError> {
     let mut v = Validator::new(body);
@@ -378,11 +399,58 @@ pub fn update_settings(body: Map<String, Value>) -> Result<Vec<(String, String)>
         true,
         &[Rule::IsString, Rule::MaxLength(120)],
     );
+    for (key, max) in COMPANY_SETTINGS {
+        v.field(key, true, &[Rule::IsString, Rule::MaxLength(*max)]);
+    }
     let m = v.finish()?;
-    Ok(["signatoryName", "signatoryTitle"]
+    let out: Vec<(String, String)> = ["signatoryName", "signatoryTitle"]
         .iter()
+        .copied()
+        .chain(COMPANY_SETTINGS.iter().map(|(k, _)| *k))
         .filter_map(|k| opt_string(&m, k).map(|s| (k.to_string(), s)))
-        .collect())
+        .collect();
+
+    let mut errors = Vec::new();
+    for (key, value) in &out {
+        let value = value.trim();
+        let ok = match key.as_str() {
+            "region.country" => value.len() == 2 && value.bytes().all(|b| b.is_ascii_uppercase()),
+            "region.currency" => value.len() == 3 && value.bytes().all(|b| b.is_ascii_uppercase()),
+            "region.locale" => {
+                let mut parts = value.split('-');
+                let lang = parts.next().unwrap_or("");
+                (2..=3).contains(&lang.len())
+                    && lang.bytes().all(|b| b.is_ascii_lowercase())
+                    && parts.all(|p| (2..=4).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+            }
+            "region.fiscalYearStart" => value.parse::<u8>().is_ok_and(|m| (1..=12).contains(&m)),
+            "company.name" => !value.is_empty(),
+            // A picture uploaded on the Settings page, or none.
+            "company.logo" => {
+                value.is_empty()
+                    || ["data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,"]
+                        .iter()
+                        .any(|p| value.starts_with(p))
+            }
+            _ => true,
+        };
+        if !ok {
+            errors.push(match key.as_str() {
+                "region.country" => "region.country must be a two-letter country code (e.g. LK, GB, US)".to_string(),
+                "region.currency" => {
+                    "region.currency must be a three-letter currency code (e.g. LKR, USD, EUR)".to_string()
+                }
+                "region.locale" => "region.locale must be a language tag such as en-GB".to_string(),
+                "region.fiscalYearStart" => "region.fiscalYearStart must be a month number from 1 to 12".to_string(),
+                "company.name" => "company.name should not be empty".to_string(),
+                _ => "company.logo must be a PNG, JPEG or WebP picture".to_string(),
+            });
+        }
+    }
+    if !errors.is_empty() {
+        return Err(AppError::validation(errors));
+    }
+    Ok(out)
 }
 
 // ─── DTOs (W1: accounts and ledger) ─────────────────────────────────────────

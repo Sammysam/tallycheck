@@ -13,6 +13,8 @@ import {
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import PageHeader from '../components/PageHeader';
+import { fiscalYearStart, region } from '../lib/region';
+import { compactAmount, money } from '../lib/money';
 
 type Icon = ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
 interface Metric { label: string; value: number; note: string; icon: Icon; tone: string }
@@ -23,9 +25,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const OVERDUE_BUCKETS = ['days1_30', 'days31_60', 'days61_90', 'days90plus'];
 
 const fmt = (v: number) =>
-  new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(v ?? 0);
+  money(Number(v ?? 0));
 const compact = (v: number) =>
-  new Intl.NumberFormat('en-LK', { notation: 'compact', maximumFractionDigits: 1 }).format(v ?? 0);
+  compactAmount(v);
 const isoDate = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -61,17 +63,22 @@ export default function Dashboard() {
   const [ar, setAr] = useState<Aging | null>(null);
   const [ap, setAp] = useState<Aging | null>(null);
   const [loading, setLoading] = useState(true);
-  const year = new Date().getFullYear();
+  // D25: figures run from the start of the company's financial year.
+  const yearStart = fiscalYearStart();
 
   const loadMetrics = () => {
     const now = new Date();
     const today = isoDate(now);
-    const yearStart = `${year}-01-01`;
-    const monthRanges = Array.from({ length: now.getMonth() + 1 }, (_, m) => ({
-      label: MONTHS[m],
-      from: isoDate(new Date(year, m, 1)),
-      to: isoDate(new Date(year, m + 1, 0)),
-    }));
+    const [startYear, startMonth] = yearStart.split('-').map(Number);
+    const count = (now.getFullYear() - startYear) * 12 + now.getMonth() - (startMonth - 1) + 1;
+    const monthRanges = Array.from({ length: count }, (_, i) => {
+      const first = new Date(startYear, startMonth - 1 + i, 1);
+      return {
+        label: MONTHS[first.getMonth()],
+        from: isoDate(first),
+        to: isoDate(new Date(first.getFullYear(), first.getMonth() + 1, 0)),
+      };
+    });
     setLoading(true);
     Promise.all([
       api.get('/reports/profit-loss', { params: { dateFrom: yearStart, dateTo: today } }),
@@ -119,7 +126,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" subtitle={`Company snapshot for ${year}. Press F5 to refresh.`} />
+      <PageHeader title="Dashboard" subtitle={`Financial year from ${yearStart}. Press F5 to refresh.`} />
 
       {/* Key figures */}
       <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-2 mb-3">
@@ -141,7 +148,7 @@ export default function Dashboard() {
 
       {!loading && (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-          <Panel title="Revenue and expenses" note={`By month, ${year} · highest ${compact(peak)} LKR`} className="xl:col-span-2">
+          <Panel title="Revenue and expenses" note={`By month from ${yearStart} · highest ${compact(peak)} ${region().currency}`} className="xl:col-span-2">
             <div className="flex items-center gap-4 text-xs text-gray-600 mb-2">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-orange-500" />Revenue</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-slate-400" />Expenses</span>

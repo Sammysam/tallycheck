@@ -35,6 +35,16 @@ fn today() -> NaiveDate {
     today_local()
 }
 
+/// D25: the first day of the current financial year — the month in the `region.fiscalYearStart`
+/// setting (1 = January, the default; 4 = April; 7 = July …). The reference used 1 January.
+async fn fiscal_year_start(db: &database::Db) -> AppResult<String> {
+    let month = database::settings::find_all(db).await?.remove("region.fiscalYearStart");
+    let month = month.and_then(|m| m.trim().parse::<u32>().ok()).filter(|m| (1..=12).contains(m)).unwrap_or(1);
+    let t = today();
+    let year = if t.month() >= month { t.year() } else { t.year() - 1 };
+    Ok(NaiveDate::from_ymd_opt(year, month, 1).unwrap_or(t).to_string())
+}
+
 pub async fn profit_loss(
     State(s): State<AppState>,
     _a: Authorized<perm::Reports>,
@@ -43,10 +53,12 @@ pub async fn profit_loss(
     let q = validate::query_map(p);
     let from = raw_date(&q, "dateFrom")?;
     let to = raw_date(&q, "dateTo")?;
-    let year_start = NaiveDate::from_ymd_opt(today().year(), 1, 1).unwrap_or_else(today).to_string();
-    let from = from.unwrap_or(year_start);
-    let to = to.unwrap_or_else(|| today().to_string());
     let mut c = s.db.read().acquire().await?;
+    let from = match from {
+        Some(f) => f,
+        None => fiscal_year_start(&s.db).await?,
+    };
+    let to = to.unwrap_or_else(|| today().to_string());
     Ok(Json(reports::profit_and_loss(&mut c, &from, &to).await?.to_json()))
 }
 
@@ -99,10 +111,12 @@ pub async fn cash_flow(
     let q = validate::query_map(p);
     let from = raw_date(&q, "dateFrom")?;
     let to = raw_date(&q, "dateTo")?;
-    let year_start = NaiveDate::from_ymd_opt(today().year(), 1, 1).unwrap_or_else(today).to_string();
-    let from = from.unwrap_or(year_start);
-    let to = to.unwrap_or_else(|| today().to_string());
     let mut c = s.db.read().acquire().await?;
+    let from = match from {
+        Some(f) => f,
+        None => fiscal_year_start(&s.db).await?,
+    };
+    let to = to.unwrap_or_else(|| today().to_string());
     let mut ids: Vec<String> = match q.get("cashAccounts").and_then(Value::as_str) {
         Some(list) if !list.trim().is_empty() => list.split(',').map(|id| id.trim().to_string()).collect(),
         _ => reports::cash_flow::default_cash_accounts(&mut c).await?,

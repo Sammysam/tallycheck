@@ -2,29 +2,11 @@
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { amountInWords } from './amountInWords';
+import { amount } from '../lib/money';
+import { company, region } from '../lib/region';
 
-// ─────────────────────────────────────────────────────────────
-// EDIT YOUR COMPANY DETAILS HERE
-// ─────────────────────────────────────────────────────────────
-export const COMPANY = {
-  name: 'Cenango (Pvt) Ltd',
-  logo: '/Logo_black.png',
-  // Address shown under "Remit To"
-  remitAddress: ['50 Galpotha Road,', 'Nawala', 'Sri Lanka'],
-  // Centred contact line under the logo — update phone/fax/email as needed
-  contactLine: '50 Galpotha Road, Nawala, Sri Lanka   Tel: +94-11-2505546   Fax: +94-11-2504551',
-  emailWebLine: 'info@cenango.lk  |  www.cenango.lk',
-  paymentOptions: [
-    "01. By Cheque drawn in favour of 'Cenango (Pvt) Ltd'.",
-    '02. Direct remittance to Account Number 1500013830 of Cenango (Pvt) Ltd at Commercial Bank of Ceylon PLC.',
-  ],
-  // Printed at the very bottom of every invoice.
-  footerNote: 'This is a system-generated invoice and no signature is required',
-  // Fallbacks only — the live values come from Settings → Company (GET /settings).
-  signatoryName: 'Samir Husain',
-  signatoryTitle: 'Director',
-};
-// ─────────────────────────────────────────────────────────────
+// The letterhead, remittance details and footer come from Settings → Company (D25): the app
+// carries no company's details of its own.
 
 /** Company settings that are editable in the app (Settings page). */
 export interface InvoiceSettings {
@@ -65,7 +47,7 @@ const splitLines = (v?: string | null) =>
     .filter(Boolean);
 
 const num = (v: number | string) =>
-  new Intl.NumberFormat('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v) || 0);
+  amount(v);
 
 const fmtDate = (d?: string | null) => {
   if (!d) return '';
@@ -77,18 +59,20 @@ const fmtDate = (d?: string | null) => {
 const esc = (s?: string | null) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 
-function buildMarkup(invoice: PdfInvoice, origin: string, settings?: InvoiceSettings): string {
+function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
+  const co = company();
+  const cur = region().currencySymbol;
   const signatoryName =
-    invoice.signatoryName?.trim() || settings?.signatoryName?.trim() || COMPANY.signatoryName;
+    invoice.signatoryName?.trim() || settings?.signatoryName?.trim() || '';
   const signatoryTitle =
-    invoice.signatoryTitle?.trim() || settings?.signatoryTitle?.trim() || COMPANY.signatoryTitle;
+    invoice.signatoryTitle?.trim() || settings?.signatoryTitle?.trim() || '';
   const billToName = invoice.billToName?.trim() || invoice.customer?.name || '';
   const billToAddress = invoice.billToAddress?.trim()
     ? splitLines(invoice.billToAddress)
     : splitLines(invoice.customer?.address);
   const paymentOptions = invoice.paymentOptions?.trim()
     ? splitLines(invoice.paymentOptions)
-    : COMPANY.paymentOptions;
+    : co.paymentOptions;
   const lines = invoice.lines ?? [];
   const rowsHtml = lines
     .map(
@@ -109,6 +93,7 @@ function buildMarkup(invoice: PdfInvoice, origin: string, settings?: InvoiceSett
       #inv-pdf-root * { box-sizing: border-box; }
       #inv-pdf-root .logo-row { display: flex; justify-content: flex-end; }
       #inv-pdf-root .logo-row img { height: 40px; }
+      #inv-pdf-root .co-name { font-size: 20px; font-weight: bold; }
       #inv-pdf-root .rule { border-top: 1px solid #111; margin: 7px 0; }
       #inv-pdf-root .contact { text-align: center; font-size: 11px; color: #333; line-height: 1.6; }
       #inv-pdf-root h1 { font-size: 26px; margin: 22px 0 18px; }
@@ -132,9 +117,9 @@ function buildMarkup(invoice: PdfInvoice, origin: string, settings?: InvoiceSett
       #inv-pdf-root .sign .name { font-weight: bold; }
       #inv-pdf-root .sysnote { margin-top: 34px; padding-top: 8px; border-top: 1px solid #ccc; text-align: center; font-size: 11px; font-style: italic; color: #444; }
     </style>
-    <div class="logo-row"><img src="${origin}${COMPANY.logo}" alt="logo" crossorigin="anonymous" /></div>
+    <div class="logo-row">${co.logo ? `<img src="${co.logo}" alt="logo" />` : `<div class="co-name">${esc(co.name)}</div>`}</div>
     <div class="rule"></div>
-    <div class="contact">${esc(COMPANY.contactLine)}<br/>${esc(COMPANY.emailWebLine)}</div>
+    <div class="contact">${esc(co.contactLine)}${co.emailWebLine ? `<br/>${esc(co.emailWebLine)}` : ''}${co.taxNumber ? `<br/>Tax No: ${esc(co.taxNumber)}` : ''}</div>
     <div class="rule"></div>
 
     <h1>Invoice</h1>
@@ -142,8 +127,8 @@ function buildMarkup(invoice: PdfInvoice, origin: string, settings?: InvoiceSett
     <div class="meta">
       <div>
         <div class="label">Remit To:</div>
-        <div>${esc(COMPANY.name)}</div>
-        ${COMPANY.remitAddress.map((l) => `<div>${esc(l)}</div>`).join('')}
+        <div>${esc(co.name)}</div>
+        ${co.addressLines.map((l) => `<div>${esc(l)}</div>`).join('')}
       </div>
       <div>
         <div>${esc(fmtDate(invoice.date))}</div>
@@ -165,8 +150,8 @@ function buildMarkup(invoice: PdfInvoice, origin: string, settings?: InvoiceSett
           <th style="width:80px;">Date</th>
           <th class="c-desc">Description</th>
           <th style="width:50px;">Qty</th>
-          <th style="width:95px;">Unit Price (Rs.)</th>
-          <th style="width:95px;">Price (Rs.)</th>
+          <th style="width:95px;">Unit Price (${esc(cur)})</th>
+          <th style="width:95px;">Price (${esc(cur)})</th>
         </tr>
       </thead>
       <tbody>
@@ -181,12 +166,12 @@ function buildMarkup(invoice: PdfInvoice, origin: string, settings?: InvoiceSett
       </tfoot>
     </table>
 
-    <div class="words"><strong>Amount in words:</strong> ${esc(amountInWords(Number(invoice.totalAmount) || 0))}</div>
+    <div class="words"><strong>Amount in words:</strong> ${esc(amountInWords(Number(invoice.totalAmount) || 0, region().currencyWord, region().currencyMinorWord))}</div>
 
-    <div class="pay">
+    ${paymentOptions.length ? `<div class="pay">
       <div class="label">Payment options</div>
       ${paymentOptions.map((p) => `<p>${esc(p)}</p>`).join('')}
-    </div>
+    </div>` : ''}
 
     <div class="sign">
       <div class="thanks">Thanking You</div>
@@ -194,7 +179,7 @@ function buildMarkup(invoice: PdfInvoice, origin: string, settings?: InvoiceSett
       <div>${esc(signatoryTitle)}</div>
     </div>
 
-    <div class="sysnote">${esc(COMPANY.footerNote)}</div>`;
+    ${co.footerNote ? `<div class="sysnote">${esc(co.footerNote)}</div>` : ''}`;
 }
 
 /**
@@ -210,8 +195,7 @@ function openInvoiceWindow(
   autoPrint: boolean,
   target?: Window | null,
 ) {
-  const origin = window.location.origin;
-  const markup = buildMarkup(invoice, origin, settings);
+  const markup = buildMarkup(invoice, settings);
 
   const win = target ?? window.open('', '_blank');
   if (!win) {
@@ -283,15 +267,13 @@ export function printInvoice(invoice: PdfInvoice, settings?: InvoiceSettings, ta
 }
 
 export async function openInvoicePdf(invoice: PdfInvoice, settings?: InvoiceSettings) {
-  const origin = window.location.origin;
-
   const root = document.createElement('div');
   root.id = 'inv-pdf-root';
   root.style.position = 'fixed';
   root.style.left = '-99999px';
   root.style.top = '0';
   root.style.width = '794px'; // ≈ A4 width at 96dpi
-  root.innerHTML = buildMarkup(invoice, origin, settings);
+  root.innerHTML = buildMarkup(invoice, settings);
   document.body.appendChild(root);
 
   // Wait for the logo image to finish loading before capturing.

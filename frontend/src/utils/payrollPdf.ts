@@ -6,11 +6,15 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { amountInWords } from './amountInWords';
 import { periodLabel, type CompanyDetails, type PayrollLine, type RunDetail } from '../lib/payroll';
+import { amount } from '../lib/money';
+import { company as companyDetails, region as companyRegion } from '../lib/region';
+
+const companyName = () => companyDetails().name.toUpperCase();
 
 const esc = (s?: string | null) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 const num = (v: number | string | null | undefined) =>
-  new Intl.NumberFormat('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v) || 0);
+  amount(v ?? 0);
 const n = (v: number | string | null | undefined) => Number(v) || 0;
 const fmtDate = (d?: string | null) => {
   if (!d) return '';
@@ -58,13 +62,13 @@ function slipMarkup(run: RunDetail, l: PayrollLine, company: CompanyDetails): st
   const month = periodLabel(run.period);
   return `
   <div class="slip">
-    <h1>${esc(company.companyName || 'CENANGO (PVT) LTD')}</h1>
+    <h1>${esc(company.companyName || companyName())}</h1>
     <h2>Salary for the Month of ${esc(month)}</h2>
     <table class="who">
       <tr><td><b>Name:</b> ${esc(l.employeeName)}</td><td class="r"><b>Emp No:</b> ${esc(l.employeeCode)}</td></tr>
       <tr><td class="muted small">${esc(l.jobTitle || '')}${l.department ? ' · ' + esc(l.department) : ''}</td><td class="r muted small">${l.epfNumber ? 'EPF No: ' + esc(l.epfNumber) : ''}</td></tr>
     </table>
-    <div class="sec">EARNINGS <span style="float:right">Rs.</span></div>
+    <div class="sec">EARNINGS <span style="float:right">${esc(companyRegion().currencySymbol)}</span></div>
     <table>
       ${row('Basic Salary', l.basicForMonth, true)}
       <tr class="ln"><td>No. of days worked</td><td class="r">${n(l.daysWorked)} / ${l.daysInMonth}</td></tr>
@@ -79,7 +83,7 @@ function slipMarkup(run: RunDetail, l: PayrollLine, company: CompanyDetails): st
       ${row('No Pay', n(l.noPayAmount) ? -n(l.noPayAmount) : 0)}
       <tr class="tot"><td>Gross Salary</td><td class="r">${num(l.grossSalary)}</td></tr>
     </table>
-    <div class="sec">DEDUCTIONS <span style="float:right">Rs.</span></div>
+    <div class="sec">DEDUCTIONS <span style="float:right">${esc(companyRegion().currencySymbol)}</span></div>
     <table>
       ${row('EPF 8%', l.epfEmployee, l.epfApplicable)}
       ${row('Staff Welfare', l.welfare)}
@@ -92,9 +96,9 @@ function slipMarkup(run: RunDetail, l: PayrollLine, company: CompanyDetails): st
       <tr class="tot"><td>Total Deductions</td><td class="r">${num(l.deductionsTotal)}</td></tr>
       <tr class="tot"><td>Net Salary</td><td class="r">${num(l.netSalary)}</td></tr>
     </table>
-    <div class="words">${esc(amountInWords(n(l.netSalary)))}</div>
+    <div class="words">${esc(amountInWords(n(l.netSalary), companyRegion().currencyWord, companyRegion().currencyMinorWord))}</div>
     ${l.epfApplicable ? `
-    <div class="sec">EMPLOYER'S CONTRIBUTION <span style="float:right">Rs.</span></div>
+    <div class="sec">EMPLOYER'S CONTRIBUTION <span style="float:right">${esc(companyRegion().currencySymbol)}</span></div>
     <table>
       ${row('EPF 12%', l.epfEmployer, true)}
       ${row('ETF 3%', l.etf, true)}
@@ -142,16 +146,16 @@ export function bankAdvicePage(run: RunDetail, company: CompanyDetails): string 
   return `
   <div class="pg">
     ${run.status === 'DRAFT' ? '<div class="draft">DRAFT</div>' : ''}
-    <h1>${esc(company.companyName || 'CENANGO (PVT) LTD')}</h1>
+    <h1>${esc(company.companyName || companyName())}</h1>
     <h2>Bank Advice — Salaries for ${esc(periodLabel(run.period))}</h2>
     <table class="small" style="margin-bottom:10px"><tr><td>Date: ${esc(run.payDate ? fmtDate(run.payDate) : today())}</td><td class="r">Ref: ${esc(run.runNumber)}</td></tr></table>
     <p class="small">Please transfer the following amounts to the accounts listed below.</p>
     <table class="grid">
-      <tr><th style="width:36px">#</th><th>Name</th><th>Account No</th><th>Branch</th><th class="r" style="width:120px">Amount (Rs.)</th></tr>
+      <tr><th style="width:36px">#</th><th>Name</th><th>Account No</th><th>Branch</th><th class="r" style="width:120px">Amount (${esc(companyRegion().currencySymbol)})</th></tr>
       ${body}
       <tr><td colspan="4" class="r b">TOTAL</td><td class="r b">${num(run.netTotal)}</td></tr>
     </table>
-    <p class="small" style="margin-top:10px"><i>${esc(amountInWords(n(run.netTotal)))}</i></p>
+    <p class="small" style="margin-top:10px"><i>${esc(amountInWords(n(run.netTotal), companyRegion().currencyWord, companyRegion().currencyMinorWord))}</i></p>
     <div class="sig"><div>Prepared by</div><div>Authorised signatory</div></div>
   </div>`;
 }
@@ -237,7 +241,7 @@ export function acknowledgementPage(run: RunDetail, company: CompanyDetails): st
     </tr>`).join('');
   return `
   <div class="pg">
-    <h1>${esc(company.companyName || 'CENANGO (PVT) LTD')}</h1>
+    <h1>${esc(company.companyName || companyName())}</h1>
     <h2>Salary &amp; Pay Slip Acknowledgement for the Month of ${esc(periodLabel(run.period))}</h2>
     <table class="grid">
       <tr><th style="width:30px">#</th><th>Name</th><th style="width:28%">Signature</th><th style="width:30px">#</th><th>Name</th><th style="width:28%">Signature</th></tr>

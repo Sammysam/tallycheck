@@ -4,7 +4,7 @@ import { Printer } from 'lucide-react';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { money } from '../lib/money';
-import { COMPANY } from '../utils/invoicePdf';
+import { company, fiscalYearStart } from '../lib/region';
 
 /** D23: a customer's statement of account — print it, or "Save as PDF" from the print dialog. */
 
@@ -36,7 +36,7 @@ export default function CustomerStatement() {
   const { id } = useParams();
   const navigate = useNavigate();
   const now = new Date();
-  const [dateFrom, setDateFrom] = useState(`${now.getFullYear()}-01-01`);
+  const [dateFrom, setDateFrom] = useState(fiscalYearStart(now));
   const [dateTo, setDateTo] = useState(isoDay(now));
   const [ran, setRan] = useState({ dateFrom, dateTo });
   const [data, setData] = useState<Statement | null>(null);
@@ -49,6 +49,7 @@ export default function CustomerStatement() {
   }, [id, ran]);
 
   const c = data?.customer;
+  const co = company();
 
   return (
     <div>
@@ -73,9 +74,9 @@ export default function CustomerStatement() {
         <div className="statement-sheet">
           <div className="flex items-start justify-between gap-6 mb-5">
             <div>
-              <img src={COMPANY.logo} alt={COMPANY.name} className="h-9 w-auto mb-2" />
-              <p className="text-xs text-gray-600 max-w-sm">{COMPANY.contactLine}</p>
-              <p className="text-xs text-gray-600">{COMPANY.emailWebLine}</p>
+              {co.logo ? <img src={co.logo} alt={co.name} className="h-9 w-auto mb-2" /> : <p className="text-lg font-bold mb-1">{co.name}</p>}
+              <p className="text-xs text-gray-600 max-w-sm">{co.contactLine}</p>
+              <p className="text-xs text-gray-600">{co.emailWebLine}{co.taxNumber ? ` · Tax No: ${co.taxNumber}` : ''}</p>
             </div>
             <div className="text-right">
               <h2 className="text-xl font-bold tracking-wide">STATEMENT OF ACCOUNT</h2>
@@ -140,8 +141,8 @@ export default function CustomerStatement() {
           </table>
 
           <div className="mt-5 text-xs text-gray-600 space-y-0.5">
-            <p className="font-semibold text-gray-700">How to pay</p>
-            {COMPANY.paymentOptions.map((p) => <p key={p}>{p}</p>)}
+            {co.paymentOptions.length > 0 && <p className="font-semibold text-gray-700">How to pay</p>}
+            {co.paymentOptions.map((p) => <p key={p}>{p}</p>)}
             <p className="pt-2 italic">This is a system-generated statement and no signature is required.</p>
           </div>
         </div>

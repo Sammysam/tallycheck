@@ -4,6 +4,7 @@ import PageHeader from '../../components/PageHeader';
 import { ReportTable } from '../../components/ReportTable';
 import { sectionRows, type AccountLine } from '../../lib/reportRows';
 import { previousPeriod, samePeriodLastYear } from '../../lib/periods';
+import { fiscalYearStart, todayIso } from '../../lib/region';
 
 interface ProfitLossData {
   revenue: AccountLine[];
@@ -22,8 +23,8 @@ interface Range { dateFrom: string; dateTo: string }
 export default function ProfitLoss() {
   const [data, setData] = useState<ProfitLossData | null>(null);
   const [before, setBefore] = useState<ProfitLossData | null>(null);
-  const today = new Date().toISOString().split('T')[0];
-  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const today = todayIso();
+  const yearStart = fiscalYearStart();
   const [dateFrom, setDateFrom] = useState(yearStart);
   const [dateTo, setDateTo] = useState(today);
   const [compareWith, setCompareWith] = useState<CompareWith>('');

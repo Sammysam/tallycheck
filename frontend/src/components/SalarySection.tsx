@@ -12,6 +12,7 @@ import {
   type SalaryForm,
   type SalaryRecord,
 } from '../lib/employees';
+import { region } from '../lib/region';
 
 const STATE_BADGE: Record<SalaryRecord['state'], { label: string; cls: string }> = {
   CURRENT: { label: 'Current', cls: 'bg-green-100 text-green-700' },
@@ -219,7 +220,7 @@ export default function SalarySection({ employeeId, isContract }: { employeeId: 
               <input value={bank.bankAccountNo} onChange={(e) => setBank({ ...bank, bankAccountNo: e.target.value })} />
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-gray-500">Staff loan balance (Rs.)</span>
+              <span className="text-xs font-medium text-gray-500">Staff loan balance ({region().currencySymbol})</span>
               <input type="number" min="0" step="0.01" value={bank.staffLoanBalance} onChange={(e) => setBank({ ...bank, staffLoanBalance: e.target.value })} />
             </label>
             {bankError && <p className="text-sm text-red-600" style={{ gridColumn: '1 / -1' }}>{bankError}</p>}

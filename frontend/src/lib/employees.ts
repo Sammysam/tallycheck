@@ -1,3 +1,5 @@
+import { money } from './money';
+
 export type EmployeeStatus = 'ACTIVE' | 'ON_LEAVE' | 'LEFT';
 export type EmploymentType = 'PERMANENT' | 'CONTRACT';
 
@@ -109,7 +111,7 @@ export function salaryToForm(s: SalaryRecord): SalaryForm {
 
 export function rs(n: number | null | undefined): string {
   if (n === null || n === undefined) return '—';
-  return `Rs. ${Number(n).toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return money(Number(n));
 }
 
 export type DocumentCategory = 'CERTIFICATE' | 'ID' | 'CONTRACT' | 'VISA' | 'PAYSLIP' | 'OTHER';

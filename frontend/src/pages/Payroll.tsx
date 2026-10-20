@@ -6,6 +6,7 @@ import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import { rs } from '../lib/employees';
 import { amt, periodLabel, type CompanyDetails, type PayeSlab, type PayrollRates, type PayrollRun } from '../lib/payroll';
+import { region } from '../lib/region';
 
 const COMPANY_FIELDS: { key: keyof CompanyDetails; label: string; hint?: string }[] = [
   { key: 'companyName', label: 'Company name (as printed)' },
@@ -155,8 +156,8 @@ export default function Payroll() {
               <Pct label="EPF employee %" value={ratesForm.epfEmployeeRate ?? ''} onChange={setR('epfEmployeeRate')} />
               <Pct label="EPF employer %" value={ratesForm.epfEmployerRate ?? ''} onChange={setR('epfEmployerRate')} />
               <Pct label="ETF employer %" value={ratesForm.etfRate ?? ''} onChange={setR('etfRate')} />
-              <Pct label="Stamp duty (Rs.) per slip" value={ratesForm.stampDuty ?? ''} onChange={setR('stampDuty')} step="1" />
-              <Pct label="Employer welfare (Rs.) per employee" value={ratesForm.employerWelfare ?? ''} onChange={setR('employerWelfare')} step="1" />
+              <Pct label={`Stamp duty (${region().currencySymbol}) per slip`} value={ratesForm.stampDuty ?? ''} onChange={setR('stampDuty')} step="1" />
+              <Pct label={`Employer welfare (${region().currencySymbol}) per employee`} value={ratesForm.employerWelfare ?? ''} onChange={setR('employerWelfare')} step="1" />
               <Pct label="Days in month (for proration)" value={ratesForm.daysInMonth ?? ''} onChange={setR('daysInMonth')} step="1" />
             </div>
 

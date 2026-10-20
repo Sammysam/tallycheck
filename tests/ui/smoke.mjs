@@ -155,7 +155,20 @@ try {
     await waitFor(`document.body.innerText.includes('The two passwords do not match')`, 'mismatch error');
     await pw(1, 'admin12345');
     await evaluate(`document.querySelector('button[type=submit]').click()`);
+    // D25: no company ships with the app; the new administrator enters theirs first.
+    await waitFor(`location.pathname === '/company-setup' && !!document.querySelector('form[aria-label="Company details"]')`, 'company setup');
+    await shot('00b-company-setup');
+    await type('input[placeholder="Your company’s legal name"]', 'Acme Trading (Pvt) Ltd');
+    const choose = (label, value) => evaluate(`(() => { const sel = document.querySelector('select[aria-label="${label}"]');
+      sel.value = ${JSON.stringify(value)}; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await choose('Country', 'LK');
+    await waitFor(`document.querySelector('[data-testid=money-example]').innerText.includes('LKR')`, 'Sri Lanka preset');
+    await choose('Financial year starts in', '1');
+    await clickText('Save and continue');
     await waitFor(`location.pathname === '/' && !!localStorage.getItem('accessToken')`, 'dashboard after setup');
+    const settings = await evaluate(`fetch('/api/settings', { headers: { authorization: 'Bearer ' + localStorage.getItem('accessToken') } }).then((r) => r.json())`);
+    if (settings['company.name'] !== 'Acme Trading (Pvt) Ltd' || settings['region.currency'] !== 'LKR')
+      throw new Error('company not saved: ' + JSON.stringify(settings).slice(0, 300));
     await evaluate(`localStorage.clear()`);
   });
 
@@ -214,9 +227,11 @@ try {
 
   await check('Settings page saves the signatory', async () => {
     await go('/settings');
-    await waitFor(`!!document.querySelector('input[placeholder="e.g. Samir Husain"]')`, 'settings form');
-    await type('input[placeholder="e.g. Samir Husain"]', 'Jane Doe');
-    await evaluate(`document.querySelector('button[type=submit]').click()`);
+    await waitFor(`!!document.querySelector('input[placeholder="e.g. Jane Smith"]')`, 'settings form');
+    await type('input[placeholder="e.g. Jane Smith"]', 'Jane Doe');
+    // D25: no title ships with the app either.
+    await type('input[placeholder="e.g. Director"]', 'Director');
+    await evaluate(`document.querySelector('input[placeholder="e.g. Jane Smith"]').closest('form').querySelector('button[type=submit]').click()`);
     await sleep(800);
     const saved = await evaluate(`fetch('/api/settings', { headers: { authorization: 'Bearer ' + localStorage.getItem('accessToken') } }).then((r) => r.json())`);
     if (saved.signatoryName !== 'Jane Doe') throw new Error(`signatoryName is ${saved.signatoryName}`);

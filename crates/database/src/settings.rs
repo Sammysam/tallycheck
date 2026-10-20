@@ -6,8 +6,9 @@ use app_core::time::now_iso;
 use app_core::AppResult;
 use std::collections::BTreeMap;
 
-/// Fallbacks used when a key has never been saved (reference `SettingsService.DEFAULTS`).
-pub const DEFAULTS: &[(&str, &str)] = &[("signatoryName", "Samir Husain"), ("signatoryTitle", "Director")];
+/// Fallbacks used when a key has never been saved. The reference's `SettingsService.DEFAULTS`
+/// named its own signatory; the app ships no company's details (D25), so there are none.
+pub const DEFAULTS: &[(&str, &str)] = &[];
 
 pub type SettingsMap = BTreeMap<String, String>;
 

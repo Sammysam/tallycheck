@@ -5,6 +5,7 @@ import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
+import { money } from '../lib/money';
 
 /**
  * D21. AR: customer credit notes against posted invoices (revenue down, receivable down).
@@ -34,7 +35,7 @@ interface Doc {
   firstAccount: string | null;
 }
 
-const fmt = (v: number | string) => new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(Number(v));
+const fmt = (v: number | string) => money(Number(v));
 const todayIso = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

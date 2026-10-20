@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
+import { money } from '../lib/money';
 
 /** D22: match a cash or bank account's ledger lines to a bank statement. */
 
@@ -30,7 +31,7 @@ interface Line {
 }
 interface Workspace extends Rec { lines: Line[]; clearedBalance: number; difference: number }
 
-const fmt = (v: number) => new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(v);
+const fmt = (v: number) => money(Number(v));
 const cents = (v: number) => Math.round(v * 100);
 const todayIso = () => {
   const d = new Date();

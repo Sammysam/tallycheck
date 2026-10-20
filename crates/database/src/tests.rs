@@ -191,7 +191,9 @@ async fn seeds_match_reference_migrations() -> AppResult<()> {
     assert_eq!(inv, 8999);
 
     let settings = settings::find_all(&db).await?;
-    assert_eq!(settings.get("signatoryName").map(String::as_str), Some("Samir Husain"));
+    // D25: the seeded customer details are blanked on a fresh install.
+    assert_eq!(settings.get("signatoryName").map(String::as_str), Some(""));
+    assert_eq!(settings.get("payroll.companyName").map(String::as_str), Some(""));
     assert_eq!(
         settings.get("payroll.payeSlabs").map(String::as_str),
         Some("[[250000,0],[500000,0.06],[750000,0.12],[null,0.18]]")
