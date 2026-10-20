@@ -7,6 +7,7 @@
 //!   outstanding balance and POSTED bills, aged from their due date (or their date).
 
 pub mod cash_flow;
+pub mod tax_return;
 
 use app_core::money::{as_json_number, Money};
 use app_core::{AppError, AppResult};
@@ -242,3 +243,11 @@ pub async fn ap_aging(conn: &mut SqliteConnection, today: NaiveDate) -> AppResul
 
 #[cfg(test)]
 mod tests;
+
+/// Tax code id → (name, rate), for reports.
+pub(crate) async fn tax_codes_by_id(
+    conn: &mut SqliteConnection,
+) -> AppResult<std::collections::HashMap<String, (String, i64)>> {
+    let rows = sqlx::query(r#"SELECT "id", "name", "rate" FROM "tax_codes""#).fetch_all(&mut *conn).await?;
+    rows.iter().map(|r| Ok((r.try_get("id")?, (r.try_get("name")?, r.try_get("rate")?)))).collect()
+}

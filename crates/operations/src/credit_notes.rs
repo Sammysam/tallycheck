@@ -41,6 +41,9 @@ pub struct CreditNote {
     pub status: String,
     pub journal_entry_id: Option<String>,
     pub created_by_id: Option<String>,
+    /// D26: the amount includes tax; this is the tax inside it, reversed with the note.
+    pub tax_code_id: Option<String>,
+    pub tax_amount: Money,
     pub created_at: String,
     pub updated_at: String,
     /// The invoice or bill number, and the customer or vendor name, for lists.
@@ -65,6 +68,8 @@ impl CreditNote {
             "status": self.status,
             "journalEntryId": opt(&self.journal_entry_id),
             "createdById": opt(&self.created_by_id),
+            "taxCodeId": opt(&self.tax_code_id),
+            "taxAmount": money_str(self.tax_amount),
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         })
@@ -72,7 +77,7 @@ impl CreditNote {
 }
 
 const SELECT: &str = r#"SELECT n."id", n."noteNumber", n."type", n."invoiceId", n."billId", n."date", n."reason", n."amount",
-       n."accountId", n."status", n."journalEntryId", n."createdById", n."createdAt", n."updatedAt",
+       n."accountId", n."status", n."journalEntryId", n."createdById", n."taxCodeId", n."taxAmount", n."createdAt", n."updatedAt",
        COALESCE(i."invoiceNumber", b."billNumber") AS "documentNumber",
        COALESCE(NULLIF(c."name", ''), i."billToName", v."name") AS "partyName"
   FROM "credit_notes" n
@@ -95,6 +100,8 @@ fn from_row(r: &SqliteRow) -> AppResult<CreditNote> {
         status: r.try_get("status")?,
         journal_entry_id: r.try_get("journalEntryId")?,
         created_by_id: r.try_get("createdById")?,
+        tax_code_id: r.try_get("taxCodeId")?,
+        tax_amount: Money::from_cents(r.try_get("taxAmount")?),
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
         document_number: r.try_get("documentNumber")?,
@@ -146,6 +153,8 @@ pub struct CreateNote {
     pub reason: String,
     pub amount: Money,
     pub account_id: String,
+    /// D26: optional tax code; `amount` includes the tax.
+    pub tax_code_id: Option<String>,
 }
 
 /// What the note is against: its number, date, status and what is still owed on it.
@@ -238,10 +247,33 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
         }));
     }
     let control = accounts::find_by_code(&mut tx, control_code).await?;
+    // D26: the tax inside the gross amount goes back to the code's tax account.
+    let (tax, tax_account) = match &dto.tax_code_id {
+        Some(code) => {
+            let c = crate::tax::usable(&mut tx, code).await?;
+            let account = if kind == AR { c.sales_account_id } else { c.purchase_account_id };
+            (crate::tax::tax_of(dto.amount, c.rate, true)?, Some(account))
+        }
+        None => (Money::ZERO, None),
+    };
+    let net = dto.amount.checked_sub(tax).ok_or_else(overflow)?;
     let number = counters::next_formatted(&mut tx, prefix, 6).await?;
     let id = new_id();
-    let (debit_account, credit_account) =
-        if kind == AR { (account.id.clone(), control.id) } else { (control.id, account.id.clone()) };
+    let mut lines = if kind == AR {
+        vec![
+            NewLine { account_id: account.id.clone(), debit: net, credit: Money::ZERO, description: None },
+            NewLine { account_id: control.id, debit: Money::ZERO, credit: dto.amount, description: None },
+        ]
+    } else {
+        vec![
+            NewLine { account_id: control.id, debit: dto.amount, credit: Money::ZERO, description: None },
+            NewLine { account_id: account.id.clone(), debit: Money::ZERO, credit: net, description: None },
+        ]
+    };
+    if let (Some(account_id), true) = (tax_account, tax != Money::ZERO) {
+        let (debit, credit) = if kind == AR { (tax, Money::ZERO) } else { (Money::ZERO, tax) };
+        lines.push(NewLine { account_id, debit, credit, description: Some("Tax".into()) });
+    }
     let entry = entries::post(
         &mut tx,
         NewEntry {
@@ -250,10 +282,7 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
             reference: Some(number.clone()),
             source_type: Some(source_type.into()),
             source_id: Some(id.clone()),
-            lines: vec![
-                NewLine { account_id: debit_account, debit: dto.amount, credit: Money::ZERO, description: None },
-                NewLine { account_id: credit_account, debit: Money::ZERO, credit: dto.amount, description: None },
-            ],
+            lines,
         },
     )
     .await?;
@@ -265,8 +294,8 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
         if kind == AR { (Some(dto.document_id.clone()), None) } else { (None, Some(dto.document_id.clone())) };
     sqlx::query(
         r#"INSERT INTO "credit_notes" ("id","noteNumber","type","invoiceId","billId","date","reason","amount","accountId",
-             "status","journalEntryId","createdById","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'POSTED',?10,?11,?12,?12)"#,
+             "status","journalEntryId","createdById","createdAt","updatedAt","taxCodeId","taxAmount")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'POSTED',?10,?11,?12,?12,?13,?14)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -280,6 +309,8 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
     .bind(&entry.id)
     .bind(&scope.user_id)
     .bind(&now)
+    .bind(&dto.tax_code_id)
+    .bind(tax.cents())
     .execute(&mut *tx)
     .await?;
     let note = find_one(&mut tx, kind, &id, scope).await?;

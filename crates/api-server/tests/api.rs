@@ -1779,3 +1779,89 @@ async fn company_and_region_settings_are_validated_and_drive_the_financial_year(
     assert!(from.ends_with("-04-01"), "default dateFrom {from}");
     Ok(())
 }
+
+#[tokio::test]
+async fn tax_codes_invoices_and_the_tax_return_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let clerk = app.signed_in("clerk", "Viewer").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let new_account = |code: &str, t: &str| json!({"code": code, "name": format!("Tax {code}"), "type": t});
+    let payable = app.call(Method::POST, "/api/accounts", Some(&admin), Some(new_account("2300", "LIABILITY"))).await?;
+    let receivable = app.call(Method::POST, "/api/accounts", Some(&admin), Some(new_account("1400", "ASSET"))).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (revenue, expense) = (id_of("4000")?, id_of("6000")?);
+
+    let body = json!({"name": "GST 8.875%", "rate": 8.875,
+        "salesAccountId": payable.body["id"], "purchaseAccountId": receivable.body["id"]});
+    let denied = app.call(Method::POST, "/api/tax-codes", Some(&clerk), Some(body.clone())).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN, "managing tax codes needs settings");
+    for bad in [json!(101), json!(-1), json!(8.12345), json!("18")] {
+        let mut b = body.clone();
+        b["rate"] = bad.clone();
+        let r = app.call(Method::POST, "/api/tax-codes", Some(&admin), Some(b)).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "rate {bad} must be refused");
+    }
+    let gst = app.call(Method::POST, "/api/tax-codes", Some(&admin), Some(body)).await?;
+    assert_eq!(gst.status, StatusCode::CREATED, "{}", gst.body);
+    assert_eq!(gst.body["rate"], json!(8.875));
+    let gst_id = gst.body["id"].as_str().ok_or("gst")?.to_string();
+    let listed = app.call(Method::GET, "/api/tax-codes", Some(&clerk), None).await?;
+    assert_eq!(listed.body.as_array().map(Vec::len), Some(1), "anyone signed in can read them");
+
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme"}))).await?;
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust.body["id"], "date": "2026-04-01",
+                "lines": [{"description": "Design", "quantity": 1, "unitPrice": 1000, "accountId": revenue, "taxCodeId": gst_id}]})),
+        )
+        .await?;
+    assert_eq!(inv.status, StatusCode::CREATED, "{}", inv.body);
+    assert_eq!((inv.body["totalAmount"].as_str(), inv.body["taxAmount"].as_str()), (Some("1088.75"), Some("88.75")));
+    assert_eq!((inv.body["subtotal"].as_str(), inv.body["pricesIncludeTax"].clone()), (Some("1000.00"), json!(false)));
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+    // Switching the draft to "prices include tax" recalculates the same lines.
+    let inc = app
+        .call(Method::PATCH, &format!("/api/invoices/{inv_id}"), Some(&admin), Some(json!({"pricesIncludeTax": true})))
+        .await?;
+    assert_eq!((inc.body["totalAmount"].clone(), inc.body["taxAmount"].as_str()), (json!(1000), Some("81.52")));
+    app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+
+    let vendor = app.call(Method::POST, "/api/vendors", Some(&admin), Some(json!({"name": "Paper Co"}))).await?;
+    let bill = app
+        .call(
+            Method::POST,
+            "/api/bills",
+            Some(&admin),
+            Some(json!({"vendorId": vendor.body["id"], "date": "2026-04-03",
+                "lines": [{"description": "Paper", "quantity": 1, "unitPrice": 200, "accountId": expense, "taxCodeId": gst_id}]})),
+        )
+        .await?;
+    assert_eq!(bill.body["taxAmount"].as_str(), Some("17.75"), "{}", bill.body);
+    app.call(Method::POST, &format!("/api/bills/{}/post", bill.body["id"].as_str().ok_or("bill")?), Some(&admin), None)
+        .await?;
+
+    let ret =
+        app.call(Method::GET, "/api/reports/tax?dateFrom=2026-04-01&dateTo=2026-04-30", Some(&admin), None).await?;
+    assert_eq!(ret.status, StatusCode::OK, "{}", ret.body);
+    let row = &ret.body["rows"][0];
+    assert_eq!(
+        (row["name"].as_str(), row["salesNet"].clone(), row["outputTax"].clone()),
+        (Some("GST 8.875%"), json!(918.48), json!(81.52))
+    );
+    assert_eq!((row["purchasesNet"].clone(), row["inputTax"].clone()), (json!(200), json!(17.75)));
+    // 1000 × 8.875/108.875 = 81.5155… → 81.52 (half-up); 81.52 − 17.75 = 63.77.
+    assert_eq!(ret.body["netTax"], json!(63.77));
+    let deleted = app.call(Method::DELETE, &format!("/api/tax-codes/{gst_id}"), Some(&admin), None).await?;
+    assert_eq!(deleted.status, StatusCode::BAD_REQUEST, "a code in use is deactivated, not deleted");
+    Ok(())
+}

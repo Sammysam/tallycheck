@@ -85,6 +85,7 @@ impl Shop {
                     quantity: Some(m(q)),
                     unit_price: Some(m(p)),
                     account_id: with_account.then(|| self.acct["4000"].clone()),
+                    tax_code_id: None,
                 })
                 .collect(),
             ..Default::default()
@@ -217,6 +218,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
         quantity: m(q),
         unit_price: m(p),
         account_id: exp.clone(),
+        tax_code_id: None,
     };
     let bill = bills::create(
         &s.db,
@@ -225,6 +227,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
             date: "2026-04-03".into(),
             due_date: None,
             notes: None,
+            prices_include_tax: false,
             lines: vec![line("Paper", "3", "12.5"), line("Ink", "1", "20")],
         },
     )
@@ -260,6 +263,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
             date: "2026-04-07".into(),
             due_date: None,
             notes: None,
+            prices_include_tax: false,
             lines: vec![line("Unposted", "1", "9")],
         },
     )
@@ -276,6 +280,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
             expense_account_id: exp.clone(),
             payment_account_id: s.acct["1000"].clone(),
             receipt_url: None,
+            tax_code_id: None,
         },
     )
     .await?;
@@ -386,11 +391,13 @@ async fn voiding_a_payment_reverses_it_and_reopens_the_invoice_and_bill() -> App
             date: "2026-04-03".into(),
             due_date: None,
             notes: None,
+            prices_include_tax: false,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),
                 unit_price: m("57.5"),
                 account_id: s.acct["6000"].clone(),
+                tax_code_id: None,
             }],
         },
     )
@@ -454,6 +461,7 @@ fn note(kind: &str, doc: &str, amount: &str, account: &str) -> crate::credit_not
         reason: "Discount agreed".into(),
         amount: m(amount),
         account_id: account.into(),
+        tax_code_id: None,
     }
 }
 
@@ -523,11 +531,13 @@ async fn debit_notes_reduce_what_is_owed_to_the_vendor() -> AppResult<()> {
             date: "2026-04-03".into(),
             due_date: None,
             notes: None,
+            prices_include_tax: false,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),
                 unit_price: m("300"),
                 account_id: expense.clone(),
+                tax_code_id: None,
             }],
         },
     )
@@ -585,5 +595,114 @@ async fn customer_statement_runs_invoices_payments_and_credits() -> AppResult<()
     let stranger = Scope { user_id: Some("someone-else".into()), sees_all: false };
     let none = crate::statements::customer_statement(&mut c, &s.customer, None, None, &stranger).await?;
     assert_eq!(none["lines"].as_array().map(Vec::len), Some(0), "only invoices the user may see");
+    Ok(())
+}
+
+#[tokio::test]
+async fn taxes_split_every_document_and_post_to_the_tax_accounts() -> AppResult<()> {
+    use crate::tax::{self, TaxCodeInput};
+    let s = shop().await?;
+    let account = |code: &str, t: AccountType| CreateAccount {
+        code: code.into(),
+        name: code.into(),
+        account_type: t,
+        subtype: None,
+        description: None,
+        parent_id: None,
+    };
+    let payable = accounts::create(&s.db, account("2300", AccountType::Liability)).await?.id;
+    let receivable = accounts::create(&s.db, account("1400", AccountType::Asset)).await?.id;
+    let bal = |id: String| {
+        let db = s.db.clone();
+        async move {
+            let mut c = db.read().acquire().await?;
+            AppResult::Ok(ledger::entries::account_balance(&mut c, &id, None, None).await?.balance)
+        }
+    };
+    let code = |name: &str, rate: i64| TaxCodeInput {
+        name: Some(name.into()),
+        rate: Some(rate),
+        description: None,
+        sales_account_id: Some(payable.clone()),
+        purchase_account_id: Some(receivable.clone()),
+        is_active: None,
+    };
+    let wrong = tax::create(&s.db, TaxCodeInput { sales_account_id: Some(receivable.clone()), ..code("Bad", 1) }).await;
+    assert!(bad_request(&wrong).is_some(), "the sales tax account must be a liability");
+    let vat = tax::create(&s.db, code("VAT 18%", 180_000)).await?;
+    assert!(matches!(tax::create(&s.db, code("vat 18%", 1)).await, Err(AppError::Conflict(_))));
+
+    // Prices excluding tax: 2 × 100 + 18% = 236.
+    let mut ex = s.invoice(vec![("2", "100", true)]);
+    ex.lines[0].tax_code_id = Some(vat.id.clone());
+    let ex = invoices::create(&s.db, ex, Some("admin")).await?;
+    assert_eq!((ex.total_amount, ex.tax_amount), (m("236"), m("36")));
+    invoices::post(&s.db, &ex.id, &ADMIN()).await?;
+    // Prices including tax: 118 holds 18 of tax.
+    let mut inc = s.invoice(vec![("1", "118", true)]);
+    inc.lines[0].tax_code_id = Some(vat.id.clone());
+    inc.prices_include_tax = true;
+    let inc = invoices::create(&s.db, inc, Some("admin")).await?;
+    assert_eq!((inc.total_amount, inc.tax_amount), (m("118"), m("18")));
+    invoices::post(&s.db, &inc.id, &ADMIN()).await?;
+    assert_eq!(s.balance("1100").await?, m("354"));
+    assert_eq!(s.balance("4000").await?, m("300"), "revenue never includes tax");
+    assert_eq!(bal(payable.clone()).await?, m("54"));
+
+    // A credit note of 59 gross takes 9 of tax back.
+    let mut cn = note("AR", &ex.id, "59", &s.acct["4000"]);
+    cn.tax_code_id = Some(vat.id.clone());
+    let cn = crate::credit_notes::create(&s.db, cn, &ADMIN()).await?;
+    assert_eq!(cn.tax_amount, m("9"));
+    assert_eq!((s.balance("4000").await?, bal(payable.clone()).await?), (m("250"), m("45")));
+
+    // Purchases: a bill excluding tax and an expense paid including tax.
+    let bill = bills::create(
+        &s.db,
+        CreateBill {
+            vendor_id: s.vendor.clone(),
+            date: "2026-04-03".into(),
+            due_date: None,
+            notes: None,
+            prices_include_tax: false,
+            lines: vec![BillLineInput {
+                description: "Paper".into(),
+                quantity: m("1"),
+                unit_price: m("57.5"),
+                account_id: s.acct["6000"].clone(),
+                tax_code_id: Some(vat.id.clone()),
+            }],
+        },
+    )
+    .await?;
+    assert_eq!((bill.total_amount, bill.tax_amount), (m("67.85"), m("10.35")));
+    bills::post(&s.db, &bill.id).await?;
+    let exp = expenses::create(
+        &s.db,
+        CreateExpense {
+            date: "2026-04-08".into(),
+            description: "Taxi".into(),
+            amount: m("118"),
+            expense_account_id: s.acct["6000"].clone(),
+            payment_account_id: s.acct["1000"].clone(),
+            receipt_url: None,
+            tax_code_id: Some(vat.id.clone()),
+        },
+    )
+    .await?;
+    expenses::post(&s.db, &exp.id).await?;
+    assert_eq!(s.balance("6000").await?, m("157.5"), "expenses never include reclaimable tax");
+    assert_eq!(bal(receivable.clone()).await?, m("28.35"));
+    assert_eq!(s.balance("2000").await?, m("67.85"));
+
+    // A code in use cannot be deleted, only switched off; a switched-off code is refused.
+    assert!(bad_request(&tax::remove(&s.db, &vat.id).await).is_some());
+    tax::update(&s.db, &vat.id, TaxCodeInput { is_active: Some(false), ..code("VAT 18%", 180_000) }).await?;
+    let mut late = s.invoice(vec![("1", "10", true)]);
+    late.lines[0].tax_code_id = Some(vat.id.clone());
+    let refused = invoices::create(&s.db, late, Some("admin")).await;
+    assert_eq!(bad_request(&refused).as_deref(), Some("The tax code \"VAT 18%\" is no longer in use"));
+    let unused = tax::create(&s.db, code("Zero-rated", 0)).await?;
+    tax::remove(&s.db, &unused.id).await?;
     Ok(())
 }

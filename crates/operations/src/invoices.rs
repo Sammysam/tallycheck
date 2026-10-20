@@ -49,6 +49,20 @@ pub struct InvoiceLine {
     pub unit_price: Money,
     pub amount: Money,
     pub account_id: Option<String>,
+    /// D26: the line's tax code and its tax, rounded half-up.
+    pub tax_code_id: Option<String>,
+    pub tax_amount: Money,
+}
+
+impl InvoiceLine {
+    /// The line without tax: what revenue is credited with.
+    pub fn net(&self, prices_include_tax: bool) -> AppResult<Money> {
+        if prices_include_tax {
+            self.amount.checked_sub(self.tax_amount).ok_or_else(overflow)
+        } else {
+            Ok(self.amount)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +85,9 @@ pub struct Invoice {
     pub amount_paid: Money,
     /// Taken off by posted credit notes (D21).
     pub amount_credited: Money,
+    /// D26: total tax on the lines, and whether the line amounts already include it.
+    pub tax_amount: Money,
+    pub prices_include_tax: bool,
     pub journal_entry_id: Option<String>,
     pub created_by_id: Option<String>,
     pub created_at: String,
@@ -105,6 +122,8 @@ impl Invoice {
                     "unitPrice": if fresh { money_num(l.unit_price) } else { money_str(l.unit_price) },
                     "amount": if fresh { money_num(l.amount) } else { money_str(l.amount) },
                     "accountId": opt(&l.account_id),
+                    "taxCodeId": opt(&l.tax_code_id),
+                    "taxAmount": if fresh { money_num(l.tax_amount) } else { money_str(l.tax_amount) },
                 })
             })
             .collect();
@@ -132,6 +151,12 @@ impl Invoice {
         );
         m.insert("amountPaid".into(), money_str(self.amount_paid));
         m.insert("amountCredited".into(), money_str(self.amount_credited));
+        m.insert("taxAmount".into(), money_str(self.tax_amount));
+        m.insert(
+            "subtotal".into(),
+            money_str(self.total_amount.checked_sub(self.tax_amount).unwrap_or(self.total_amount)),
+        );
+        m.insert("pricesIncludeTax".into(), json!(self.prices_include_tax));
         m.insert("journalEntryId".into(), opt(&self.journal_entry_id));
         m.insert("createdById".into(), opt(&self.created_by_id));
         m.insert("lines".into(), Value::Array(lines));
@@ -143,7 +168,7 @@ impl Invoice {
 
 const COLUMNS: &str = r#"i."id", i."invoiceNumber", i."poNumber", i."customerId", i."date", i."dueDate", i."status", i."notes",
     i."billToName", i."billToAddress", i."paymentOptions", i."signatoryName", i."signatoryTitle", i."paymentTerms",
-    i."totalAmount", i."amountPaid", i."amountCredited", i."journalEntryId", i."createdById", i."createdAt", i."updatedAt""#;
+    i."totalAmount", i."amountPaid", i."amountCredited", i."taxAmount", i."pricesIncludeTax", i."journalEntryId", i."createdById", i."createdAt", i."updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Invoice> {
     Ok(Invoice {
@@ -164,6 +189,8 @@ fn from_row(r: &SqliteRow) -> AppResult<Invoice> {
         total_amount: Money::from_cents(r.try_get("totalAmount")?),
         amount_paid: Money::from_cents(r.try_get("amountPaid")?),
         amount_credited: Money::from_cents(r.try_get("amountCredited")?),
+        tax_amount: Money::from_cents(r.try_get("taxAmount")?),
+        prices_include_tax: r.try_get::<i64, _>("pricesIncludeTax")? == 1,
         journal_entry_id: r.try_get("journalEntryId")?,
         created_by_id: r.try_get("createdById")?,
         created_at: r.try_get("createdAt")?,
@@ -177,7 +204,7 @@ async fn attach(conn: &mut SqliteConnection, invoices: &mut [Invoice]) -> AppRes
     let mut customers: HashMap<String, Option<Party>> = HashMap::new();
     for inv in invoices.iter_mut() {
         let rows = sqlx::query(
-            r#"SELECT "id","invoiceId","description","quantity","unitPrice","amount","accountId"
+            r#"SELECT "id","invoiceId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount"
                FROM "invoice_lines" WHERE "invoiceId" = ?1 ORDER BY rowid"#,
         )
         .bind(&inv.id)
@@ -194,6 +221,8 @@ async fn attach(conn: &mut SqliteConnection, invoices: &mut [Invoice]) -> AppRes
                     unit_price: Money::from_cents(r.try_get("unitPrice")?),
                     amount: Money::from_cents(r.try_get("amount")?),
                     account_id: r.try_get("accountId")?,
+                    tax_code_id: r.try_get("taxCodeId")?,
+                    tax_amount: Money::from_cents(r.try_get("taxAmount")?),
                 })
             })
             .collect::<AppResult<Vec<_>>>()?;
@@ -258,6 +287,8 @@ pub struct LineInput {
     pub quantity: Option<Money>,
     pub unit_price: Option<Money>,
     pub account_id: Option<String>,
+    /// D26: optional tax code for the line.
+    pub tax_code_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -274,41 +305,64 @@ pub struct CreateInvoice {
     pub signatory_name: Option<String>,
     pub signatory_title: Option<String>,
     pub lines: Vec<LineInput>,
+    /// D26: the line amounts already include tax.
+    pub prices_include_tax: bool,
 }
 
-/// A line ready to store: its input plus resolved quantity, unit price and amount.
+/// A line ready to store: its input plus resolved quantity, unit price, amount and tax.
 struct PricedLine {
     input: LineInput,
     quantity: Money,
     unit_price: Money,
     amount: Money,
+    tax: Money,
 }
 
-/// Blank quantity means one; blank price means the line carries no money.
-fn build_lines(inputs: &[LineInput]) -> AppResult<(Vec<PricedLine>, Money)> {
+/// Blank quantity means one; blank price means the line carries no money. Returns the lines,
+/// the invoice total (tax included) and the tax.
+async fn build_lines(
+    conn: &mut SqliteConnection,
+    inputs: &[LineInput],
+    prices_include_tax: bool,
+) -> AppResult<(Vec<PricedLine>, Money, Money)> {
     let mut out = Vec::new();
-    let mut total = Money::ZERO;
+    let (mut total, mut tax_total) = (Money::ZERO, Money::ZERO);
     for l in inputs {
         let quantity = l.quantity.unwrap_or(Money::from_cents(100));
         let unit_price = l.unit_price.unwrap_or(Money::ZERO);
         let amount = Money::line_amount(quantity, unit_price).ok_or_else(overflow)?;
-        total = total.checked_add(amount).ok_or_else(overflow)?;
-        out.push(PricedLine { input: l.clone(), quantity, unit_price, amount });
+        let (gross, tax) = match &l.tax_code_id {
+            Some(code) => {
+                let rate = crate::tax::usable(conn, code).await?.rate;
+                let (_, tax, gross) = crate::tax::split(amount, rate, prices_include_tax)?;
+                (gross, tax)
+            }
+            None => (amount, Money::ZERO),
+        };
+        total = total.checked_add(gross).ok_or_else(overflow)?;
+        tax_total = tax_total.checked_add(tax).ok_or_else(overflow)?;
+        out.push(PricedLine { input: l.clone(), quantity, unit_price, amount, tax });
     }
-    Ok((out, total))
+    Ok((out, total, tax_total))
 }
 
-async fn insert_lines(tx: &mut Tx, invoice_id: &str, inputs: &[LineInput]) -> AppResult<Money> {
+/// Stores the lines; returns the invoice total (tax included) and its tax.
+async fn insert_lines(
+    tx: &mut Tx,
+    invoice_id: &str,
+    inputs: &[LineInput],
+    prices_include_tax: bool,
+) -> AppResult<(Money, Money)> {
     for l in inputs {
         if let Some(a) = &l.account_id {
             require_account(tx, a).await?;
         }
     }
-    let (lines, total) = build_lines(inputs)?;
-    for PricedLine { input: l, quantity, unit_price, amount } in lines {
+    let (lines, total, tax_total) = build_lines(tx, inputs, prices_include_tax).await?;
+    for PricedLine { input: l, quantity, unit_price, amount, tax } in lines {
         sqlx::query(
-            r#"INSERT INTO "invoice_lines" ("id","invoiceId","description","quantity","unitPrice","amount","accountId")
-               VALUES (?1,?2,?3,?4,?5,?6,?7)"#,
+            r#"INSERT INTO "invoice_lines" ("id","invoiceId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount")
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
         )
         .bind(new_id())
         .bind(invoice_id)
@@ -317,10 +371,12 @@ async fn insert_lines(tx: &mut Tx, invoice_id: &str, inputs: &[LineInput]) -> Ap
         .bind(unit_price.cents())
         .bind(amount.cents())
         .bind(&l.account_id)
+        .bind(&l.tax_code_id)
+        .bind(tax.cents())
         .execute(&mut **tx)
         .await?;
     }
-    Ok(total)
+    Ok((total, tax_total))
 }
 
 pub async fn create_in(tx: &mut Tx, dto: CreateInvoice, created_by: Option<&str>) -> AppResult<Invoice> {
@@ -358,12 +414,16 @@ pub async fn create_in(tx: &mut Tx, dto: CreateInvoice, created_by: Option<&str>
     .bind(&now)
     .execute(&mut **tx)
     .await?;
-    let total = insert_lines(tx, &id, &dto.lines).await?;
-    sqlx::query(r#"UPDATE "invoices" SET "totalAmount" = ?1 WHERE "id" = ?2"#)
-        .bind(total.cents())
-        .bind(&id)
-        .execute(&mut **tx)
-        .await?;
+    let (total, tax) = insert_lines(tx, &id, &dto.lines, dto.prices_include_tax).await?;
+    sqlx::query(
+        r#"UPDATE "invoices" SET "totalAmount" = ?1, "taxAmount" = ?2, "pricesIncludeTax" = ?3 WHERE "id" = ?4"#,
+    )
+    .bind(total.cents())
+    .bind(tax.cents())
+    .bind(dto.prices_include_tax)
+    .bind(&id)
+    .execute(&mut **tx)
+    .await?;
     load(tx, &id).await?.ok_or_else(|| AppError::internal("created invoice vanished"))
 }
 
@@ -389,6 +449,8 @@ pub struct InvoicePatch {
     pub signatory_name: Option<Option<String>>,
     pub signatory_title: Option<Option<String>>,
     pub lines: Option<Option<Vec<LineInput>>>,
+    /// D26.
+    pub prices_include_tax: Option<bool>,
 }
 
 impl InvoicePatch {
@@ -405,6 +467,7 @@ impl InvoicePatch {
             || self.signatory_name.is_some()
             || self.signatory_title.is_some()
             || self.lines.is_some()
+            || self.prices_include_tax.is_some()
     }
 }
 
@@ -477,12 +540,34 @@ pub async fn update(db: &Db, id: &str, patch: InvoicePatch, scope: &Scope) -> Ap
         return Err(AppError::bad_request("Select a customer or enter a Bill To name"));
     }
     let mut replaced = false;
-    if let Some(Some(lines)) = &patch.lines {
+    if let Some(include) = patch.prices_include_tax {
+        inv.prices_include_tax = include;
+    }
+    // New lines, or the existing ones again when only "prices include tax" changed.
+    let relines = match &patch.lines {
+        Some(Some(lines)) => Some(lines.clone()),
+        _ if patch.prices_include_tax.is_some() => Some(
+            inv.lines
+                .iter()
+                .map(|l| LineInput {
+                    description: l.description.clone(),
+                    quantity: Some(l.quantity),
+                    unit_price: Some(l.unit_price),
+                    account_id: l.account_id.clone(),
+                    tax_code_id: l.tax_code_id.clone(),
+                })
+                .collect(),
+        ),
+        _ => None,
+    };
+    if let Some(lines) = relines {
         if lines.is_empty() {
             return Err(AppError::bad_request("An invoice needs at least one line"));
         }
         sqlx::query(r#"DELETE FROM "invoice_lines" WHERE "invoiceId" = ?1"#).bind(id).execute(&mut *tx).await?;
-        inv.total_amount = insert_lines(&mut tx, id, lines).await?;
+        let (total, tax) = insert_lines(&mut tx, id, &lines, inv.prices_include_tax).await?;
+        inv.total_amount = total;
+        inv.tax_amount = tax;
         replaced = true;
     }
     save_header(&mut tx, &before, &inv).await?;
@@ -507,6 +592,8 @@ async fn save_header(tx: &mut Tx, before: &Invoice, after: &Invoice) -> AppResul
         || before.payment_terms != after.payment_terms
         || before.total_amount != after.total_amount
         || before.amount_paid != after.amount_paid
+        || before.tax_amount != after.tax_amount
+        || before.prices_include_tax != after.prices_include_tax
         || before.journal_entry_id != after.journal_entry_id;
     if !changed {
         return Ok(());
@@ -514,7 +601,8 @@ async fn save_header(tx: &mut Tx, before: &Invoice, after: &Invoice) -> AppResul
     sqlx::query(
         r#"UPDATE "invoices" SET "poNumber"=?1,"customerId"=?2,"date"=?3,"dueDate"=?4,"status"=?5,"notes"=?6,"billToName"=?7,
              "billToAddress"=?8,"paymentOptions"=?9,"signatoryName"=?10,"signatoryTitle"=?11,"paymentTerms"=?12,
-             "totalAmount"=?13,"amountPaid"=?14,"journalEntryId"=?15,"updatedAt"=?16 WHERE "id"=?17"#,
+             "totalAmount"=?13,"amountPaid"=?14,"journalEntryId"=?15,"updatedAt"=?16,"taxAmount"=?18,"pricesIncludeTax"=?19
+             WHERE "id"=?17"#,
     )
     .bind(&after.po_number)
     .bind(&after.customer_id)
@@ -533,6 +621,8 @@ async fn save_header(tx: &mut Tx, before: &Invoice, after: &Invoice) -> AppResul
     .bind(&after.journal_entry_id)
     .bind(now_iso())
     .bind(&after.id)
+    .bind(after.tax_amount.cents())
+    .bind(after.prices_include_tax)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -571,11 +661,28 @@ async fn post_in(tx: &mut Tx, id: &str, scope: &Scope) -> AppResult<Invoice> {
     let ar = ledger::accounts::find_by_code(tx, "1100").await?;
     let mut lines =
         vec![NewLine { account_id: ar.id, debit: inv.total_amount, credit: Money::ZERO, description: None }];
-    lines.extend(inv.lines.iter().map(|l| NewLine {
-        account_id: l.account_id.clone().unwrap_or_default(),
+    // Revenue gets each line without its tax; the tax goes to the code's sales account (D26).
+    let mut tax_by_account: Vec<(String, Money)> = Vec::new();
+    for l in &inv.lines {
+        lines.push(NewLine {
+            account_id: l.account_id.clone().unwrap_or_default(),
+            debit: Money::ZERO,
+            credit: l.net(inv.prices_include_tax)?,
+            description: Some(l.description.clone()),
+        });
+        if let (Some(code), true) = (&l.tax_code_id, l.tax_amount != Money::ZERO) {
+            let account = crate::tax::find_one(tx, code).await?.sales_account_id;
+            match tax_by_account.iter_mut().find(|(a, _)| *a == account) {
+                Some((_, t)) => *t = t.checked_add(l.tax_amount).ok_or_else(overflow)?,
+                None => tax_by_account.push((account, l.tax_amount)),
+            }
+        }
+    }
+    lines.extend(tax_by_account.into_iter().map(|(account_id, tax)| NewLine {
+        account_id,
         debit: Money::ZERO,
-        credit: l.amount,
-        description: Some(l.description.clone()),
+        credit: tax,
+        description: Some("Tax".into()),
     }));
     let entry = entries::post(
         tx,
@@ -704,6 +811,7 @@ pub async fn duplicate(db: &Db, id: &str, scope: &Scope, today: &str) -> AppResu
         payment_options: src.payment_options.as_ref().map(|p| p.split('\n').map(str::to_string).collect()),
         signatory_name: src.signatory_name.clone(),
         signatory_title: src.signatory_title.clone(),
+        prices_include_tax: src.prices_include_tax,
         lines: src
             .lines
             .iter()
@@ -712,6 +820,7 @@ pub async fn duplicate(db: &Db, id: &str, scope: &Scope, today: &str) -> AppResu
                 quantity: Some(l.quantity),
                 unit_price: Some(l.unit_price),
                 account_id: l.account_id.clone(),
+                tax_code_id: l.tax_code_id.clone(),
             })
             .collect(),
     };

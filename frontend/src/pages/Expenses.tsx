@@ -6,6 +6,8 @@ import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { money } from '../lib/money';
+import { region } from '../lib/region';
+import { taxOf, useTaxCodes } from '../lib/taxes';
 
 interface Expense { id: string; expenseNumber: string; date: string; description: string; amount: number; status: string }
 
@@ -21,7 +23,9 @@ export default function Expenses() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ date: '', description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '' });
+  const [form, setForm] = useState({ date: '', description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '', taxCodeId: region().defaultPurchaseTax });
+  const taxCodes = useTaxCodes();
+  const chosenTax = taxCodes.find((c) => c.id === form.taxCodeId);
   const [error, setError] = useState('');
 
   const load = (p = page) =>
@@ -41,9 +45,9 @@ export default function Expenses() {
     e.preventDefault();
     setError('');
     try {
-      await api.post('/expenses', { ...form, amount: Number(form.amount) });
+      await api.post('/expenses', { ...form, amount: Number(form.amount), taxCodeId: form.taxCodeId || undefined });
       setShowForm(false);
-      setForm({ date: '', description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '' });
+      setForm({ date: '', description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '', taxCodeId: region().defaultPurchaseTax });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to save expense');
@@ -72,7 +76,7 @@ export default function Expenses() {
               <input required placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
             </div>
-            <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            <div className="form-grid" style={{ gridTemplateColumns: taxCodes.length ? '1fr 1fr 1fr' : '1fr 1fr' }}>
               <select required value={form.expenseAccountId} onChange={(e) => setForm({ ...form, expenseAccountId: e.target.value })}>
                 <option value="">Expense Account</option>
                 {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
@@ -81,7 +85,18 @@ export default function Expenses() {
                 <option value="">Paid From (Bank / Cash)</option>
                 {assetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
               </select>
+              {taxCodes.length > 0 && (
+                <select value={form.taxCodeId} onChange={(e) => setForm({ ...form, taxCodeId: e.target.value })} aria-label="Tax">
+                  <option value="">No tax</option>
+                  {taxCodes.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
             </div>
+            {chosenTax && Number(form.amount) > 0 && (
+              <p className="text-xs text-gray-600">
+                The amount includes {chosenTax.name}: {fmt(taxOf(Number(form.amount), chosenTax.rate, true))} tax, reclaimable.
+              </p>
+            )}
             <input placeholder="Receipt URL (optional)" value={form.receiptUrl} onChange={(e) => setForm({ ...form, receiptUrl: e.target.value })} />
             <div className="flex gap-2">
               <button type="submit" className="btn btn-primary">Save</button>

@@ -20,14 +20,24 @@ const PG_INDEXES: &str = include_str!("../tests/fixtures/reference_pg_indexes.tx
 
 /// Columns this project adds on purpose (approved deviations), appended after the reference's.
 const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
-    ("bills", "amountPaid", true),        // D13
-    ("payments", "status", true),         // D18
-    ("invoices", "amountCredited", true), // D21
-    ("bills", "amountCredited", true),    // D21
+    ("bills", "amountPaid", true),         // D13
+    ("payments", "status", true),          // D18
+    ("invoices", "amountCredited", true),  // D21
+    ("bills", "amountCredited", true),     // D21
+    ("invoice_lines", "taxCodeId", false), // D26
+    ("invoice_lines", "taxAmount", true),
+    ("invoices", "taxAmount", true),
+    ("invoices", "pricesIncludeTax", true),
+    ("bill_lines", "taxCodeId", false),
+    ("bill_lines", "taxAmount", true),
+    ("bills", "taxAmount", true),
+    ("bills", "pricesIncludeTax", true),
+    ("expenses", "taxCodeId", false),
+    ("expenses", "taxAmount", true),
 ];
 
 /// Tables this project adds on purpose (approved deviations); the reference has no such table.
-const APPROVED_EXTRA_TABLES: &[&str] = &["credit_notes", "bank_reconciliations", "reconciled_lines"]; // D21, D22
+const APPROVED_EXTRA_TABLES: &[&str] = &["credit_notes", "bank_reconciliations", "reconciled_lines", "tax_codes"]; // D21, D22, D26
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =

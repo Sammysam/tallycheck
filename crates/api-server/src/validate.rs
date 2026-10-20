@@ -389,6 +389,9 @@ const COMPANY_SETTINGS: &[(&str, usize)] = &[
     ("region.currencyMinorWord", 30),
     ("region.locale", 20),
     ("region.fiscalYearStart", 2),
+    // D26: the tax codes new sales / purchase lines start with ("" for none).
+    ("tax.defaultSales", 36),
+    ("tax.defaultPurchases", 36),
 ];
 
 /// Returns the provided (non-null) settings in declaration order.

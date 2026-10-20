@@ -163,6 +163,7 @@ fn singular(resource: &str) -> &str {
         "payments" => "payment",
         "credit-notes" => "credit note",
         "debit-notes" => "debit note",
+        "tax-codes" => "tax code",
         "banking" => "bank account",
         "users" => "user",
         "roles" => "role",

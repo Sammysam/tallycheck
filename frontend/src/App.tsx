@@ -29,6 +29,8 @@ import TrialBalance from './pages/reports/TrialBalance';
 import ProfitLoss from './pages/reports/ProfitLoss';
 import BalanceSheet from './pages/reports/BalanceSheet';
 import CashFlow from './pages/reports/CashFlow';
+import TaxReturn from './pages/reports/TaxReturn';
+import Taxes from './pages/Taxes';
 import ArAging from './pages/reports/ArAging';
 import ApAging from './pages/reports/ApAging';
 import Users from './pages/Users';
@@ -87,6 +89,10 @@ export default function App() {
                   <Route path="/reports/profit-loss"      element={<ProfitLoss />} />
                   <Route path="/reports/balance-sheet"    element={<BalanceSheet />} />
                   <Route path="/reports/cash-flow"        element={<CashFlow />} />
+                  <Route path="/reports/tax"              element={<TaxReturn />} />
+                  <Route path="/taxes" element={
+                    <ProtectedRoute permission="settings"><Taxes /></ProtectedRoute>
+                  } />
                   <Route path="/reports/ar-aging"         element={<ArAging />} />
                   <Route path="/reports/ap-aging"         element={<ApAging />} />
                   <Route path="/users" element={
