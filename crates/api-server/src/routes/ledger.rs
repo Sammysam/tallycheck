@@ -130,3 +130,18 @@ pub async fn account_balance(
         "balance": t.balance.to_json_number(),
     })))
 }
+
+/// D23: one account's lines with a running balance, for drilling into a report figure.
+pub async fn account_activity(
+    State(state): State<AppState>,
+    _auth: Authorized<perm::Ledger>,
+    Path(account_id): Path<String>,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> AppResult<Json<Value>> {
+    let q = validate::query_map(pairs);
+    let from = validate::optional_query_date(&q, "dateFrom")?;
+    let to = validate::optional_query_date(&q, "dateTo")?;
+    let mut conn = state.db.read().acquire().await?;
+    let activity = ledger::activity::account_activity(&mut conn, &account_id, from.as_deref(), to.as_deref()).await?;
+    Ok(Json(activity.to_json()))
+}

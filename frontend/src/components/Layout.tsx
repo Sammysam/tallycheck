@@ -9,6 +9,7 @@ import {
   ArrowRight,
   BarChart2,
   CreditCard,
+  FileSpreadsheet,
   FileText,
   Home,
   Printer,
@@ -24,6 +25,7 @@ import Toolbar, { type ToolbarButton } from './desktop/Toolbar';
 import StatusBar from './desktop/StatusBar';
 import Dialog from './desktop/Dialog';
 import { hasCommand, isUnsaved, runCommand, setUnsaved, subscribeCommands } from '../lib/commands';
+import { exportScreen } from '../lib/exportCsv';
 
 declare const __APP_VERSION__: string;
 
@@ -36,6 +38,7 @@ const SHORTCUTS: [string, string][] = [
   ['Esc', 'Close the open form'],
   ['Ctrl+F', 'Find (jump to the search box)'],
   ['Ctrl+P', 'Print this screen'],
+  ['Ctrl+E', 'Export the tables on this screen to Excel (CSV)'],
   ['F5', 'Refresh this screen'],
   ['Ctrl+B', 'Show or hide the navigation pane'],
   ['Alt+Left / Alt+Right', 'Back / forward'],
@@ -63,7 +66,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     }
   });
   const [refreshKey, setRefreshKey] = useState(0);
-  const [dialog, setDialog] = useState<'shortcuts' | 'about' | 'discard' | null>(null);
+  const [dialog, setDialog] = useState<'shortcuts' | 'about' | 'discard' | 'nothing-to-export' | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   // Menu items grey out when the screen has no "New" / "Close".
   const canNew = useSyncExternalStore(subscribeCommands, () => hasCommand('new'));
@@ -105,6 +108,14 @@ export default function Layout({ children }: { children: ReactNode }) {
     );
     box?.focus();
     box?.select();
+  }, []);
+
+  // D23: every table on the screen into one CSV file named after the screen.
+  const exportTables = useCallback(() => {
+    const main = document.querySelector<HTMLElement>('main.desk-main');
+    // Named after the screen's own heading ("Customer Statement", "Profit & Loss", …).
+    const title = main?.querySelector('h1')?.textContent?.trim() || pageTrail(window.location.pathname)[1] || 'Export';
+    if (!main || !exportScreen(main, title)) setDialog('nothing-to-export');
   }, []);
 
   const refresh = useCallback(() => {
@@ -172,6 +183,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       if (plain && k === 'n') return act(newRecord);
       if (plain && k === 's') return act(save);
       if (plain && k === 'p') return act(() => window.print());
+      if (plain && k === 'e') return act(exportTables);
       if (plain && k === 'f') return act(find);
       if (plain && k === 'b') return act(togglePane);
       if (e.key === 'F1') return act(() => setDialog('shortcuts'));
@@ -198,7 +210,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('contextmenu', onContext);
     };
-  }, [refresh, newRecord, save, find, togglePane, closeForm, navigate]);
+  }, [refresh, newRecord, save, find, togglePane, closeForm, exportTables, navigate]);
 
   // ── Menus ──────────────────────────────────────────────────────────────
   const go = (to: string) => () => navigate(to);
@@ -218,6 +230,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { label: 'Close form', shortcut: 'Esc', onSelect: closeForm, disabled: !canClose },
     'separator',
     { label: 'Print…', shortcut: 'Ctrl+P', onSelect: () => window.print() },
+    { label: 'Export to Excel (CSV)…', shortcut: 'Ctrl+E', onSelect: exportTables },
     'separator',
     ...(isAdmin
       ? [{ label: 'Backup and restore…', onSelect: () => window.location.assign('/system/backup') }, 'separator' as const]
@@ -279,6 +292,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     null,
     { label: 'Refresh', title: 'Refresh (F5)', icon: RefreshCw, onClick: refresh },
     { label: 'Print', title: 'Print (Ctrl+P)', icon: Printer, onClick: () => window.print() },
+    { label: 'Export', title: 'Export the tables on this screen to Excel (Ctrl+E)', icon: FileSpreadsheet, onClick: exportTables },
   ];
   // No divider twice in a row when a whole group is hidden by permissions.
   const tools = toolbar.filter((b, i, all) => b !== null || (i > 0 && all[i - 1] !== null));
@@ -342,6 +356,16 @@ export default function Layout({ children }: { children: ReactNode }) {
               <p className="text-gray-500">© Cenango (Pvt) Ltd</p>
             </div>
           </div>
+        </Dialog>
+      )}
+
+      {dialog === 'nothing-to-export' && (
+        <Dialog
+          title="Export to Excel"
+          onClose={closeDialog}
+          buttons={<button type="button" className="btn btn-primary" onClick={closeDialog}>OK</button>}
+        >
+          <p className="text-sm text-gray-700">There is no table on this screen to export.</p>
         </Dialog>
       )}
 

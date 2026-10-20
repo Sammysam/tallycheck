@@ -380,3 +380,29 @@ async fn bank_reconciliation_matches_the_statement_and_carries_outstanding_lines
     assert_eq!(rec::list(&mut c, &cash).await?.len(), 2);
     Ok(())
 }
+
+#[tokio::test]
+async fn account_activity_runs_the_balance_and_matches_the_trial_balance() -> AppResult<()> {
+    let b = books().await?;
+    let cash = b.ids["1000"].clone();
+    b.post(b.entry("2026-03-31", vec![b.line("1000", "1000", "0"), b.line("3000", "0", "1000")])).await?;
+    b.post(b.entry("2026-04-05", vec![b.line("6000", "250.25", "0"), b.line("1000", "0", "250.25")])).await?;
+    let sale = b.post(b.entry("2026-04-20", vec![b.line("1000", "300", "0"), b.line("4000", "0", "300")])).await?;
+    let mut tx = b.db.begin().await?;
+    entries::reverse(&mut tx, &sale.id, "2026-04-21").await?;
+    tx.commit().await?;
+
+    let mut c = b.db.read().acquire().await?;
+    let april = crate::activity::account_activity(&mut c, &cash, Some("2026-04-01"), Some("2026-04-30")).await?;
+    assert_eq!(april.opening, m("1000"));
+    let running: Vec<Money> = april.lines.iter().map(|l| l.balance).collect();
+    assert_eq!(running, vec![m("749.75"), m("1049.75"), m("749.75")], "a reversal counts too (D1)");
+    assert_eq!((april.total_debit, april.total_credit, april.closing), (m("300"), m("550.25"), m("749.75")));
+    let all = crate::activity::account_activity(&mut c, &cash, None, None).await?;
+    assert_eq!(all.closing, entries::account_balance(&mut c, &cash, None, None).await?.balance);
+    // Credit-normal accounts run the other way round.
+    let revenue = crate::activity::account_activity(&mut c, &b.ids["4000"], None, None).await?;
+    assert_eq!(revenue.lines.first().map(|l| l.balance), Some(m("300")));
+    assert_eq!(revenue.closing, Money::ZERO);
+    Ok(())
+}

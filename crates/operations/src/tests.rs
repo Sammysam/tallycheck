@@ -548,3 +548,42 @@ async fn debit_notes_reduce_what_is_owed_to_the_vendor() -> AppResult<()> {
     assert!(bad_request(&v).is_some());
     Ok(())
 }
+
+#[tokio::test]
+async fn customer_statement_runs_invoices_payments_and_credits() -> AppResult<()> {
+    let s = shop().await?;
+    let revenue = s.acct["4000"].clone();
+    let main = invoices::create(&s.db, s.invoice(vec![("1", "1000", true)]), Some("admin")).await?;
+    invoices::post(&s.db, &main.id, &ADMIN()).await?;
+    let _draft = invoices::create(&s.db, s.invoice(vec![("1", "500", true)]), Some("admin")).await?;
+    let voided = invoices::create(&s.db, s.invoice(vec![("1", "200", true)]), Some("admin")).await?;
+    invoices::post(&s.db, &voided.id, &ADMIN()).await?;
+    invoices::void(&s.db, &voided.id, &ADMIN(), TODAY).await?;
+    crate::credit_notes::create(&s.db, note("AR", &main.id, "100", &revenue), &ADMIN()).await?;
+    payments::create(&s.db, s.pay("AR", Some(&main.id), None, "400")).await?;
+    let mistake = payments::create(&s.db, s.pay("AR", Some(&main.id), None, "1")).await?;
+    payments::void(&s.db, &mistake.id, TODAY).await?;
+
+    let mut c = s.db.read().acquire().await?;
+    let all = crate::statements::customer_statement(&mut c, &s.customer, None, None, &ADMIN()).await?;
+    let kinds: Vec<(&str, f64)> = all["lines"]
+        .as_array()
+        .map(|a| a.iter().map(|l| (l["type"].as_str().unwrap_or(""), l["balance"].as_f64().unwrap_or(0.0))).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        kinds,
+        vec![("INVOICE", 1000.0), ("CREDIT_NOTE", 900.0), ("PAYMENT", 500.0)],
+        "drafts and voids never count"
+    );
+    let open = invoices::find_one(&mut c, &main.id, &ADMIN()).await?.outstanding()?;
+    assert_eq!(all["closingBalance"], open.to_json_number(), "closing balance = what is still owed");
+
+    let late = crate::statements::customer_statement(&mut c, &s.customer, Some("2026-04-21"), None, &ADMIN()).await?;
+    assert_eq!((late["openingBalance"].as_f64(), late["lines"].as_array().map(Vec::len)), (Some(900.0), Some(1)));
+    let early = crate::statements::customer_statement(&mut c, &s.customer, None, Some("2026-04-19"), &ADMIN()).await?;
+    assert_eq!(early["closingBalance"].as_f64(), Some(1000.0));
+    let stranger = Scope { user_id: Some("someone-else".into()), sees_all: false };
+    let none = crate::statements::customer_statement(&mut c, &s.customer, None, None, &stranger).await?;
+    assert_eq!(none["lines"].as_array().map(Vec::len), Some(0), "only invoices the user may see");
+    Ok(())
+}

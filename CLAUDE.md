@@ -321,6 +321,20 @@ recommendations without answering each one individually; revisit any of them on 
   `?accountId=`, POST start, GET/DELETE `:id`, PUT `:id/lines` `{lineIds}`, POST `:id/complete`,
   POST `:id/undo`. Screen: Accounting → Bank Reconciliation. The unused `bank_accounts` table
   is untouched.
+- **D23 Statements, drill-down and export** (requested by the user 2026-10-20).
+  * `GET /api/customers/:id/statement?dateFrom&dateTo` (permission `invoices`, `invoices:all`
+    scope): POSTED/PAID invoices less POSTED AR payments and POSTED credit notes, date order,
+    running balance, balance brought forward; drafts and voids never count. With no end date the
+    closing balance equals the customer's outstanding invoices. Screen: Customers → Statement
+    (company letterhead, Print / Save as PDF).
+  * `GET /api/ledger/activity/:accountId?dateFrom&dateTo` (permission `ledger`): opening balance,
+    every line with a running balance in the account's normal direction (all entries, D1),
+    closing = trial balance for the same dates. Account names in Trial Balance, Profit & Loss and
+    Balance Sheet link to it (`/ledger/account/:id`) with the report's dates. The P&L, Balance
+    Sheet and ageing screens now draw their figures as grid tables (`report-table`).
+  * Export (toolbar, File menu, Ctrl+E): every table on the screen into one UTF-8 CSV named after
+    the screen heading, amounts as plain numbers, action/checkbox columns left out, text that
+    Excel would run as a formula prefixed with an apostrophe (`lib/exportCsv.ts`).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

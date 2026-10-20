@@ -17,6 +17,7 @@ pub mod expenses;
 pub mod invoices;
 pub mod parties;
 pub mod payments;
+pub mod statements;
 
 use app_core::money::Money;
 use app_core::{AppError, AppResult};

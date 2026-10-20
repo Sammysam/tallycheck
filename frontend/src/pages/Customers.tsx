@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Customer { id: string; name: string; email: string; phone: string; address: string }
 
 export default function Customers() {
   const [rows, setRows] = useState<Customer[]>([]);
+  const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const [showForm, setShowForm] = useState(false);
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
@@ -63,7 +67,12 @@ export default function Customers() {
         { header: 'Phone',   accessor: (r) => r.phone   || '—' },
         { header: 'Address', accessor: (r) => r.address || '—' },
         { header: '', accessor: (r) => (
-          <button onClick={() => remove(r)} className="btn-link text-xs" style={{ color: '#dc2626' }}>Delete</button>
+          <span className="space-x-3">
+            {hasPermission('invoices') && (
+              <button onClick={() => navigate(`/customers/${r.id}/statement`)} className="btn-link text-xs">Statement</button>
+            )}
+            <button onClick={() => remove(r)} className="btn-link text-xs" style={{ color: '#dc2626' }}>Delete</button>
+          </span>
         )},
       ]} />
     </div>

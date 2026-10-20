@@ -19,6 +19,8 @@ import Invoices from './pages/Invoices';
 import Bills from './pages/Bills';
 import Expenses from './pages/Expenses';
 import Payments from './pages/Payments';
+import CustomerStatement from './pages/CustomerStatement';
+import AccountActivity from './pages/AccountActivity';
 import CreditNotes from './pages/CreditNotes';
 import Ledger from './pages/Ledger';
 import BankReconciliation from './pages/BankReconciliation';
@@ -71,6 +73,12 @@ export default function App() {
                   <Route path="/credit-notes"             element={<CreditNotes kind="AR" key="AR" />} />
                   <Route path="/debit-notes"              element={<CreditNotes kind="AP" key="AP" />} />
                   <Route path="/ledger"                   element={<Ledger />} />
+                  <Route path="/ledger/account/:id" element={
+                    <ProtectedRoute permission="ledger"><AccountActivity /></ProtectedRoute>
+                  } />
+                  <Route path="/customers/:id/statement" element={
+                    <ProtectedRoute permission="invoices"><CustomerStatement /></ProtectedRoute>
+                  } />
                   <Route path="/reconcile"                element={<BankReconciliation />} />
                   <Route path="/reports/trial-balance"    element={<TrialBalance />} />
                   <Route path="/reports/profit-loss"      element={<ProfitLoss />} />

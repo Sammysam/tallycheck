@@ -5,6 +5,7 @@
 //! and its journal entry commit or roll back together. Balances come only from journal lines.
 
 pub mod accounts;
+pub mod activity;
 pub mod entries;
 pub mod reconciliation;
 
