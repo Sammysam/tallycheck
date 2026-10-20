@@ -53,6 +53,7 @@ export const navigation = [
     icon: Calculator,
     items: [
       { label: 'Ledger', to: '/ledger', permission: 'ledger' },
+      { label: 'Bank Reconciliation', to: '/reconcile', permission: 'ledger' },
     ],
   },
   {

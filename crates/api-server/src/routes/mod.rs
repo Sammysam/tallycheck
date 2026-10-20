@@ -8,6 +8,7 @@ pub mod employees;
 pub mod ledger;
 pub mod operations;
 pub mod payroll;
+pub mod reconciliation;
 pub mod reports;
 pub mod roles;
 pub mod settings;
@@ -79,6 +80,11 @@ pub fn api_router() -> Router<AppState> {
         .route("/debit-notes", get(op::debit_notes_list).post(op::debit_notes_create))
         .route("/debit-notes/{id}/void", post(op::debit_notes_void))
         .route("/books/lock", get(books::lock_get).put(books::lock_set))
+        .route("/reconciliations", get(reconciliation::list).post(reconciliation::start))
+        .route("/reconciliations/{id}", get(reconciliation::get).delete(reconciliation::discard))
+        .route("/reconciliations/{id}/lines", axum::routing::put(reconciliation::set_lines))
+        .route("/reconciliations/{id}/complete", post(reconciliation::complete))
+        .route("/reconciliations/{id}/undo", post(reconciliation::undo))
         .route("/reports/profit-loss", get(reports::profit_loss))
         .route("/reports/balance-sheet", get(reports::balance_sheet))
         .route("/reports/ar-aging", get(reports::ar_aging))

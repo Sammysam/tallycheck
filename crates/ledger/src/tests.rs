@@ -316,3 +316,67 @@ async fn seed_fills_an_empty_chart() -> AppResult<()> {
     assert_eq!(accounts::seed(&db).await?, 0);
     Ok(())
 }
+
+#[tokio::test]
+async fn bank_reconciliation_matches_the_statement_and_carries_outstanding_lines() -> AppResult<()> {
+    use crate::reconciliation as rec;
+    let b = books().await?;
+    let cash = b.ids["1000"].clone();
+    let capital = b.post(b.entry("2026-04-01", vec![b.line("1000", "1000", "0"), b.line("3000", "0", "1000")])).await?;
+    let cheque = b.post(b.entry("2026-04-05", vec![b.line("6000", "250", "0"), b.line("1000", "0", "250")])).await?;
+    let deposit = b.post(b.entry("2026-04-20", vec![b.line("1000", "300", "0"), b.line("4000", "0", "300")])).await?;
+    let may = b.post(b.entry("2026-05-03", vec![b.line("6000", "100", "0"), b.line("1000", "0", "100")])).await?;
+    // A receipt voided before it reached the bank: entry and reversal cancel and stay off the list.
+    let voided = b.post(b.entry("2026-04-10", vec![b.line("1000", "50", "0"), b.line("4000", "0", "50")])).await?;
+    let mut tx = b.db.begin().await?;
+    entries::reverse(&mut tx, &voided.id, "2026-04-12").await?;
+    tx.commit().await?;
+    let cash_line = |e: &entries::JournalEntry| {
+        e.lines.iter().find(|l| l.account_id == cash).map(|l| l.id.clone()).unwrap_or_default()
+    };
+
+    let april = rec::start(&b.db, &cash, "2026-04-30", m("750"), None).await?;
+    let ids: Vec<&str> = april.lines.iter().map(|l| l.entry_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![capital.id.as_str(), cheque.id.as_str(), deposit.id.as_str()],
+        "May and the voided pair are not listed"
+    );
+    assert_eq!((april.cleared_balance, april.difference), (Money::ZERO, m("750")));
+    let id = april.rec.id.clone();
+
+    let early = rec::complete(&b.db, &id, None).await;
+    assert!(matches!(early, Err(AppError::BadRequest(_))), "not balanced yet");
+    let wrong = rec::set_cleared(&b.db, &id, &[cash_line(&may)]).await;
+    assert!(matches!(wrong, Err(AppError::BadRequest(_))), "a May line is after the statement date");
+    let twice = rec::start(&b.db, &cash, "2026-04-30", m("750"), None).await;
+    assert!(matches!(twice, Err(AppError::BadRequest(_))), "one reconciliation in progress per account");
+
+    // The deposit is in transit: tick only what the statement shows.
+    let ws = rec::set_cleared(&b.db, &id, &[cash_line(&capital), cash_line(&cheque)]).await?;
+    assert_eq!((ws.cleared_balance, ws.difference), (m("750"), Money::ZERO));
+    let done = rec::complete(&b.db, &id, None).await?;
+    assert_eq!(done.rec.status, rec::COMPLETED);
+    assert_eq!(done.lines.len(), 2, "a completed reconciliation shows what it cleared");
+
+    let stale = rec::start(&b.db, &cash, "2026-04-30", m("0"), None).await;
+    assert!(matches!(stale, Err(AppError::BadRequest(_))), "statement dates move forward");
+    let may_rec = rec::start(&b.db, &cash, "2026-05-31", m("950"), None).await?;
+    assert_eq!(may_rec.rec.opening_balance, m("750"));
+    let left: Vec<&str> = may_rec.lines.iter().map(|l| l.entry_id.as_str()).collect();
+    assert_eq!(left, vec![deposit.id.as_str(), may.id.as_str()], "the April deposit comes up again");
+    let may_id = may_rec.rec.id.clone();
+    rec::set_cleared(&b.db, &may_id, &[cash_line(&deposit), cash_line(&may)]).await?;
+    rec::complete(&b.db, &may_id, None).await?;
+
+    let not_latest = rec::undo(&b.db, &id).await;
+    assert!(matches!(not_latest, Err(AppError::BadRequest(_))), "only the latest can be undone");
+    let reopened = rec::undo(&b.db, &may_id).await?;
+    assert_eq!((reopened.rec.status.as_str(), reopened.difference), (rec::DRAFT, Money::ZERO), "ticks are kept");
+    rec::discard(&b.db, &may_id).await?;
+    let again = rec::start(&b.db, &cash, "2026-05-31", m("950"), None).await?;
+    assert!(again.lines.iter().all(|l| !l.cleared), "discarding frees the lines");
+    let mut c = b.db.read().acquire().await?;
+    assert_eq!(rec::list(&mut c, &cash).await?.len(), 2);
+    Ok(())
+}

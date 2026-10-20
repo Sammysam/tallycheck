@@ -283,6 +283,26 @@ try {
     await shot('11-trial-balance');
   });
 
+  await check('Bank reconciliation ticks the statement lines and finishes at zero (D22)', async () => {
+    await go('/reconcile');
+    await waitFor(`document.body.innerText.includes('Start a reconciliation') && document.querySelector('select')?.selectedOptions[0]?.textContent.includes('1000')`, 'start form for Cash');
+    await evaluate(`(() => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      const d = document.querySelector('form input[type=date]'); set.call(d, '2026-04-30'); d.dispatchEvent(new Event('input', { bubbles: true }));
+      return true; })()`);
+    await type('input[placeholder="Closing balance"]', '1000.5');
+    await clickText('Start');
+    await waitFor(`!!document.querySelector('input[aria-label="Clear JE-000001"]')`, 'opening capital listed');
+    await waitFor(`document.querySelector('[data-testid=rec-difference]').innerText.includes('1,000.50')`, 'difference before ticking');
+    if (!(await evaluate(`[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Finish').disabled`)))
+      throw new Error('Finish must wait for a zero difference');
+    await evaluate(`document.querySelector('input[aria-label="Clear JE-000001"]').click()`);
+    await waitFor(`document.querySelector('[data-testid=rec-difference]').innerText.includes('0.00') && !document.querySelector('[data-testid=rec-difference]').innerText.includes('1,000')`, 'zero difference');
+    await shot('10b-reconcile');
+    await clickText('Finish');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('2026-04-30') && tr.innerText.includes('COMPLETED'))`, 'completed in history');
+  });
+
   // ── W2 screens ───────────────────────────────────────────────────────────
   // Row actions report failures with alert() and ask with confirm(); both would block CDP.
   const quietDialogs = () => evaluate(`window.confirm = () => true; window.__alerts = []; window.alert = (m) => window.__alerts.push(String(m)); true`);

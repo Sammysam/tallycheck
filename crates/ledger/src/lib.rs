@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod entries;
+pub mod reconciliation;
 
 pub use accounts::{Account, AccountType};
 pub use entries::{JournalEntry, JournalLine, NewEntry, NewLine};
