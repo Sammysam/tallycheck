@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Database,
@@ -9,31 +9,17 @@ import {
   ShieldCheck,
   Users,
   ChevronDown,
+  LogOut,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
-// ─── Navigation definition ─────────────────────────────────────────────────
-const navigation = [
-  {
-    id: 'dashboard',
-    label: 'Dashboard',
-    icon: LayoutDashboard,
-    iconBg: 'bg-teal-100',
-    iconColor: 'text-teal-600',
-    accentColor: 'bg-teal-500',
-    borderColor: 'border-teal-500',
-    to: '/',
-    standalone: true,
-    permission: 'dashboard',
-  },
+// ─── Navigation definition (also used by the top bar for page titles) ───────
+export const navigation = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, to: '/', standalone: true, permission: 'dashboard' },
   {
     id: 'master-data',
     label: 'Master Data',
     icon: Database,
-    iconBg: 'bg-blue-100',
-    iconColor: 'text-blue-600',
-    accentColor: 'bg-blue-500',
-    borderColor: 'border-blue-500',
     items: [
       { label: 'Accounts',  to: '/accounts',  permission: 'accounts' },
       { label: 'Customers', to: '/customers', permission: 'customers' },
@@ -44,10 +30,6 @@ const navigation = [
     id: 'people',
     label: 'People',
     icon: Users,
-    iconBg: 'bg-emerald-100',
-    iconColor: 'text-emerald-600',
-    accentColor: 'bg-emerald-500',
-    borderColor: 'border-emerald-500',
     items: [
       { label: 'Employees', to: '/employees', permission: 'employees' },
       { label: 'Payroll',   to: '/payroll',   permission: 'payroll' },
@@ -57,10 +39,6 @@ const navigation = [
     id: 'transactions',
     label: 'Transactions',
     icon: ArrowLeftRight,
-    iconBg: 'bg-orange-100',
-    iconColor: 'text-orange-600',
-    accentColor: 'bg-orange-500',
-    borderColor: 'border-orange-500',
     items: [
       { label: 'Invoices', to: '/invoices', permission: 'invoices' },
       { label: 'Bills',    to: '/bills',    permission: 'bills' },
@@ -72,10 +50,6 @@ const navigation = [
     id: 'accounting',
     label: 'Accounting',
     icon: Calculator,
-    iconBg: 'bg-slate-100',
-    iconColor: 'text-slate-600',
-    accentColor: 'bg-slate-500',
-    borderColor: 'border-slate-500',
     items: [
       { label: 'Ledger', to: '/ledger', permission: 'ledger' },
     ],
@@ -84,10 +58,6 @@ const navigation = [
     id: 'reports',
     label: 'Reports',
     icon: BarChart2,
-    iconBg: 'bg-violet-100',
-    iconColor: 'text-violet-600',
-    accentColor: 'bg-violet-500',
-    borderColor: 'border-violet-500',
     items: [
       { label: 'Trial Balance', to: '/reports/trial-balance', permission: 'reports' },
       { label: 'Profit & Loss', to: '/reports/profit-loss',   permission: 'reports' },
@@ -100,10 +70,6 @@ const navigation = [
     id: 'administration',
     label: 'Administration',
     icon: ShieldCheck,
-    iconBg: 'bg-rose-100',
-    iconColor: 'text-rose-600',
-    accentColor: 'bg-rose-500',
-    borderColor: 'border-rose-500',
     items: [
       { label: 'Users', to: '/users', permission: 'users' },
       { label: 'Roles', to: '/roles', permission: 'users' },
@@ -112,6 +78,25 @@ const navigation = [
     ],
   },
 ];
+
+/** [section, page] for the current path, for the top bar. */
+export function pageTrail(pathname) {
+  for (const group of navigation) {
+    if (group.standalone) {
+      if (pathname === group.to) return [null, group.label];
+      continue;
+    }
+    const item = group.items.find((i) => pathname === i.to || pathname.startsWith(i.to + '/'));
+    if (item) return [group.label, item.label];
+  }
+  if (pathname.startsWith('/2fa')) return [null, 'Two-factor sign-in'];
+  return [null, ''];
+}
+
+export function initialsOf(name) {
+  const parts = (name || '?').split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? '?') + (parts[1]?.[0] ?? '')).toUpperCase();
+}
 
 // ─── Permission filtering ───────────────────────────────────────────────────
 function filterNavigation(items, hasPermission) {
@@ -124,8 +109,6 @@ function filterNavigation(items, hasPermission) {
     .filter((group) => (group.standalone ? hasPermission(group.permission) : group.items.length > 0));
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 /** Returns true if any child route of a group matches the current path */
 function groupIsActive(group, pathname) {
   if (group.standalone) return pathname === group.to;
@@ -135,24 +118,23 @@ function groupIsActive(group, pathname) {
 }
 
 // ─── Sub-item ───────────────────────────────────────────────────────────────
-function SubItem({ item, accentColor, borderColor }) {
+function SubItem({ item }) {
   return (
     <NavLink
       to={item.to}
-      end
       className={({ isActive }) =>
-        `flex items-center gap-2.5 pl-10 pr-3 py-1.5 rounded-lg text-sm transition-all duration-150 group ${
+        `relative flex items-center ml-[1.375rem] pl-5 pr-3 py-1.5 rounded-lg text-[13px] transition-colors duration-150 ${
           isActive
-            ? `font-medium text-gray-900 bg-gray-100 border-l-2 ${borderColor} pl-9`
-            : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+            ? 'font-medium text-white bg-white/10'
+            : 'text-slate-400 hover:text-white hover:bg-white/5'
         }`
       }
     >
       {({ isActive }) => (
         <>
           <span
-            className={`w-1.5 h-1.5 rounded-full shrink-0 transition-colors ${
-              isActive ? accentColor : 'bg-gray-300 group-hover:bg-gray-400'
+            className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] rounded-full transition-all ${
+              isActive ? 'h-4 bg-orange-500' : 'h-0'
             }`}
           />
           {item.label}
@@ -165,32 +147,18 @@ function SubItem({ item, accentColor, borderColor }) {
 // ─── Group row (collapsible) ─────────────────────────────────────────────────
 function GroupRow({ group, isOpen, onToggle, isAnyChildActive }) {
   const Icon = group.icon;
-
   return (
     <button
       onClick={onToggle}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 group ${
-        isAnyChildActive
-          ? 'text-gray-900 bg-gray-100'
-          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${
+        isAnyChildActive ? 'text-white' : 'text-slate-300 hover:text-white hover:bg-white/5'
       }`}
     >
-      {/* Icon box */}
-      <span
-        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${group.iconBg}`}
-      >
-        <Icon size={14} className={group.iconColor} strokeWidth={2.2} />
-      </span>
-
-      {/* Label */}
+      <Icon size={17} className={isAnyChildActive ? 'text-orange-400' : 'text-slate-400'} strokeWidth={2} />
       <span className="flex-1 text-left">{group.label}</span>
-
-      {/* Chevron */}
       <ChevronDown
         size={14}
-        className={`text-gray-400 transition-transform duration-200 ${
-          isOpen ? 'rotate-180' : 'rotate-0'
-        }`}
+        className={`text-slate-500 transition-transform duration-200 ${isOpen ? 'rotate-180' : 'rotate-0'}`}
       />
     </button>
   );
@@ -199,36 +167,22 @@ function GroupRow({ group, isOpen, onToggle, isAnyChildActive }) {
 // ─── Standalone row (Dashboard) ──────────────────────────────────────────────
 function StandaloneRow({ group }) {
   const Icon = group.icon;
-
   return (
     <NavLink
       to={group.to}
       end
       className={({ isActive }) =>
-        `flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-150 ${
+        `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${
           isActive
-            ? 'text-gray-900 bg-gray-100'
-            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            ? 'text-white bg-gradient-to-r from-orange-500 to-orange-600 shadow-lg shadow-orange-900/30'
+            : 'text-slate-300 hover:text-white hover:bg-white/5'
         }`
       }
     >
       {({ isActive }) => (
         <>
-          <span
-            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-              isActive ? 'bg-teal-500' : group.iconBg
-            }`}
-          >
-            <Icon
-              size={14}
-              className={isActive ? 'text-white' : group.iconColor}
-              strokeWidth={2.2}
-            />
-          </span>
+          <Icon size={17} className={isActive ? 'text-white' : 'text-slate-400'} strokeWidth={2} />
           <span className="flex-1">{group.label}</span>
-          {isActive && (
-            <span className={`w-1.5 h-1.5 rounded-full ${group.accentColor}`} />
-          )}
         </>
       )}
     </NavLink>
@@ -238,7 +192,8 @@ function StandaloneRow({ group }) {
 // ─── Main component ──────────────────────────────────────────────────────────
 export default function CollapsibleSidebar() {
   const location = useLocation();
-  const { hasPermission } = useAuth();
+  const navigate = useNavigate();
+  const { user, hasPermission, logout } = useAuth();
 
   const visibleNavigation = filterNavigation(navigation, hasPermission);
 
@@ -248,53 +203,44 @@ export default function CollapsibleSidebar() {
   )?.id ?? null;
 
   const [openGroup, setOpenGroup] = useState(initialOpen);
-
   const toggle = (id) => setOpenGroup((prev) => (prev === id ? null : id));
 
   return (
-    <aside className="w-60 shrink-0 flex flex-col bg-white border-r border-gray-200 h-full">
-
-      {/* ── Header ── */}
-      <div className="flex flex-col items-center justify-center gap-1 px-4 py-3 border-b border-gray-100 shrink-0">
-        <img src="/Logo_black.png" alt="Cenango" className="h-6 w-auto max-w-full object-contain" />
-        <span className="text-sm font-medium text-black">Accounting System</span>
+    <aside className="w-64 shrink-0 flex flex-col bg-slate-900 h-full">
+      {/* ── Brand ── */}
+      <div className="px-5 pt-5 pb-4 shrink-0">
+        <img src="/Logo_black.png" alt="Cenango" className="sidebar-logo h-6 w-auto max-w-full object-contain" />
+        <span className="mt-1.5 block text-[11px] font-medium uppercase tracking-[0.18em] text-orange-400">
+          Accounting System
+        </span>
       </div>
 
       {/* ── Navigation ── */}
-      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
+      <nav className="nav-scroll flex-1 overflow-y-auto px-3 pb-3 space-y-0.5">
+        <p className="px-3 pt-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Menu</p>
         {visibleNavigation.map((group) => {
           if (group.standalone) {
             return <StandaloneRow key={group.id} group={group} />;
           }
-
-          const isOpen        = openGroup === group.id;
+          const isOpen = openGroup === group.id;
           const anyChildActive = groupIsActive(group, location.pathname);
-
           return (
             <div key={group.id}>
-              {/* Group header button */}
               <GroupRow
                 group={group}
                 isOpen={isOpen}
                 onToggle={() => toggle(group.id)}
                 isAnyChildActive={anyChildActive}
               />
-
-              {/* Animated sub-items panel */}
               <div
                 className={`grid transition-all duration-200 ease-in-out ${
                   isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
                 }`}
               >
                 <div className="overflow-hidden">
-                  <div className="pt-0.5 pb-1 space-y-0.5 ml-1">
+                  <div className="relative pt-0.5 pb-1.5 space-y-0.5 before:absolute before:left-[1.375rem] before:top-1 before:bottom-2 before:w-px before:bg-slate-700/70">
                     {group.items.map((item) => (
-                      <SubItem
-                        key={item.to}
-                        item={item}
-                        accentColor={group.accentColor}
-                        borderColor={group.borderColor}
-                      />
+                      <SubItem key={item.to} item={item} />
                     ))}
                   </div>
                 </div>
@@ -304,40 +250,27 @@ export default function CollapsibleSidebar() {
         })}
       </nav>
 
-      {/* ── Footer ── */}
-      <div className="px-4 py-3 border-t border-gray-100 shrink-0">
+      {/* ── Signed-in user ── */}
+      <div className="m-3 p-2.5 rounded-xl bg-white/5 border border-white/5 shrink-0">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center shrink-0">
-            <span className="text-white text-[10px] font-bold">A</span>
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 shadow">
+            <span className="text-white text-xs font-bold">{initialsOf(user?.username)}</span>
           </div>
-          <div className="flex flex-col leading-none min-w-0">
-            <span className="text-xs font-medium text-gray-700 truncate">Admin</span>
-            <span className="text-[10px] text-gray-400 mt-0.5">Internal User</span>
+          <div className="flex flex-col leading-tight min-w-0 flex-1">
+            <span className="text-sm font-medium text-white truncate">{user?.username ?? ''}</span>
+            <span className="text-[11px] text-slate-400 truncate">{user?.role || 'No role'}</span>
           </div>
+          <button
+            type="button"
+            onClick={() => { logout(); navigate('/login'); }}
+            title="Sign out"
+            aria-label="Sign out"
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </div>
     </aside>
   );
 }
-
-/*
- * ─── Sample usage ────────────────────────────────────────────────────────────
- *
- * import { BrowserRouter } from 'react-router-dom';
- * import CollapsibleSidebar from './components/CollapsibleSidebar';
- *
- * function App() {
- *   return (
- *     <BrowserRouter>
- *       <div className="flex h-screen overflow-hidden">
- *         <CollapsibleSidebar />
- *         <main className="flex-1 overflow-y-auto p-6 bg-gray-50">
- *           <p>Page content here</p>
- *         </main>
- *       </div>
- *     </BrowserRouter>
- *   );
- * }
- *
- * export default App;
- */

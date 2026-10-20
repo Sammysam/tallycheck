@@ -32,7 +32,7 @@ export default function BalanceSheet() {
         <div className="flex gap-2 items-center">
           <span className="text-sm text-gray-500">As of</span>
           <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-          <button onClick={load} className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Run</button>
+          <button onClick={load} className="px-3 py-1 text-sm bg-orange-600 text-white rounded hover:bg-orange-700">Run</button>
         </div>
       } />
       {data && (

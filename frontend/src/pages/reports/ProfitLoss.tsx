@@ -36,7 +36,7 @@ export default function ProfitLoss() {
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border rounded px-2 py-1 text-sm" />
           <span className="text-gray-400 text-sm">to</span>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border rounded px-2 py-1 text-sm" />
-          <button onClick={load} className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Run</button>
+          <button onClick={load} className="px-3 py-1 text-sm bg-orange-600 text-white rounded hover:bg-orange-700">Run</button>
         </div>
       } />
       {data && (

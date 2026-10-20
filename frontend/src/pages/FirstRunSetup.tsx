@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AuthShell, { PasswordInput } from '../components/AuthShell';
 import api, { errMsg } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -45,14 +46,12 @@ export default function FirstRunSetup() {
   };
 
   const input =
-    'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+    'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent';
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm">
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-          <div className="mb-6 text-center">
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">Welcome</h1>
+    <AuthShell>
+          <div className="mb-6">
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Welcome</h1>
             <p className="text-sm text-gray-400 mt-1">Create the administrator account to get started</p>
           </div>
 
@@ -68,11 +67,11 @@ export default function FirstRunSetup() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Password (at least 8 characters)</label>
-                <input type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className={input} />
+                <PasswordInput required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className={input} />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1.5">Confirm password</label>
-                <input type="password" required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} className={input} />
+                <PasswordInput required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} className={input} />
               </div>
               <p className="text-xs text-gray-400">
                 This account can do everything, including payroll and user management. Keep the password safe. You can turn on 2FA after signing in.
@@ -81,14 +80,12 @@ export default function FirstRunSetup() {
               <button
                 type="submit"
                 disabled={loading || !status}
-                className="w-full py-2.5 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full py-3 px-4 bg-orange-600 shadow-sm shadow-orange-600/30 text-white text-sm font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? 'Creating…' : 'Create administrator'}
               </button>
             </form>
           )}
-        </div>
-      </div>
-    </div>
+    </AuthShell>
   );
 }

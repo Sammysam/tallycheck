@@ -114,11 +114,14 @@ async function go(path) {
 }
 async function check(name, fn) {
   try {
-    await fn();
+    // A step that hangs (e.g. a browser file dialog) fails after 90 s instead of stalling the run.
+    await Promise.race([fn(), sleep(90000).then(() => { throw new Error('step timed out after 90 s'); })]);
     results.push(`PASS  ${name}`);
+    console.log(results.at(-1));
   } catch (e) {
     failures.push(name);
     results.push(`FAIL  ${name}: ${e.message}`);
+    console.log(results.at(-1));
     await shot(`FAIL-${name.replace(/\W+/g, '_')}`).catch(() => {});
   }
 }
@@ -431,9 +434,9 @@ try {
   await check('Dashboard shows the year-to-date figures from the reports', async () => {
     const before = httpErrors.length;
     await go('/');
-    await waitFor(`document.body.innerText.toLowerCase().includes('net income (ytd)') && document.body.innerText.toLowerCase().includes('ap outstanding')`, 'KPI cards');
+    await waitFor(`document.body.innerText.toLowerCase().includes('net income') && document.body.innerText.toLowerCase().includes('payables (ap)')`, 'KPI cards');
     const text = await pageText();
-    // Cards are CSS-uppercased, so innerText is too. Revenue 2,500.63 (the paid invoice);
+    // Revenue 2,500.63 (the paid invoice);
     // AP outstanding 37.50 (the posted bill); net income 962.38 = 2,500.63 - 37.50 - 1,500.75.
     for (const v of ['2,500.63', '37.50', '962.38']) if (!text.includes(v)) throw new Error('dashboard is missing ' + v);
     const newErrors = httpErrors.slice(before).filter((e) => e.includes('/api/reports'));
@@ -671,8 +674,9 @@ try {
 } catch (e) {
   failures.push('harness');
   results.push(`FAIL  harness: ${e.message}`);
+  console.log(results.at(-1));
 } finally {
-  console.log(results.join('\n'));
+  console.log(`--- ${results.length - failures.length} passed, ${failures.length} failed`);
   console.log(`\nAPI responses >= 400 seen by the browser:\n  ${[...new Set(httpErrors)].join('\n  ') || '(none)'}`);
   console.log(`Console errors:\n  ${[...new Set(consoleErrors)].slice(0, 15).join('\n  ') || '(none)'}`);
   console.log(`Screenshots: ${SHOTS}`);
