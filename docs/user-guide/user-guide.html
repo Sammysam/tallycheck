@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cenango Accounting — User Guide</title>
+<style>
+  @page { size: A4; margin: 14mm 15mm 16mm; }
+  :root { --orange: #ea580c; --navy: #13203b; --ink: #1f2937; --muted: #5b6472; --line: #e5e7eb; --soft: #f6f7f9; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.5; margin: 0; background: #fff; }
+  h1, h2, h3 { color: var(--navy); line-height: 1.25; }
+  h2 { font-size: 19pt; margin: 0 0 4mm; padding-bottom: 2mm; border-bottom: 2.5px solid var(--orange); break-before: page; }
+  h2 .num { color: var(--orange); margin-right: 3mm; }
+  h3 { font-size: 13pt; margin: 6mm 0 2mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; }
+  ol, ul { margin: 0 0 3mm; padding-left: 6mm; }
+  li { margin-bottom: 1mm; }
+  code { font-family: Consolas, monospace; font-size: 9pt; background: var(--soft); padding: 0 1mm; border-radius: 2px; }
+  figure { margin: 3mm 0 5mm; break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid #cfd4dc; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.08); display: block; }
+  figure.half img { width: 68%; margin: 0 auto; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 1.5mm; text-align: center; }
+  .lead { font-size: 11pt; color: var(--muted); margin-bottom: 4mm; }
+  .tip { background: #fff7ed; border-left: 3px solid var(--orange); padding: 2.5mm 4mm; margin: 3mm 0; font-size: 9.8pt; break-inside: avoid; }
+  .note { background: var(--soft); border-left: 3px solid #94a3b8; padding: 2.5mm 4mm; margin: 3mm 0; font-size: 9.8pt; break-inside: avoid; }
+  kbd { font-family: Consolas, monospace; font-size: 9pt; background: #f1f3f5; border: 1px solid #cfd4dc; border-bottom-width: 2px; border-radius: 3px; padding: 0 1.5mm; }
+  b.ui { color: var(--navy); }
+  table.grid { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 9.8pt; break-inside: avoid; }
+  table.grid th, table.grid td { border: 1px solid var(--line); padding: 1.6mm 2.5mm; text-align: left; vertical-align: top; }
+  table.grid th { background: var(--soft); color: var(--navy); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+
+  /* Cover */
+  .cover { height: 265mm; display: flex; flex-direction: column; justify-content: space-between; }
+  .cover-band { background: linear-gradient(120deg, #3a2318 0%, #13203b 55%, #1b2f5a 100%); color: #fff; padding: 22mm 14mm 18mm; border-radius: 6px;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cover-band .brand { font-size: 26pt; font-weight: 700; letter-spacing: .5px; }
+  .cover-band .sub { color: #fdba74; font-size: 10pt; letter-spacing: 3px; text-transform: uppercase; margin-top: 1mm; }
+  .cover-band h1 { color: #fff; font-size: 30pt; margin: 18mm 0 3mm; }
+  .cover-band p { color: #cbd5e1; font-size: 12pt; max-width: 140mm; }
+  .cover-meta { color: var(--muted); font-size: 10pt; }
+  .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; margin: 8mm 0; }
+  .feature { border: 1px solid var(--line); border-top: 3px solid var(--orange); border-radius: 4px; padding: 3mm 4mm; font-size: 9.5pt; }
+  .feature b { display: block; color: var(--navy); font-size: 10.5pt; margin-bottom: 1mm; }
+
+  .toc { columns: 2; column-gap: 10mm; font-size: 10.5pt; }
+  .toc div { break-inside: avoid; margin-bottom: 3mm; }
+  .toc b { color: var(--navy); }
+  .toc span { color: var(--muted); display: block; font-size: 9.5pt; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 2mm; margin: 3mm 0 5mm; font-size: 9.5pt; }
+  .flow span { background: var(--navy); color: #fff; padding: 1.5mm 3mm; border-radius: 3px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .flow i { color: var(--orange); font-style: normal; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<!-- ───────────────────────── Cover ───────────────────────── -->
+<section class="cover">
+  <div class="cover-band">
+    <div class="brand">CENANGO</div>
+    <div class="sub">Accounting System</div>
+    <h1>User Guide</h1>
+    <p>What the app can do and how to use it, from the first start to month-end, with screenshots of every main screen.</p>
+  </div>
+
+  <div>
+    <div class="feature-grid">
+      <div class="feature"><b>Works offline</b>A Windows desktop app. Your data stays on your PC; no internet or cloud needed.</div>
+      <div class="feature"><b>Any company, any country</b>Your own company details, 244 countries, your currency and financial year.</div>
+      <div class="feature"><b>Full double-entry books</b>Every invoice, bill, payment and payroll posts to the ledger automatically.</div>
+      <div class="feature"><b>Sales &amp; purchases</b>Invoices, bills, expenses, payments, credit and debit notes, foreign currency.</div>
+      <div class="feature"><b>Taxes</b>VAT / GST / sales tax, tax groups, withholding tax and a tax return report.</div>
+      <div class="feature"><b>Reports</b>Profit &amp; Loss, Balance Sheet, Cash Flow, Trial Balance, ageing, statements.</div>
+      <div class="feature"><b>Employees &amp; payroll</b>Employee records, documents, salaries, monthly payroll and payslips.</div>
+      <div class="feature"><b>Users &amp; security</b>Roles and permissions, two-factor sign-in, a full activity log.</div>
+      <div class="feature"><b>Safe data</b>Encrypted backups, checked restores, daily automatic backup, locked periods.</div>
+    </div>
+    <p class="cover-meta">Version 0.1.0 · October 2026 · The screenshots use a made-up sample company, “Acme Trading (Pvt) Ltd”.</p>
+  </div>
+</section>
+
+<!-- ───────────────────────── Contents ───────────────────────── -->
+<h2>Contents</h2>
+<div class="toc">
+  <div><b>1. Getting started</b><span>Install, create the administrator, set up your company, sign in, two-factor sign-in</span></div>
+  <div><b>2. The app window</b><span>Menu bar, toolbar, navigation pane, status bar, keyboard shortcuts</span></div>
+  <div><b>3. Dashboard</b><span>Your year at a glance</span></div>
+  <div><b>4. Setting up your books</b><span>Chart of accounts, customers, vendors, taxes</span></div>
+  <div><b>5. Selling: invoices</b><span>Create, post, print and download invoices</span></div>
+  <div><b>6. Getting paid: payments</b><span>Customer and vendor payments, withholding tax, voiding</span></div>
+  <div><b>7. Buying: bills and expenses</b><span>Vendor bills and expenses paid on the spot</span></div>
+  <div><b>8. Credit and debit notes</b><span>Discounts, returns and corrections</span></div>
+  <div><b>9. Foreign currency</b><span>Invoices and bills in USD, EUR…, exchange gains and losses</span></div>
+  <div><b>10. Accounting</b><span>Ledger, journal entries, bank reconciliation, locking the books</span></div>
+  <div><b>11. Reports</b><span>P&amp;L, Balance Sheet, Cash Flow, Trial Balance, ageing, statements, tax return</span></div>
+  <div><b>12. Employees</b><span>Employee records, photos, documents, salary and bank details</span></div>
+  <div><b>13. Payroll</b><span>Monthly payroll run, posting, payslips, statutory forms</span></div>
+  <div><b>14. Administration</b><span>Users, roles, activity log, settings</span></div>
+  <div><b>15. Backup and restore</b><span>Encrypted backups, daily backups, restoring</span></div>
+  <div><b>16. Quick reference</b><span>A typical month, several PCs, what is not covered yet</span></div>
+</div>
+
+<h3>The everyday flow in one line</h3>
+<div class="flow">
+  <span>Set up company</span><i>→</i><span>Customers &amp; vendors</span><i>→</i><span>Invoice / Bill</span><i>→</i><span>Post</span><i>→</i><span>Payment</span><i>→</i><span>Reconcile bank</span><i>→</i><span>Reports</span><i>→</i><span>Lock the month</span>
+</div>
+<div class="note"><b>Draft → Posted → Paid / Void.</b> Invoices, bills and expenses are saved as <b>drafts</b> first, and you can still change them. <b>Posting</b> writes them into the ledger. Posted records are never deleted. A mistake is corrected by <b>voiding</b>, which adds a reversing entry, so the history is always complete.</div>
+
+<!-- ───────────────────────── 1 ───────────────────────── -->
+<h2><span class="num">1</span>Getting started</h2>
+<h3>Install</h3>
+<p>Run the installer <b>Cenango Accounting_0.1.0_x64-setup.exe</b>. It installs for the current Windows user, so it needs no administrator rights, and adds a Start-menu shortcut. Your data is kept in <code>%LOCALAPPDATA%\CenangoAccounting</code>. Installing an update or uninstalling never touches that folder.</p>
+
+<h3>Create the administrator (first start only)</h3>
+<p>On a new installation the app has no users yet, so it asks you to create the first one: the <b>administrator</b>, who can do everything.</p>
+<ol>
+  <li>Choose a <b class="ui">Username</b>.</li>
+  <li>Enter a <b class="ui">Password</b> of at least 8 characters, and type it again to confirm.</li>
+  <li>Click <b class="ui">Create administrator</b>.</li>
+</ol>
+<figure class="half"><img src="images/first-run.jpg"><figcaption>First start: create the administrator account.</figcaption></figure>
+<div class="tip">This screen appears only once, on the PC itself. After the first account exists, everyone signs in normally.</div>
+
+<h3>Set up your company — step by step</h3>
+<p>Next the app asks for your company details, <b>one question per page</b>. These details print on your invoices and statements, and they set your currency and financial year.</p>
+<table class="grid">
+  <tr><th style="width:14%">Step</th><th>What it asks</th></tr>
+  <tr><td>1 – 5</td><td>Company name, address, email, phone, website</td></tr>
+  <tr><td>6</td><td>Country. Choosing it fills in the currency, number format and financial-year start; you can change any of them.</td></tr>
+  <tr><td>7 – 10</td><td>Tax / VAT / GST number, logo, how customers pay you (bank details), a note at the bottom of invoices</td></tr>
+  <tr><td>11</td><td>Review: every answer on one page. Click a row to change it, then <b class="ui">Finish</b>.</td></tr>
+</table>
+<ul>
+  <li><b class="ui">Next</b> saves the answer and moves on. <b class="ui">Skip</b> leaves it empty. <b class="ui">Back</b> returns to the previous page.</li>
+  <li><b class="ui">Set up later</b> (top right) goes straight into the app. It asks again at the next sign-in, until the company name is entered.</li>
+  <li>To open the wizard again later, go to <b class="ui">Admin → Company Setup</b>. <b class="ui">Admin → Settings</b> has every field on one page.</li>
+</ul>
+<div class="two">
+  <figure><img src="images/setup-name.jpg"><figcaption>One question per page: Back, Skip, Next.</figcaption></figure>
+  <figure><img src="images/setup-country.jpg"><figcaption>The country sets the currency and financial year.</figcaption></figure>
+</div>
+<figure><img src="images/setup-review.jpg"><figcaption>The last page: check everything, click a row to change it, then Finish.</figcaption></figure>
+
+<h3>Sign in</h3>
+<p>Each person signs in with their own username and password. After several wrong passwords the account is paused for a short time, and the screen says why.</p>
+<figure class="half"><img src="images/login.jpg"><figcaption>The sign-in screen.</figcaption></figure>
+
+<h3>Two-factor sign-in (2FA) — recommended</h3>
+<p>Each user can add a second step to their sign-in: a 6-digit code from an authenticator app, such as Google Authenticator or Microsoft Authenticator, on their phone.</p>
+<ol>
+  <li>Choose <b class="ui">Turn on 2FA</b> from the top bar.</li>
+  <li>Scan the QR code with the phone app, or type in the key shown under it.</li>
+  <li>Enter the 6-digit code from the app and click <b class="ui">Activate 2FA &amp; Sign in</b>.</li>
+</ol>
+<figure class="half"><img src="images/two-factor.jpg"><figcaption>Turning on two-factor sign-in. (The key is blurred in this guide.)</figcaption></figure>
+<div class="tip">If someone loses their phone, an administrator can use <b>Reset 2FA</b> on the Users page.</div>
+
+<!-- ───────────────────────── 2 ───────────────────────── -->
+<h2><span class="num">2</span>The app window</h2>
+<p class="lead">The app works like a normal Windows program: a menu bar, a toolbar, a navigation pane on the left and a status bar at the bottom.</p>
+<figure><img src="images/window.jpg"><figcaption>The main window.</figcaption></figure>
+<table class="grid">
+  <tr><th style="width:30%">Part</th><th>What it does</th></tr>
+  <tr><td><b>Menu bar</b><br>File · Edit · View · Lists · People · Transactions · Accounting · Reports · Admin · Help</td><td>Every screen and command, with its keyboard shortcut shown next to it.</td></tr>
+  <tr><td><b>Toolbar</b></td><td>One click to the common tasks: Back / Forward / Home, new Invoice, Bill, Expense or Payment, the Customers, Vendors and Employees lists, Reports, and Refresh, Print and Export.</td></tr>
+  <tr><td><b>Navigation pane</b></td><td>Every screen, grouped: Master Data, People, Transactions, Accounting, Reports and Administration. Hide or show it with <kbd>Ctrl</kbd>+<kbd>B</kbd>.</td></tr>
+  <tr><td><b>Status bar</b></td><td>Where you are, who is signed in, the connection status and today's date.</td></tr>
+</table>
+<h3>Keyboard shortcuts</h3>
+<table class="grid">
+  <tr><th>Keys</th><th>Action</th><th>Keys</th><th>Action</th></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>New record on this screen</td><td><kbd>F5</kbd></td><td>Refresh this screen</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the open form</td><td><kbd>Esc</kbd></td><td>Close the form</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Jump to the search box</td><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Back / Forward</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Print this screen</td><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Hide / show the navigation pane</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>E</kbd></td><td>Export the tables to Excel (CSV)</td><td><kbd>F1</kbd></td><td>Show all shortcuts</td></tr>
+</table>
+<div class="tip">If you leave a form you have changed without saving it, the app asks before your changes are thrown away.</div>
+
+<!-- ───────────────────────── 3 ───────────────────────── -->
+<h2><span class="num">3</span>Dashboard</h2>
+<p class="lead">The first screen after signing in shows how the financial year is going.</p>
+<figure><img src="images/dashboard.jpg"><figcaption>Dashboard: year-to-date totals, revenue against expenses by month, and what needs attention.</figcaption></figure>
+<ul>
+  <li><b>Six cards:</b> Total Revenue, Total Expenses, Net Income (profit), Total Assets, Receivables (what customers owe you) and Payables (what you owe vendors).</li>
+  <li><b>Revenue and expenses</b> by month for the financial year.</li>
+  <li><b>Needs attention:</b> overdue customer invoices and overdue vendor bills, taken from the ageing reports.</li>
+</ul>
+<p>Press <kbd>F5</kbd> to refresh the figures.</p>
+
+<!-- ───────────────────────── 4 ───────────────────────── -->
+<h2><span class="num">4</span>Setting up your books</h2>
+<h3>Chart of accounts</h3>
+<p><b class="ui">Master Data → Accounts.</b> A new installation starts with a ready-made chart of accounts: cash, receivables, payables, revenue, expenses, equity and the payroll accounts. Add your own accounts with <b class="ui">+ New Account</b>, for example a separate bank account or an expense category. An account can be deleted only while nothing has been posted to it.</p>
+<figure><img src="images/accounts.jpg"><figcaption>The chart of accounts. Type in the filter box to find an account.</figcaption></figure>
+
+<h3>Customers and vendors</h3>
+<p><b class="ui">Master Data → Customers</b> and <b class="ui">Vendors</b> hold the people you sell to and buy from: name, contact details and address. Choosing a customer on an invoice fills in the Bill To details. Each customer also has a <b>Statement</b> link (see chapter 11).</p>
+<figure><img src="images/vendors.jpg"><figcaption>The Vendors list.</figcaption></figure>
+
+<h3>Taxes (VAT / GST / sales tax)</h3>
+<p><b class="ui">Admin → Taxes.</b> Create one <b>tax code</b> for each rate you charge or pay.</p>
+<ul>
+  <li><b>Standard:</b> one rate, for example VAT 18%. Choose the account the tax on sales is posted to (tax payable), and the account the tax on purchases is posted to (tax receivable).</li>
+  <li><b>Group:</b> several taxes on one line, for example a national tax plus a local tax, including a tax charged on top of another tax.</li>
+  <li><b>Withholding:</b> tax a customer keeps back from a payment and pays to the tax office for you.</li>
+  <li><b>Defaults:</b> the tax code that new sales lines and new purchase lines start with. Each line can still be changed.</li>
+</ul>
+<figure><img src="images/taxes.jpg"><figcaption>Tax codes and the defaults for new lines.</figcaption></figure>
+<div class="note">If your company is not registered for tax, leave this screen empty. Invoices then show no tax.</div>
+
+<!-- ───────────────────────── 5 ───────────────────────── -->
+<h2><span class="num">5</span>Selling: invoices</h2>
+<p class="lead"><b class="ui">Transactions → Invoices</b>, or the <b class="ui">Invoice</b> button on the toolbar.</p>
+<figure><img src="images/invoices.jpg"><figcaption>The invoice list. Search by invoice number, PO number or customer, and filter by status or date.</figcaption></figure>
+
+<h3>Create an invoice</h3>
+<ol>
+  <li>Click <b class="ui">+ New Invoice</b>. The invoice opens exactly as it will print.</li>
+  <li>On the left (<b>Bookkeeping</b>, not printed): choose the <b>customer</b>, the <b>payment terms</b> (these set the due date), the <b>revenue account</b> and <b>tax code</b> for each line, and the <b>currency</b>.</li>
+  <li>On the invoice: check the <b>Bill To</b> details, then type each line's description, quantity and unit price. Totals, tax and the amount in words update as you type.</li>
+  <li>Click <b class="ui">Save Invoice</b>. It is saved as a <b>draft</b>, so you can still change it.</li>
+  <li>In the list, set its status to <b>Posted</b>. This puts it into the ledger: the customer's balance and your revenue go up.</li>
+</ol>
+<figure><img src="images/new-invoice.jpg"><figcaption>A new invoice. When a tax code is used, the title changes to “Tax Invoice”.</figcaption></figure>
+<ul>
+  <li><b class="ui">Preview</b>, <b class="ui">Print</b> and <b class="ui">Download</b> produce the invoice as a PDF, with your logo, company details, payment instructions and the signatory's name and title.</li>
+  <li><b class="ui">Signatory</b> on the list sets the name and title printed at the bottom of every invoice.</li>
+  <li><b>Prices include tax</b>: tick this when the prices you type already include the tax.</li>
+</ul>
+
+<!-- ───────────────────────── 6 ───────────────────────── -->
+<h2><span class="num">6</span>Getting paid: payments</h2>
+<p class="lead"><b class="ui">Transactions → Payments</b>. Record money received from customers (<b>AR</b>) and money paid to vendors (<b>AP</b>).</p>
+<ol>
+  <li>Click <b class="ui">+ Record Payment</b>.</li>
+  <li>Choose <b>AR — Customer Payment</b> or <b>AP — Vendor Payment</b>, then the invoice or bill. The list shows what is still owed on each one.</li>
+  <li>Enter the date and amount, the method (bank transfer, cash, cheque…) and the account the money went into or came out of.</li>
+  <li>Click <b class="ui">Record Payment</b>. The invoice becomes <b>Paid</b>, or <b>Partly paid</b> if not all of it was paid.</li>
+</ol>
+<h3>Withholding tax</h3>
+<p>If the customer kept back some tax, choose the withholding tax code and enter the amount withheld. The app shows how the invoice is settled, for example “LKR 1,130.00 paid + LKR 50.00 withheld for the tax office”.</p>
+<figure><img src="images/withholding.jpg"><figcaption>Recording a payment with tax withheld by the customer.</figcaption></figure>
+<div class="tip"><b>Void</b> cancels a payment that was entered by mistake. The invoice is owed again, and the ledger keeps both the payment and its reversal.</div>
+
+<!-- ───────────────────────── 7 ───────────────────────── -->
+<h2><span class="num">7</span>Buying: bills and expenses</h2>
+<h3>Bills (from vendors)</h3>
+<p><b class="ui">Transactions → Bills</b>, or the <b class="ui">Bill</b> button. Use a bill when a vendor sends you an invoice that you will pay later.</p>
+<ol>
+  <li>Click <b class="ui">+ New Bill</b>, then choose the vendor and enter the date, due date and currency.</li>
+  <li>Add each line with its description, amount, <b>expense account</b> and tax code.</li>
+  <li>Save the bill, then <b>post</b> it. Your payables go up until you pay it on the Payments screen.</li>
+</ol>
+<figure><img src="images/bills.jpg"><figcaption>The bill list. A posted bill can be voided.</figcaption></figure>
+<h3>Expenses (paid straight away)</h3>
+<p><b class="ui">Transactions → Expenses</b>, or the <b class="ui">Expense</b> button. Use this for costs paid on the spot, such as fuel, stationery or a utility bill: there is no vendor bill to keep track of. Click <b class="ui">+ New Expense</b>, choose the expense account, the account you paid from and the tax code, then save and post.</p>
+
+<!-- ───────────────────────── 8 ───────────────────────── -->
+<h2><span class="num">8</span>Credit and debit notes</h2>
+<p class="lead">For a discount, a return or an over-charge after an invoice or bill has been posted.</p>
+<ul>
+  <li><b class="ui">Credit Notes</b> reduce what a <b>customer</b> owes on a posted invoice.</li>
+  <li><b class="ui">Debit Notes</b> reduce what you owe a <b>vendor</b> on a posted bill.</li>
+</ul>
+<ol>
+  <li>Click <b class="ui">+ New Credit Note</b> (or <b class="ui">+ New Debit Note</b>).</li>
+  <li>Choose the invoice or bill, then enter the date, the reason, the amount and the account.</li>
+  <li>Save it. The balance owed goes down straight away, and the customer's statement shows the note.</li>
+</ol>
+<figure><img src="images/credit-notes.jpg"><figcaption>A credit note for a discount on invoice INV-9000.</figcaption></figure>
+<div class="note">A note can be voided, which puts the amount back.</div>
+
+<!-- ───────────────────────── 9 ───────────────────────── -->
+<h2><span class="num">9</span>Foreign currency</h2>
+<p class="lead">Invoice an overseas customer in USD, or enter a bill from a European supplier in EUR. Your books stay in your own currency.</p>
+<ol>
+  <li>On the invoice or bill, set <b class="ui">Currency</b> to the foreign currency.</li>
+  <li>Enter the rate: <b>“1 USD = how many LKR?”</b>. The app suggests the last rate you used for that currency.</li>
+  <li>The invoice is written and printed in USD. In the books it is recorded in your own currency at that rate.</li>
+  <li>When the customer pays, enter the payment in USD at <b>that day's rate</b>.</li>
+</ol>
+<figure><img src="images/usd-invoice.jpg"><figcaption>A USD invoice: prices in USD, “Booked as about LKR 30,000.00 in the books”.</figcaption></figure>
+<p>If the rate has changed since the invoice, the difference is posted automatically to <b>7900 Foreign Exchange Gain/Loss</b>. The Payments list shows each foreign payment in your own currency (<b>In the books</b>), together with the gain or loss (<b>Exchange</b>).</p>
+<figure><img src="images/fx-payment.jpg"><figcaption>$100.00 received at 310 (booked at 300): LKR 31,000.00 in the books and an exchange gain of LKR 1,000.00.</figcaption></figure>
+
+<!-- ───────────────────────── 10 ───────────────────────── -->
+<h2><span class="num">10</span>Accounting</h2>
+<h3>Ledger and journal entries</h3>
+<p><b class="ui">Accounting → Ledger</b> lists every journal entry, whether it came from an invoice, bill, payment or payroll run, or was entered by hand. Click an entry to see its debit and credit lines. Enter manual journal entries here too: for opening balances, bank charges, interest or corrections. A journal entry must balance before it can be posted.</p>
+<figure><img src="images/ledger.jpg"><figcaption>The ledger.</figcaption></figure>
+
+<h3>Bank reconciliation</h3>
+<p><b class="ui">Accounting → Bank Reconciliation</b> checks your books against the bank statement.</p>
+<ol>
+  <li>Choose the bank account, then enter the statement date and the closing balance printed on the statement.</li>
+  <li>Tick each deposit and payment that appears on the statement.</li>
+  <li>When <b>Difference</b> shows 0.00, click <b class="ui">Finish</b>. Or click <b class="ui">Save for later</b> and carry on another time.</li>
+</ol>
+<figure><img src="images/reconcile.jpg"><figcaption>Reconciled: the difference is zero.</figcaption></figure>
+<div class="tip">Bank charges or interest on the statement but not in the books? Post them as a journal entry on the Ledger screen, then press <kbd>F5</kbd>.</div>
+
+<h3>Lock the books</h3>
+<p>Once a month or year is closed, lock it under <b class="ui">Admin → Settings → Lock the books</b>. After that, nothing can be posted on or before the lock date: no invoices, bills, payments, expenses, payroll or journal entries. This protects figures that have already been reported. Mistakes found later are corrected with entries dated today.</p>
+<figure><img src="images/lock-books.jpg"><figcaption>Settings: the invoice signatory and Lock the books.</figcaption></figure>
+
+<!-- ───────────────────────── 11 ───────────────────────── -->
+<h2><span class="num">11</span>Reports</h2>
+<p class="lead">Every report works the same way: choose the dates, click <b class="ui">Run</b>, click any account to see its entries, press <kbd>Ctrl</kbd>+<kbd>P</kbd> to print or <kbd>Ctrl</kbd>+<kbd>E</kbd> to export to Excel.</p>
+<h3>Profit &amp; Loss</h3>
+<p>Revenue, cost of goods sold and expenses for any period, ending with <b>Net Income</b>. <b>Compare</b> puts the same period last year (or the previous period) beside it, with the change.</p>
+<figure><img src="images/profit-loss.jpg"><figcaption>Profit &amp; Loss compared with the same period last year.</figcaption></figure>
+<h3>Balance Sheet</h3>
+<p>What the company owns (assets) and owes (liabilities), plus equity, on any date. The current year's profit shows as Retained Earnings, and a check confirms the sheet balances.</p>
+<figure><img src="images/balance-sheet.jpg"><figcaption>Balance Sheet — “✓ Balanced”.</figcaption></figure>
+<h3>Cash Flow</h3>
+<p>Where the cash came from and went to: operating, investing and financing activities, from the opening to the closing cash balance. Tick the accounts that count as cash and bank.</p>
+<figure><img src="images/cash-flow.jpg"><figcaption>Cash Flow statement.</figcaption></figure>
+<h3>Trial Balance</h3>
+<p>Every account's debit or credit balance. Total debits always equal total credits.</p>
+<figure><img src="images/trial-balance.jpg"><figcaption>Trial Balance.</figcaption></figure>
+<h3>AR and AP ageing</h3>
+<p>Who owes you, and whom you owe, grouped by how late the payment is: Current, 1–30, 31–60, 61–90 and 90+ days.</p>
+<figure><img src="images/ap-aging.jpg"><figcaption>AP ageing: one bill is more than 90 days overdue.</figcaption></figure>
+<h3>Account activity (drill-down)</h3>
+<p>Click any account in a report to see every entry behind its figure, with a running balance.</p>
+<figure><img src="images/account-activity.jpg"><figcaption>The entries behind 4000 Revenue.</figcaption></figure>
+<h3>Customer statement</h3>
+<p>On the Customers list, click <b class="ui">Statement</b> to list a customer's invoices, payments and credits for a period, with the amount due. Use <b class="ui">Print / PDF</b> to send it to them.</p>
+<figure><img src="images/statement.jpg"><figcaption>Statement of account, ready to print or save as PDF.</figcaption></figure>
+<h3>Tax return</h3>
+<p>For any period: sales and purchases per tax code, tax charged on sales, tax paid on purchases, and the <b>tax to pay</b>. Use it to fill in your country's return form.</p>
+<figure><img src="images/tax-return.jpg"><figcaption>Tax return summary.</figcaption></figure>
+
+<!-- ───────────────────────── 12 ───────────────────────── -->
+<h2><span class="num">12</span>Employees</h2>
+<p class="lead"><b class="ui">People → Employees</b>: one record per person.</p>
+<figure><img src="images/employees.jpg"><figcaption>The employee list.</figcaption></figure>
+<ul>
+  <li><b>Profile:</b> personal and job details, ID numbers and a photo. Photos and documents are stored encrypted on the PC.</li>
+  <li><b>Salary:</b> <b class="ui">+ Set salary</b> records the starting salary with its parts (basic pay and allowances). <b class="ui">+ Add increment</b> records a raise with its effective date. The history is kept.</li>
+  <li><b>Bank details</b> for salary transfers, and the employee's <b>staff loan</b> balance.</li>
+  <li><b>Documents:</b> <b class="ui">+ Upload document</b> stores contracts, certificates, IDs and similar files, with a category and an optional expiry date. Payslips are filed here automatically by payroll.</li>
+</ul>
+<figure><img src="images/employee-salary.jpg"><figcaption>Salary, salary history, bank details and documents on the employee's page.</figcaption></figure>
+
+<!-- ───────────────────────── 13 ───────────────────────── -->
+<h2><span class="num">13</span>Payroll</h2>
+<p class="lead"><b class="ui">People → Payroll</b>. One run per month.</p>
+<ol>
+  <li><b class="ui">Start payroll for</b> the month. The app builds the <b>salary sheet</b> from each employee's salary: days worked, allowances, bonus, no-pay days, statutory deductions, loan instalments and other deductions. While the run is a <b>draft</b>, everything can be changed, and nothing has reached the ledger yet.</li>
+  <li><b>Check the totals</b>: gross pay, deductions, net pay, employer contributions and the total cost to the company.</li>
+  <li><b class="ui">Post to ledger</b> records salaries, deductions and employer contributions in the books.</li>
+  <li><b>Pay</b> the salaries from the bank account.</li>
+  <li><b>Remit</b> the statutory amounts to the authorities when they are due. The run shows what is due, remitted and still outstanding.</li>
+  <li><b>Documents:</b> print the salary slips, the bank advice and the statutory forms. <b class="ui">File slips to employee records</b> saves each slip in that employee's documents.</li>
+</ol>
+<figure><img src="images/payroll-draft.jpg"><figcaption>A draft payroll run with the salary sheet. Documents printed from a draft carry a DRAFT watermark.</figcaption></figure>
+<figure><img src="images/payroll-paid.jpg"><figcaption>The run posted and paid, with the statutory payments still to make.</figcaption></figure>
+<div class="tip"><b>Void</b> reverses every entry of a run, including any staff loan instalments, if it was posted by mistake.</div>
+<div class="note"><b>Today</b>, payroll follows Sri Lankan rules (EPF 8% + 12%, ETF 3%, PAYE, stamp duty). Payroll for other countries, where each company sets up its own deductions and contributions, is the next feature being built.</div>
+
+<!-- ───────────────────────── 14 ───────────────────────── -->
+<h2><span class="num">14</span>Administration</h2>
+<h3>Users</h3>
+<p><b class="ui">Admin → Users.</b> Give each person their own account; never share a password. <b class="ui">+ New User</b> creates an account with a role. Use <b>Deactivate</b> when someone leaves; their history stays in the log. <b>Reset Password</b> and <b>Reset 2FA</b> help someone who is locked out.</p>
+<figure><img src="images/users.jpg"><figcaption>Users and their roles.</figcaption></figure>
+<h3>Roles</h3>
+<p><b class="ui">Admin → Roles.</b> A role is a list of the screens its users may open. The app comes with Admin (everything), Accountant and Viewer (dashboard, ledger and reports only). You can create your own, for example a payroll clerk who can see employees and payroll only.</p>
+<figure><img src="images/roles.jpg"><figcaption>Roles and the pages each one can use.</figcaption></figure>
+<h3>Activity log</h3>
+<p><b class="ui">Admin → Activity Log</b> records who did what and when: sign-ins, records created, posted and voided, setting changes and more. Filter it by user. The log cannot be edited.</p>
+<figure><img src="images/activity-log.jpg"><figcaption>The activity log.</figcaption></figure>
+<h3>Settings</h3>
+<p><b class="ui">Admin → Settings</b> has the company details, logo, country, currency and financial year; the invoice signatory; and <b>Lock the books</b>.</p>
+<figure><img src="images/settings.jpg"><figcaption>Settings: company details.</figcaption></figure>
+
+<!-- ───────────────────────── 15 ───────────────────────── -->
+<h2><span class="num">15</span>Backup and restore</h2>
+<p class="lead"><b class="ui">File → Backup and restore…</b> Keep copies of your data somewhere other than this PC, such as a USB drive, another PC or a cloud folder.</p>
+<ul>
+  <li><b>Backup password:</b> set it once. Every backup is <b>encrypted</b> with it, so a lost USB drive does not expose your accounts. Keep the password safe: a backup cannot be opened without it.</li>
+  <li><b>Making a backup</b> writes one file (<code>cenango-accounting-….qbak</code>). It holds the whole database plus every employee photo, document and payslip. The app checks each backup after writing it.</li>
+  <li><b>Daily backup:</b> while the app is running it makes one backup a day into the folder you choose, and keeps the newest copies (14 by default).</li>
+  <li><b>Restore:</b> choose a backup file and click <b class="ui">Check backup</b>, which confirms it is complete and readable. Then type <b>RESTORE</b> and click <b class="ui">Restore at next start</b>. The current data is kept in a <i>pre-restore</i> folder, just in case.</li>
+</ul>
+<figure><img src="images/backup.jpg"><figcaption>Daily backup settings, and a backup checked before restoring.</figcaption></figure>
+
+<!-- ───────────────────────── 16 ───────────────────────── -->
+<h2><span class="num">16</span>Quick reference</h2>
+<h3>A typical month</h3>
+<table class="grid">
+  <tr><th style="width:24%">When</th><th>What to do</th><th style="width:30%">Where</th></tr>
+  <tr><td>Every sale</td><td>Create the invoice, post it, print or email the PDF</td><td>Transactions → Invoices</td></tr>
+  <tr><td>Every vendor invoice</td><td>Enter it as a bill and post it</td><td>Transactions → Bills</td></tr>
+  <tr><td>Small costs paid at once</td><td>Record an expense</td><td>Transactions → Expenses</td></tr>
+  <tr><td>Money in or out</td><td>Record the payment against its invoice or bill</td><td>Transactions → Payments</td></tr>
+  <tr><td>Weekly</td><td>Check overdue customers and bills</td><td>Dashboard, AR / AP ageing</td></tr>
+  <tr><td>Month-end</td><td>Run payroll; post, pay and remit; file the slips</td><td>People → Payroll</td></tr>
+  <tr><td>Month-end</td><td>Reconcile each bank account to its statement</td><td>Accounting → Bank Reconciliation</td></tr>
+  <tr><td>Month-end</td><td>Review P&amp;L, Balance Sheet and Cash Flow; run the tax return</td><td>Reports</td></tr>
+  <tr><td>After closing</td><td>Lock the month</td><td>Admin → Settings</td></tr>
+  <tr><td>Always</td><td>Keep the daily backup on; copy backups off this PC</td><td>File → Backup and restore…</td></tr>
+</table>
+
+<h3>Several PCs in one office</h3>
+<p>The app can be shared on the office network (LAN mode, off by default). One PC keeps the data, and the others use the app through it in a browser, each person with their own user account. Only the main PC opens the database.</p>
+
+<h3>Not covered yet</h3>
+<ul>
+  <li>Payroll for countries other than Sri Lanka. This is being built next.</li>
+  <li>Bank accounts held in a foreign currency, and revaluing unpaid foreign invoices at month-end.</li>
+  <li>Currencies with three decimal places (for example the Kuwaiti or Bahraini dinar) as the company's own currency.</li>
+  <li>One company per installation: a second company needs its own data folder.</li>
+</ul>
+
+</body>
+</html>
