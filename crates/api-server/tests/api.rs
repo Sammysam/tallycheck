@@ -1388,3 +1388,91 @@ async fn first_administrator_is_created_once_and_only_on_this_pc() -> TestResult
     assert!(actions.iter().any(|a| a == "Created the first administrator"), "{actions:?}");
     Ok(())
 }
+
+#[tokio::test]
+async fn payments_are_voided_and_the_books_locked_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let clerk = app.signed_in("clerk", "Accountant").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (cash, revenue) = (id_of("1000")?, id_of("4000")?);
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme"}))).await?;
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust.body["id"], "date": "2026-04-01",
+                "lines": [{"description": "Design", "quantity": 1, "unitPrice": 300, "accountId": revenue}]})),
+        )
+        .await?;
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+    app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+    // A part-payment, so the invoice still has a balance a later payment could go against.
+    let payment = |date: &str| {
+        json!({"type": "AR", "invoiceId": inv_id, "date": date, "amount": 100,
+            "paymentMethod": "CASH", "paymentAccountId": cash})
+    };
+    let pay = app.call(Method::POST, "/api/payments", Some(&admin), Some(payment("2026-04-25"))).await?;
+    assert_eq!((pay.status, pay.body["status"].as_str()), (StatusCode::CREATED, Some("POSTED")));
+    let pay_id = pay.body["id"].as_str().ok_or("pay")?.to_string();
+
+    // The payment's own entry cannot be reversed behind the invoice's back.
+    let je = pay.body["journalEntryId"].as_str().ok_or("je")?;
+    let sneaky = app.call(Method::POST, &format!("/api/ledger/entries/{je}/reverse"), Some(&admin), None).await?;
+    assert_nest_error(
+        &sneaky,
+        400,
+        json!("This entry was posted by a payment. Void or unpost it from that screen instead."),
+        &format!("/api/ledger/entries/{je}/reverse"),
+    );
+
+    // Lock: anyone signed in can read it, only an administrator can move it.
+    let open = app.call(Method::GET, "/api/books/lock", Some(&clerk), None).await?;
+    assert_eq!(open.body, json!({"lockedThrough": null}));
+    let lock = |d: Value| json!({ "lockedThrough": d });
+    let denied = app.call(Method::PUT, "/api/books/lock", Some(&clerk), Some(lock(json!("2026-04-30")))).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    for bad in [json!("2026-13-01"), json!(20260430), json!("2999-01-01")] {
+        let r = app.call(Method::PUT, "/api/books/lock", Some(&admin), Some(lock(bad.clone()))).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}: {}", r.body);
+    }
+    let locked = app.call(Method::PUT, "/api/books/lock", Some(&admin), Some(lock(json!("2026-04-30")))).await?;
+    assert_eq!(locked.body["lockedThrough"], "2026-04-30");
+    let late = app.call(Method::POST, "/api/payments", Some(&admin), Some(payment("2026-04-30"))).await?;
+    assert_eq!(late.status, StatusCode::BAD_REQUEST);
+    assert!(late.body["message"]
+        .as_str()
+        .unwrap_or("")
+        .starts_with("The books are locked up to and including 2026-04-30"));
+
+    // Voiding is dated today, so it still works for a payment in the locked period.
+    let void_path = format!("/api/payments/{pay_id}/void");
+    let voided = app.call(Method::POST, &void_path, Some(&clerk), None).await?;
+    assert_eq!((voided.status, voided.body["status"].as_str()), (StatusCode::CREATED, Some("VOID")), "{}", voided.body);
+    let again = app.call(Method::POST, &void_path, Some(&clerk), None).await?;
+    assert_nest_error(&again, 400, json!("Payment is already voided"), &void_path);
+    let after = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    assert_eq!((after.body["status"].as_str(), after.body["amountPaid"].as_str()), (Some("POSTED"), Some("0.00")));
+    let listed = app.call(Method::GET, "/api/payments", Some(&admin), None).await?;
+    assert_eq!(listed.body["data"][0]["status"], "VOID", "a voided payment stays on the list");
+
+    let unlocked = app.call(Method::PUT, "/api/books/lock", Some(&admin), Some(lock(Value::Null))).await?;
+    assert_eq!(unlocked.body["lockedThrough"], Value::Null);
+
+    let log = app.call(Method::GET, "/api/audit-logs", Some(&admin), None).await?;
+    let data = log.body["data"].as_array().ok_or("data")?;
+    let actions: Vec<(&str, &str)> =
+        data.iter().map(|e| (e["action"].as_str().unwrap_or(""), e["detail"].as_str().unwrap_or(""))).collect();
+    assert!(actions.contains(&("Changed the books lock date", "Locked through 2026-04-30")), "{actions:?}");
+    assert!(actions.contains(&("Changed the books lock date", "Unlocked")), "{actions:?}");
+    assert!(actions.iter().any(|(a, _)| *a == "Voided a payment"), "{actions:?}");
+    Ok(())
+}

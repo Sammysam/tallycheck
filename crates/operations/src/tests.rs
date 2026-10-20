@@ -346,3 +346,102 @@ async fn customers_in_use_cannot_be_deleted() -> AppResult<()> {
     );
     Ok(())
 }
+
+async fn invoice_state(s: &Shop, id: &str) -> AppResult<(String, Money)> {
+    let mut c = s.db.read().acquire().await?;
+    let inv = invoices::find_one(&mut c, id, &ADMIN()).await?;
+    Ok((inv.status, inv.amount_paid))
+}
+
+#[tokio::test]
+async fn voiding_a_payment_reverses_it_and_reopens_the_invoice_and_bill() -> AppResult<()> {
+    let s = shop().await?;
+    let inv = invoices::create(&s.db, s.invoice(vec![("1", "1000", true)]), Some("admin")).await?;
+    invoices::post(&s.db, &inv.id, &ADMIN()).await?;
+    let first = payments::create(&s.db, s.pay("AR", Some(&inv.id), None, "400")).await?;
+    let second = payments::create(&s.db, s.pay("AR", Some(&inv.id), None, "600")).await?;
+    assert_eq!(invoice_state(&s, &inv.id).await?, ("PAID".into(), m("1000")));
+    assert_eq!(first.status, "POSTED");
+
+    let voided = payments::void(&s.db, &first.id, TODAY).await?;
+    assert_eq!(voided.status, "VOID");
+    assert_eq!(invoice_state(&s, &inv.id).await?, ("POSTED".into(), m("600")), "PAID returns to POSTED");
+    assert_eq!(s.balance("1100").await?, m("400"), "the voided amount is owed again");
+    assert_eq!(s.balance("1000").await?, m("600"));
+    let again = payments::void(&s.db, &first.id, TODAY).await;
+    assert_eq!(bad_request(&again).as_deref(), Some("Payment is already voided"));
+
+    let blocked = invoices::void(&s.db, &inv.id, &ADMIN(), TODAY).await;
+    assert!(bad_request(&blocked).is_some(), "still part-paid by the second payment");
+    payments::void(&s.db, &second.id, TODAY).await?;
+    assert_eq!(invoice_state(&s, &inv.id).await?, ("POSTED".into(), Money::ZERO));
+    invoices::void(&s.db, &inv.id, &ADMIN(), TODAY).await?;
+    assert_eq!(s.balance("1100").await?, Money::ZERO);
+    assert_eq!(s.balance("1000").await?, Money::ZERO);
+
+    let bill = bills::create(
+        &s.db,
+        CreateBill {
+            vendor_id: s.vendor.clone(),
+            date: "2026-04-03".into(),
+            due_date: None,
+            notes: None,
+            lines: vec![BillLineInput {
+                description: "Paper".into(),
+                quantity: m("1"),
+                unit_price: m("57.5"),
+                account_id: s.acct["6000"].clone(),
+            }],
+        },
+    )
+    .await?;
+    bills::post(&s.db, &bill.id).await?;
+    let paid = payments::create(&s.db, s.pay("AP", None, Some(&bill.id), "57.5")).await?;
+    payments::void(&s.db, &paid.id, TODAY).await?;
+    let mut c = s.db.read().acquire().await?;
+    let reopened = bills::find_one(&mut c, &bill.id).await?;
+    drop(c);
+    assert_eq!((reopened.status.as_str(), reopened.amount_paid), ("POSTED", Money::ZERO));
+    assert_eq!(s.balance("2000").await?, m("57.5"));
+    bills::void(&s.db, &bill.id, TODAY).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn nothing_posts_on_or_before_the_books_lock_date() -> AppResult<()> {
+    let s = shop().await?;
+    let inv = invoices::create(&s.db, s.invoice(vec![("1", "100", true)]), Some("admin")).await?;
+    invoices::post(&s.db, &inv.id, &ADMIN()).await?;
+    let pay = payments::create(&s.db, s.pay("AR", Some(&inv.id), None, "40")).await?;
+
+    let lock = |d: Option<&'static str>| {
+        let db = s.db.clone();
+        async move {
+            let mut tx = db.begin().await?;
+            ledger::entries::set_locked_through(&mut tx, d).await?;
+            tx.commit().await?;
+            AppResult::Ok(())
+        }
+    };
+    lock(Some("2026-04-30")).await?;
+    let locked = "The books are locked up to and including 2026-04-30. Use a later date, or ask an administrator to change the lock date.";
+
+    // On the lock date itself and before it: refused, and nothing is half-written.
+    let mut on_lock_day = s.pay("AR", Some(&inv.id), None, "10");
+    on_lock_day.date = "2026-04-30".into();
+    assert_eq!(bad_request(&payments::create(&s.db, on_lock_day).await).as_deref(), Some(locked));
+    assert_eq!(invoice_state(&s, &inv.id).await?, ("POSTED".into(), m("40")));
+    let draft = invoices::create(&s.db, s.invoice(vec![("1", "5", true)]), Some("admin")).await?;
+    assert_eq!(bad_request(&invoices::post(&s.db, &draft.id, &ADMIN()).await).as_deref(), Some(locked));
+
+    // After it: fine. Corrections of locked documents are dated today, in the open period.
+    let mut may = s.pay("AR", Some(&inv.id), None, "10");
+    may.date = "2026-05-01".into();
+    payments::create(&s.db, may).await?;
+    payments::void(&s.db, &pay.id, TODAY).await?;
+    assert_eq!(invoice_state(&s, &inv.id).await?, ("POSTED".into(), m("10")));
+
+    lock(None).await?;
+    invoices::post(&s.db, &draft.id, &ADMIN()).await?;
+    Ok(())
+}

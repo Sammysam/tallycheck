@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod audit_logs;
 pub mod auth;
+pub mod books;
 pub mod employees;
 pub mod ledger;
 pub mod operations;
@@ -72,6 +73,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/expenses/{id}/void", post(op::expenses_void))
         .route("/payments", get(op::payments_list).post(op::payments_create))
         .route("/payments/{id}", get(op::payments_get))
+        .route("/payments/{id}/void", post(op::payments_void))
+        .route("/books/lock", get(books::lock_get).put(books::lock_set))
         .route("/reports/profit-loss", get(reports::profit_loss))
         .route("/reports/balance-sheet", get(reports::balance_sheet))
         .route("/reports/ar-aging", get(reports::ar_aging))

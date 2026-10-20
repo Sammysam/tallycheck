@@ -5,7 +5,7 @@ use crate::extract::{perm, Authorized};
 use crate::state::AppState;
 use crate::validate;
 use app_core::time::today_local;
-use app_core::AppResult;
+use app_core::{AppError, AppResult};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -65,6 +65,18 @@ pub async fn get_entry(
     Ok(Json(entries::get(&mut conn, &id).await?))
 }
 
+/// Which screen owns an entry posted by a business document.
+fn document_name(source_type: &str) -> Option<&'static str> {
+    Some(match source_type {
+        "INVOICE" => "an invoice",
+        "BILL" => "a bill",
+        "EXPENSE" => "an expense",
+        "PAYMENT_AR" | "PAYMENT_AP" => "a payment",
+        "PAYROLL" | "PAYROLL_PAYMENT" | "PAYROLL_REMITTANCE" => "a payroll run",
+        _ => return None,
+    })
+}
+
 /// Dated with the Sri Lanka business date (D5); the reference used the UTC date.
 pub async fn reverse(
     State(state): State<AppState>,
@@ -72,6 +84,17 @@ pub async fn reverse(
     Path(id): Path<String>,
 ) -> AppResult<(StatusCode, Json<JournalEntry>)> {
     let mut tx = state.db.begin().await?;
+    // D18: an entry an invoice, bill, expense, payment or payroll run posted is undone from
+    // that document, which also fixes the document's status and amounts. Reversing it here
+    // would leave, say, an invoice marked PAID with its payment gone from the ledger.
+    let entry = entries::get(&mut tx, &id).await?;
+    if let (Some(kind), Some(_)) = (entry.source_type.as_deref(), entry.source_id.as_deref()) {
+        if let Some(doc) = document_name(kind) {
+            return Err(AppError::bad_request(format!(
+                "This entry was posted by {doc}. Void or unpost it from that screen instead."
+            )));
+        }
+    }
     let reversal = entries::reverse(&mut tx, &id, &today_local().to_string()).await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(reversal)))

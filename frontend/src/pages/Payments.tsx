@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import api from '../api/client';
+import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import Pagination from '../components/Pagination';
+import StatusBadge from '../components/StatusBadge';
+import Dialog from '../components/desktop/Dialog';
 
-interface Payment { id: string; paymentNumber: string; type: string; date: string; amount: number; paymentMethod: string }
+interface Payment { id: string; paymentNumber: string; type: string; date: string; amount: number; paymentMethod: string; status: string }
 
 export default function Payments() {
   const [rows, setRows] = useState<Payment[]>([]);
@@ -23,6 +25,8 @@ export default function Payments() {
   useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '' });
   const [error, setError] = useState('');
+  const [voiding, setVoiding] = useState<Payment | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const load = (p = page) =>
     api.get('/payments', { params: { page: p, limit } }).then((r) => {
@@ -32,10 +36,32 @@ export default function Payments() {
     });
 
   useEffect(() => { load(); }, [page]);
-  useEffect(() => {
-    api.get('/accounts').then((r) => setAccounts(r.data.filter((a: any) => a.type === 'ASSET')));
+  const loadDocuments = () => {
     api.get('/invoices', { params: { limit: 100 } }).then((r) => setInvoices((r.data.data ?? r.data).filter((i: any) => i.status === 'POSTED')));
     api.get('/bills',    { params: { limit: 100 } }).then((r) => setBills((r.data.data ?? r.data).filter((b: any) => b.status === 'POSTED')));
+  };
+
+  // Reverses the payment in the ledger; its invoice or bill is owed again (D18).
+  const confirmVoid = async () => {
+    if (!voiding) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.post(`/payments/${voiding.id}/void`);
+      setVoiding(null);
+      load();
+      loadDocuments();
+    } catch (err) {
+      setVoiding(null);
+      setError(errMsg(err, 'Could not void the payment'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    api.get('/accounts').then((r) => setAccounts(r.data.filter((a: any) => a.type === 'ASSET')));
+    loadDocuments();
   }, []);
 
   const submit = async (e: React.FormEvent) => {
@@ -116,8 +142,36 @@ export default function Payments() {
         { header: 'Date',   accessor: 'date' },
         { header: 'Amount', accessor: (r) => fmt(r.amount) },
         { header: 'Method', accessor: 'paymentMethod' },
+        { header: 'Status', accessor: (r) => <StatusBadge status={r.status ?? 'POSTED'} /> },
+        { header: 'Actions', accessor: (r) => r.status !== 'VOID' && (
+          <button onClick={() => setVoiding(r)} className="btn-link" style={{ color: '#dc2626' }}>Void</button>
+        ) },
       ]} />
       <Pagination page={page} totalPages={totalPages} total={total} limit={limit} onPage={(p) => { setPage(p); load(p); }} />
+
+      {voiding && (
+        <Dialog
+          title="Void payment"
+          onClose={() => !busy && setVoiding(null)}
+          buttons={
+            <>
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={confirmVoid}>
+                {busy ? 'Voiding…' : 'Void payment'}
+              </button>
+              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setVoiding(null)}>Cancel</button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-800">
+            Void <strong>{voiding.paymentNumber}</strong> for <strong>{fmt(voiding.amount)}</strong>?
+          </p>
+          <ul className="mt-2 text-sm text-gray-600 list-disc pl-5 space-y-0.5">
+            <li>A reversing entry dated today is posted to the ledger.</li>
+            <li>The {voiding.type === 'AR' ? 'invoice' : 'bill'} it paid is owed again.</li>
+            <li>The payment stays on this list, marked VOID. This cannot be undone.</li>
+          </ul>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@
 //!   becomes PAID when nothing is outstanding.
 //! * AP: debit 2000 AP, credit the payment account; the bill accumulates `amountPaid` and
 //!   becomes PAID when nothing is outstanding (D13). A DRAFT bill cannot be paid (D14).
+//! * Void (D18): the payment's entry is reversed and the amount is outstanding again.
 
 use crate::invoices::{self, PAID};
 use crate::parties::{self, PartyKind};
@@ -34,6 +35,8 @@ pub struct Payment {
     pub payment_account_id: String,
     pub notes: Option<String>,
     pub journal_entry_id: Option<String>,
+    /// POSTED, or VOID once reversed (D18).
+    pub status: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -54,13 +57,14 @@ impl Payment {
             "paymentAccountId": self.payment_account_id,
             "notes": opt(&self.notes),
             "journalEntryId": opt(&self.journal_entry_id),
+            "status": self.status,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         })
     }
 }
 
-const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","status","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Payment> {
     Ok(Payment {
@@ -77,6 +81,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Payment> {
         payment_account_id: r.try_get("paymentAccountId")?,
         notes: r.try_get("notes")?,
         journal_entry_id: r.try_get("journalEntryId")?,
+        status: r.try_get("status")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
     })
@@ -253,4 +258,38 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     let p = find_one(&mut tx, &id).await?;
     tx.commit().await?;
     Ok(p)
+}
+
+/// D18: voids a payment. Its journal entry is reversed (dated `today`), the invoice or bill
+/// takes the amount back as outstanding — PAID returns to POSTED — and the payment row is
+/// kept, marked VOID, so the history stays complete. All in one transaction.
+pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Payment> {
+    let mut tx = db.begin().await?;
+    let p = find_one(&mut tx, id).await?;
+    if p.status == "VOID" {
+        return Err(AppError::bad_request("Payment is already voided"));
+    }
+    if let Some(je) = &p.journal_entry_id {
+        entries::reverse(&mut tx, je, today).await?;
+    }
+    if let Some(iid) = &p.invoice_id {
+        let inv = invoices::load_any(&mut tx, iid).await?;
+        let paid = inv.amount_paid.checked_sub(p.amount).ok_or_else(overflow)?.max(Money::ZERO);
+        let status = if inv.status == PAID && paid < inv.total_amount { invoices::POSTED } else { inv.status.as_str() };
+        invoices::set_paid(&mut tx, &inv, paid, status).await?;
+    }
+    if let Some(bid) = &p.bill_id {
+        let b = bills::find_one(&mut tx, bid).await?;
+        let paid = b.amount_paid.checked_sub(p.amount).ok_or_else(overflow)?.max(Money::ZERO);
+        let status = if b.status == "PAID" && paid < b.total_amount { "POSTED" } else { b.status.as_str() };
+        bills::set_paid(&mut tx, &b.id, paid, status).await?;
+    }
+    sqlx::query(r#"UPDATE "payments" SET "status" = 'VOID', "updatedAt" = ?1 WHERE "id" = ?2"#)
+        .bind(now_iso())
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    let out = find_one(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(out)
 }

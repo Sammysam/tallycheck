@@ -274,6 +274,23 @@ recommendations without answering each one individually; revisit any of them on 
   once any user exists and from any address that is not loopback, so a LAN client can never
   claim a fresh install. The check and insert share the writer transaction. Audited as
   "Created the first administrator". `ADMIN_USERNAME`/`ADMIN_PASSWORD` and `create-admin` still work.
+- **D18 Void a payment** (requested by the user 2026-10-20). The reference could not undo a
+  payment, although voiding a paid invoice told the user to "reverse the payment first".
+  `POST /api/payments/:id/void` (permission `payments`, 201) reverses the payment's entry dated
+  today, takes the amount off the invoice's or bill's `amountPaid` (PAID → POSTED) and marks the
+  payment `status` VOID (new column, default POSTED; payments JSON gains `status`). The row is
+  kept. One transaction; a second void is 400 "Payment is already voided". Audited as "Voided a
+  payment". `POST /api/ledger/entries/:id/reverse` now refuses an entry posted by an invoice,
+  bill, expense, payment or payroll run (400 "This entry was posted by a payment. Void or unpost
+  it from that screen instead."), since reversing it there left the document out of step.
+- **D19 Books lock date** (requested by the user 2026-10-20). Settings key `booksLockedThrough`.
+  `ledger::entries::insert` — the one path every posting and reversal takes — refuses any entry
+  dated on or before it (400 "The books are locked up to and including YYYY-MM-DD. …"), so it
+  covers documents, payroll and manual entries alike. Voids and unposts are dated today, so a
+  locked period is corrected in the open one. `GET /api/books/lock` (any signed-in user) →
+  `{lockedThrough}`; `PUT /api/books/lock` `{lockedThrough: "YYYY-MM-DD" | null}` is Admin only
+  (403 otherwise), the date may not be after today, audited as "Changed the books lock date"
+  with "Locked through …" / "Unlocked". Shown and changed under Settings → Lock the books.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

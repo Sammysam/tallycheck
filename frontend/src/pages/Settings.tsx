@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
+import BooksLock from '../components/BooksLock';
 
 const emptyForm = { signatoryName: '', signatoryTitle: '' };
 
@@ -82,6 +83,8 @@ export default function Settings() {
           </form>
         </div>
       )}
+
+      <BooksLock />
     </div>
   );
 }

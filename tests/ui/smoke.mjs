@@ -689,6 +689,35 @@ try {
     await shot('26-backup');
   });
 
+  await check('Payments page voids a payment and the invoice is owed again (D18)', async () => {
+    await go('/payments');
+    await rowAction('PAY-000001', 'Void');
+    await waitFor(`!!document.querySelector('[role=dialog]')?.innerText.includes('PAY-000001')`, 'confirm dialog');
+    await clickText('Void payment');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('PAY-000001') && tr.innerText.includes('VOID'))`, 'payment marked VOID');
+    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-9000');
+    if (inv.status !== 'POSTED' || inv.amountPaid !== '0.00') throw new Error(`invoice is ${inv.status} with ${inv.amountPaid} paid`);
+    await shot('27-payment-void');
+  });
+
+  await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {
+    await go('/settings');
+    await waitFor(`document.body.innerText.includes('not locked')`, 'lock card');
+    await fillDates('2026-04-30');
+    await clickText('Lock');
+    await waitFor(`document.querySelector('[data-testid=lock-status]')?.innerText.includes('30 April 2026')`, 'locked');
+    const cash = (await api('GET', '/api/accounts')).body.find((a) => a.code === '1000').id;
+    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-9000');
+    const late = await api('POST', '/api/payments', { type: 'AR', invoiceId: inv.id, date: '2026-04-30', amount: 1, paymentMethod: 'CASH', paymentAccountId: cash });
+    if (late.status !== 400 || !String(late.body.message).startsWith('The books are locked up to and including 2026-04-30'))
+      throw new Error(`payment on the lock date answered ${late.status} ${JSON.stringify(late.body)}`);
+    await shot('28-books-locked');
+    await clickText('Unlock');
+    await waitFor(`!!document.querySelector('[role=dialog]')`, 'unlock confirmation');
+    await evaluate(`document.querySelector('[role=dialog] .btn-primary').click()`);
+    await waitFor(`document.querySelector('[data-testid=lock-status]')?.innerText.includes('not locked')`, 'unlocked');
+  });
+
   await check('second login goes through 2FA verify', async () => {
     await evaluate(`localStorage.removeItem('accessToken')`);
     await go('/login');

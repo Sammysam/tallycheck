@@ -211,6 +211,9 @@ pub fn summarize(method: &str, path: &str) -> String {
     if resource == "settings" {
         return "Updated company settings".into();
     }
+    if resource == "books" && last == "lock" {
+        return "Changed the books lock date".into();
+    }
 
     if resource == "payroll" && at(1) == Some("runs") {
         match last {

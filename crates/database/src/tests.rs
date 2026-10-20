@@ -19,7 +19,7 @@ const PG_CONSTRAINTS: &str = include_str!("../tests/fixtures/reference_pg_constr
 const PG_INDEXES: &str = include_str!("../tests/fixtures/reference_pg_indexes.txt");
 
 /// Columns this project adds on purpose (approved deviations), appended after the reference's.
-const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[("bills", "amountPaid", true)]; // D13
+const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[("bills", "amountPaid", true), ("payments", "status", true)]; // D13, D18
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =
