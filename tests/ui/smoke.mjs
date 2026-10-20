@@ -434,7 +434,7 @@ try {
     await send('Input.insertText', { text: '3' });
     await evaluate(`(() => { const nums = document.querySelectorAll('form input[type=number]'); nums[1].focus(); return true; })()`);
     await send('Input.insertText', { text: '12.5' });
-    await pick(1, '6000');
+    await pick(2, '6000');
     // The reference rejects an empty due date (IsDateFormat on ""), so the form needs one too.
     await fillDates('2026-04-03', true);
     await clickText('Save Bill');
@@ -909,6 +909,48 @@ try {
     if (inv.status !== 'PAID') throw new Error('the withholding should complete the payment, invoice is ' + inv.status);
     const ret = (await api('GET', '/api/reports/tax?dateFrom=2026-01-01&dateTo=2026-12-31')).body;
     if (ret.withholdingTotals.withheldByCustomers !== 50) throw new Error('return shows ' + JSON.stringify(ret.withholdingTotals));
+  });
+
+  await check('A USD invoice from the form, paid at a better rate: an exchange gain (D30)', async () => {
+    await go('/invoices');
+    await clickText('+ New Invoice');
+    await waitFor(`!!document.querySelector('select[aria-label="Currency"]')`, 'currency picker');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Currency"]');
+      sel.value = 'USD'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`!!document.querySelector('input[aria-label="Exchange rate"]')`, 'rate field');
+    await type('input[aria-label="Exchange rate"]', '300');
+    // No tax on this one: switch the line's default VAT off.
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Tax for line 1"]');
+      if (sel) { sel.value = ''; sel.dispatchEvent(new Event('change', { bubbles: true })); } return true; })()`);
+    await type('input[placeholder="Name as it should print"]', 'US Buyer');
+    await type('input[placeholder="Item description"]', 'Export order');
+    await evaluate(`(() => { const el = document.querySelectorAll('.inv-sheet input[type=number]')[1]; el.focus(); el.select(); return true; })()`);
+    await send('Input.insertText', { text: '100' });
+    await waitFor(`[...document.querySelectorAll('.inv-sheet th')].some((th) => th.textContent.includes('(USD)'))`, 'USD columns');
+    await shot('34-usd-invoice');
+    await clickText('Save Invoice');
+    await waitFor(`document.body.innerText.includes('US Buyer')`, 'USD invoice listed');
+    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.billToName === 'US Buyer');
+    if (inv.currency !== 'USD' || inv.baseTotal !== '30000.00') throw new Error(`invoice ${inv.currency} ${inv.baseTotal}`);
+    await api('POST', `/api/invoices/${inv.id}/post`);
+
+    await go('/payments');
+    await clickText('+ Record Payment');
+    await waitFor(`[...(document.querySelectorAll('form select')[1]?.options ?? [])].some((o) => o.textContent.includes('US Buyer'))`, 'USD invoice option');
+    await pick(1, 'US Buyer');
+    await waitFor(`document.querySelector('input[aria-label="Payment exchange rate"]')?.value === '300'`, 'rate starts at the invoice rate');
+    await type('input[placeholder="Amount"]', '100');
+    await type('input[aria-label="Payment exchange rate"]', '310');
+    await pick(3, '1000');
+    await fillDates('2026-10-02');
+    await clickText('Record Payment');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('31,000.00'))`, 'payment in the books at 310');
+    const paid = (await api('GET', '/api/invoices')).body.data.find((i) => i.billToName === 'US Buyer');
+    if (paid.status !== 'PAID') throw new Error('USD invoice is ' + paid.status);
+    const tb = (await api('GET', '/api/ledger/trial-balance')).body;
+    const fx = tb.find((r) => r.account.code === '7900');
+    if (!fx || fx.balance !== -1000) throw new Error('exchange account ' + JSON.stringify(fx && fx.balance));
+    await shot('35-fx-payment');
   });
 
   await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {

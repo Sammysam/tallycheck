@@ -5,11 +5,12 @@ import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
-import { money } from '../lib/money';
+import { money, moneyIn } from '../lib/money';
+import CurrencyPicker from '../components/CurrencyPicker';
 import { region } from '../lib/region';
 import { lineCodes, summarize, useTaxCodes } from '../lib/taxes';
 
-interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; totalAmount: number; status: string }
+interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; totalAmount: number; status: string; currency?: string | null }
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const emptyLine = () => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId: '', taxCodeId: region().defaultPurchaseTax });
@@ -27,7 +28,7 @@ export default function Bills() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, lines: [emptyLine()] });
+  const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', lines: [emptyLine()] });
   const taxCodes = useTaxCodes();
   // D26: what the bill will total, worked out as the server will.
   const summary = summarize(
@@ -59,9 +60,15 @@ export default function Bills() {
     setError('');
     try {
       const { lines, ...rest } = form;
-      await api.post('/bills', { ...rest, lines: lines.map(({ _key, taxCodeId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined })) });
+      const { currency, exchangeRate, ...doc } = rest;
+      await api.post('/bills', {
+        ...doc,
+        currency: currency || undefined,
+        exchangeRate: currency ? Number(exchangeRate) : undefined,
+        lines: lines.map(({ _key, taxCodeId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined })),
+      });
       setShowForm(false);
-      setForm({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, lines: [emptyLine()] });
+      setForm({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', lines: [emptyLine()] });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to save bill');
@@ -73,7 +80,6 @@ export default function Bills() {
     catch (err: any) { alert(err?.response?.data?.message ?? 'Action failed'); }
   };
 
-  const fmt = (v: number) => money(Number(v));
 
   return (
     <div>
@@ -92,6 +98,10 @@ export default function Bills() {
               </select>
               <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
               <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+            </div>
+            <div style={{ maxWidth: 520 }}>
+              <CurrencyPicker compact currency={form.currency} rate={form.exchangeRate}
+                onChange={(currency, exchangeRate) => setForm({ ...form, currency, exchangeRate })} />
             </div>
             <div>
               <div className="grid gap-2 mb-1" style={{ gridTemplateColumns: taxCodes.length ? '3fr 80px 100px 2fr 1.4fr' : '3fr 80px 100px 2fr' }}>
@@ -128,8 +138,11 @@ export default function Bills() {
                 </label>
               ) : <span />}
               <span className="tabular-nums text-gray-700">
-                {summary.tax !== 0 && <>Subtotal {fmt(summary.subtotal)} · Tax {fmt(summary.tax)} · </>}
-                <strong>Total {fmt(summary.total)}</strong>
+                {summary.tax !== 0 && <>Subtotal {moneyIn(summary.subtotal, form.currency)} · Tax {moneyIn(summary.tax, form.currency)} · </>}
+                <strong>Total {moneyIn(summary.total, form.currency)}</strong>
+                {form.currency && Number(form.exchangeRate) > 0 && (
+                  <span className="text-xs text-gray-500"> ≈ {money(Math.round(summary.total * Number(form.exchangeRate) * 100) / 100)}</span>
+                )}
               </span>
             </div>
             <div className="flex gap-2 pt-1">
@@ -144,7 +157,7 @@ export default function Bills() {
         { header: '#',       accessor: 'billNumber' },
         { header: 'Vendor',  accessor: (r) => r.vendor?.name ?? '—' },
         { header: 'Date',    accessor: 'date' },
-        { header: 'Amount',  accessor: (r) => fmt(r.totalAmount) },
+        { header: 'Amount',  accessor: (r) => moneyIn(Number(r.totalAmount), r.currency) },
         { header: 'Status',  accessor: (r) => <StatusBadge status={r.status} /> },
         { header: 'Actions', accessor: (r) => (
           <div className="flex gap-2">

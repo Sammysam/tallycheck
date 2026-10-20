@@ -11,6 +11,8 @@
 //! voided documents never count. Lines without tax are on their own row ("No tax code").
 //! Net tax = output tax − input tax: payable when positive, reclaimable when negative.
 //!
+//! Foreign-currency documents (D30) are converted at their own rate, as their entries were.
+//!
 //! Withholding (D27): tax customers held back from their payments (a credit to claim) and tax
 //! held back from vendors (owed to the tax office), per withholding code, by payment date.
 
@@ -26,6 +28,20 @@ fn rate_json(rate: i64) -> Value {
     serde_json::from_str(text.trim_end_matches('0').trim_end_matches('.')).unwrap_or(json!(0))
 }
 
+/// D30: a document-currency amount in the home currency at `rate` (hundred-millionths),
+/// rounded as the document's entry was.
+fn to_base(amount: Money, rate: i64) -> AppResult<Money> {
+    const ONE: i128 = 100_000_000;
+    if i128::from(rate) == ONE {
+        return Ok(amount);
+    }
+    let step = i128::from(app_core::money::rounding_step());
+    let (n, d) = (i128::from(amount.cents()) * i128::from(rate), ONE * step);
+    let (q, r) = (n / d, n % d);
+    let units = if 2 * r.abs() >= d { q + n.signum() } else { q };
+    i64::try_from(units * step).map(Money::from_cents).map_err(|_| overflow())
+}
+
 fn overflow() -> AppError {
     AppError::internal("tax return overflow")
 }
@@ -34,39 +50,38 @@ fn overflow() -> AppError {
 const MOVEMENTS: &str = r#"
 SELECT 'S' AS "side", 'I:' || l."id" AS "line", dt."taxCodeId" AS "code",
        CASE WHEN i."pricesIncludeTax" = 1 THEN l."amount" - l."taxAmount" ELSE l."amount" END AS "net",
-       COALESCE(dt."taxAmount", 0) AS "tax"
+       COALESCE(dt."taxAmount", 0) AS "tax", i."exchangeRate" AS "rate"
   FROM "invoice_lines" l JOIN "invoices" i ON i."id" = l."invoiceId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'INVOICE_LINE' AND dt."sourceId" = l."id"
  WHERE i."status" IN ('POSTED', 'PAID') AND (?1 IS NULL OR i."date" >= ?1) AND (?2 IS NULL OR i."date" <= ?2)
 UNION ALL
-SELECT 'S', 'N:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0)
-  FROM "credit_notes" n
+SELECT 'S', 'N:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0), ni."exchangeRate"
+  FROM "credit_notes" n JOIN "invoices" ni ON ni."id" = n."invoiceId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'CREDIT_NOTE' AND dt."sourceId" = n."id"
  WHERE n."type" = 'AR' AND n."status" = 'POSTED' AND (?1 IS NULL OR n."date" >= ?1) AND (?2 IS NULL OR n."date" <= ?2)
 UNION ALL
 SELECT 'P', 'B:' || l."id", dt."taxCodeId",
        CASE WHEN b."pricesIncludeTax" = 1 THEN l."amount" - l."taxAmount" ELSE l."amount" END,
-       COALESCE(dt."taxAmount", 0)
+       COALESCE(dt."taxAmount", 0), b."exchangeRate"
   FROM "bill_lines" l JOIN "bills" b ON b."id" = l."billId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'BILL_LINE' AND dt."sourceId" = l."id"
  WHERE b."status" IN ('POSTED', 'PAID') AND (?1 IS NULL OR b."date" >= ?1) AND (?2 IS NULL OR b."date" <= ?2)
 UNION ALL
-SELECT 'P', 'E:' || e."id", dt."taxCodeId", e."amount" - e."taxAmount", COALESCE(dt."taxAmount", 0)
+SELECT 'P', 'E:' || e."id", dt."taxCodeId", e."amount" - e."taxAmount", COALESCE(dt."taxAmount", 0), 100000000
   FROM "expenses" e
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'EXPENSE' AND dt."sourceId" = e."id"
  WHERE e."status" = 'POSTED' AND (?1 IS NULL OR e."date" >= ?1) AND (?2 IS NULL OR e."date" <= ?2)
 UNION ALL
-SELECT 'P', 'D:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0)
-  FROM "credit_notes" n
+SELECT 'P', 'D:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0), nb."exchangeRate"
+  FROM "credit_notes" n JOIN "bills" nb ON nb."id" = n."billId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'CREDIT_NOTE' AND dt."sourceId" = n."id"
  WHERE n."type" = 'AP' AND n."status" = 'POSTED' AND (?1 IS NULL OR n."date" >= ?1) AND (?2 IS NULL OR n."date" <= ?2)"#;
 
 const WITHHELD: &str = r#"
-SELECT p."type" AS "side", p."withholdingTaxCodeId" AS "code", SUM(p."withholdingAmount") AS "amount"
+SELECT p."type" AS "side", p."withholdingTaxCodeId" AS "code", p."withholdingAmount" AS "amount", p."exchangeRate" AS "rate"
   FROM "payments" p
  WHERE p."status" = 'POSTED' AND p."withholdingAmount" > 0
-   AND (?1 IS NULL OR p."date" >= ?1) AND (?2 IS NULL OR p."date" <= ?2)
- GROUP BY p."type", p."withholdingTaxCodeId""#;
+   AND (?1 IS NULL OR p."date" >= ?1) AND (?2 IS NULL OR p."date" <= ?2)"#;
 
 #[derive(Default, Clone, Copy)]
 struct Sums {
@@ -122,8 +137,9 @@ pub async fn tax_return(conn: &mut SqliteConnection, date_from: &str, date_to: &
         let side: String = r.try_get("side")?;
         let line: String = r.try_get("line")?;
         let code: Option<String> = r.try_get("code")?;
-        let net = Money::from_cents(r.try_get("net")?);
-        let tax = Money::from_cents(r.try_get("tax")?);
+        let rate: i64 = r.try_get("rate")?;
+        let net = to_base(Money::from_cents(r.try_get("net")?), rate)?;
+        let tax = to_base(Money::from_cents(r.try_get("tax")?), rate)?;
         let row = by_code.entry(code).or_default();
         row.add_net(&side, net)?;
         row.add_tax(&side, tax)?;
@@ -161,7 +177,7 @@ pub async fn tax_return(conn: &mut SqliteConnection, date_from: &str, date_to: &
     for r in sqlx::query(WITHHELD).bind(from).bind(to).fetch_all(&mut *conn).await? {
         let side: String = r.try_get("side")?;
         let code: Option<String> = r.try_get("code")?;
-        let amount = Money::from_cents(r.try_get("amount")?);
+        let amount = to_base(Money::from_cents(r.try_get("amount")?), r.try_get("rate")?)?;
         let slot = withheld.entry(code.unwrap_or_default()).or_insert((Money::ZERO, Money::ZERO));
         if side == "AR" {
             slot.0 = add(slot.0, amount)?;

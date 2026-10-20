@@ -49,6 +49,8 @@ pub struct CreditNote {
     /// The invoice or bill number, and the customer or vendor name, for lists.
     pub document_number: Option<String>,
     pub party_name: Option<String>,
+    /// D30: the document's currency (None = home); `amount` is in it.
+    pub currency: Option<String>,
 }
 
 impl CreditNote {
@@ -61,6 +63,7 @@ impl CreditNote {
             "billId": opt(&self.bill_id),
             "documentNumber": opt(&self.document_number),
             "partyName": opt(&self.party_name),
+            "currency": opt(&self.currency),
             "date": self.date,
             "reason": self.reason,
             "amount": money_str(self.amount),
@@ -79,7 +82,8 @@ impl CreditNote {
 const SELECT: &str = r#"SELECT n."id", n."noteNumber", n."type", n."invoiceId", n."billId", n."date", n."reason", n."amount",
        n."accountId", n."status", n."journalEntryId", n."createdById", n."taxCodeId", n."taxAmount", n."createdAt", n."updatedAt",
        COALESCE(i."invoiceNumber", b."billNumber") AS "documentNumber",
-       COALESCE(NULLIF(c."name", ''), i."billToName", v."name") AS "partyName"
+       COALESCE(NULLIF(c."name", ''), i."billToName", v."name") AS "partyName",
+       COALESCE(i."currency", b."currency") AS "currency"
   FROM "credit_notes" n
   LEFT JOIN "invoices" i ON i."id" = n."invoiceId"
   LEFT JOIN "customers" c ON c."id" = i."customerId"
@@ -106,6 +110,7 @@ fn from_row(r: &SqliteRow) -> AppResult<CreditNote> {
         updated_at: r.try_get("updatedAt")?,
         document_number: r.try_get("documentNumber")?,
         party_name: r.try_get("partyName")?,
+        currency: r.try_get("currency")?,
     })
 }
 
@@ -166,6 +171,10 @@ struct Target {
     paid: Money,
     credited: Money,
     outstanding: Money,
+    /// D30: the document's rate, credits so far as booked, and what is owed as booked.
+    rate: i64,
+    base_credited: Money,
+    base_outstanding: Money,
 }
 
 async fn target(conn: &mut SqliteConnection, kind: &str, id: &str, scope: &Scope) -> AppResult<Target> {
@@ -173,33 +182,46 @@ async fn target(conn: &mut SqliteConnection, kind: &str, id: &str, scope: &Scope
         let inv = invoices::find_one(conn, id, scope).await?;
         Ok(Target {
             outstanding: inv.outstanding()?,
+            base_outstanding: inv.base_outstanding()?,
             number: inv.invoice_number,
             date: inv.date,
             status: inv.status,
             total: inv.total_amount,
             paid: inv.amount_paid,
             credited: inv.amount_credited,
+            rate: inv.exchange_rate,
+            base_credited: inv.base_amount_credited,
         })
     } else {
         let b = bills::find_one(conn, id).await?;
         Ok(Target {
             outstanding: b.outstanding()?,
+            base_outstanding: b.base_outstanding()?,
             number: b.bill_number,
             date: b.date,
             status: b.status,
             total: b.total_amount,
             paid: b.amount_paid,
             credited: b.amount_credited,
+            rate: b.exchange_rate,
+            base_credited: b.base_amount_credited,
         })
     }
 }
 
-async fn set_credited(tx: &mut database::Tx, kind: &str, id: &str, t: &Target, credited: Money) -> AppResult<()> {
+async fn set_credited(
+    tx: &mut database::Tx,
+    kind: &str,
+    id: &str,
+    t: &Target,
+    credited: Money,
+    base_credited: Money,
+) -> AppResult<()> {
     let status = invoices::settled_status(&t.status, t.total, t.paid, credited)?;
     if kind == AR {
-        invoices::set_credited(tx, id, credited, status).await
+        invoices::set_credited(tx, id, credited, base_credited, status).await
     } else {
-        bills::set_credited(tx, id, credited, status).await
+        bills::set_credited(tx, id, credited, base_credited, status).await
     }
 }
 
@@ -252,22 +274,31 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
         Some(code) => crate::tax::line_tax(&mut tx, code, dto.amount, true).await?,
         None => (Vec::new(), Money::ZERO),
     };
-    let net = dto.amount.checked_sub(tax).ok_or_else(overflow)?;
+    // D30: in the home currency at the document's own rate, so no exchange difference arises;
+    // a note that clears the document takes exactly what is left as booked.
+    let base_amount =
+        if dto.amount == t.outstanding { t.base_outstanding } else { crate::fx::to_base(dto.amount, t.rate)? };
+    let mut base_parts = Vec::new();
+    for p in &parts {
+        base_parts.push(crate::tax::TaxPart { amount: crate::fx::to_base(p.amount, t.rate)?, ..p.clone() });
+    }
+    let base_tax = base_parts.iter().try_fold(Money::ZERO, |s, p| s.checked_add(p.amount)).ok_or_else(overflow)?;
+    let net = base_amount.checked_sub(base_tax).ok_or_else(overflow)?;
     let number = counters::next_formatted(&mut tx, prefix, 6).await?;
     let id = new_id();
     let mut lines = if kind == AR {
         vec![
             NewLine { account_id: account.id.clone(), debit: net, credit: Money::ZERO, description: None },
-            NewLine { account_id: control.id, debit: Money::ZERO, credit: dto.amount, description: None },
+            NewLine { account_id: control.id, debit: Money::ZERO, credit: base_amount, description: None },
         ]
     } else {
         vec![
-            NewLine { account_id: control.id, debit: dto.amount, credit: Money::ZERO, description: None },
+            NewLine { account_id: control.id, debit: base_amount, credit: Money::ZERO, description: None },
             NewLine { account_id: account.id.clone(), debit: Money::ZERO, credit: net, description: None },
         ]
     };
     // D27: each part of the tax back to its own code's account.
-    for (account_id, part) in crate::tax::by_account(&mut tx, parts.clone(), kind == AR).await? {
+    for (account_id, part) in crate::tax::by_account(&mut tx, base_parts, kind == AR).await? {
         let (debit, credit) = if kind == AR { (part, Money::ZERO) } else { (Money::ZERO, part) };
         lines.push(NewLine { account_id, debit, credit, description: Some("Tax".into()) });
     }
@@ -284,15 +315,16 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
     )
     .await?;
     let credited = t.credited.checked_add(dto.amount).ok_or_else(overflow)?;
-    set_credited(&mut tx, kind, &dto.document_id, &t, credited).await?;
+    let base_credited = t.base_credited.checked_add(base_amount).ok_or_else(overflow)?;
+    set_credited(&mut tx, kind, &dto.document_id, &t, credited, base_credited).await?;
 
     let now = now_iso();
     let (invoice_id, bill_id) =
         if kind == AR { (Some(dto.document_id.clone()), None) } else { (None, Some(dto.document_id.clone())) };
     sqlx::query(
         r#"INSERT INTO "credit_notes" ("id","noteNumber","type","invoiceId","billId","date","reason","amount","accountId",
-             "status","journalEntryId","createdById","createdAt","updatedAt","taxCodeId","taxAmount")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'POSTED',?10,?11,?12,?12,?13,?14)"#,
+             "status","journalEntryId","createdById","createdAt","updatedAt","taxCodeId","taxAmount","baseAmount")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'POSTED',?10,?11,?12,?12,?13,?14,?15)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -308,6 +340,7 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
     .bind(&now)
     .bind(&dto.tax_code_id)
     .bind(tax.cents())
+    .bind(base_amount.cents())
     .execute(&mut *tx)
     .await?;
     crate::tax::save_parts(&mut tx, "CREDIT_NOTE", &id, &parts).await?;
@@ -329,7 +362,12 @@ pub async fn void(db: &Db, kind: &str, id: &str, scope: &Scope, today: &str) -> 
     let doc_id = note.invoice_id.as_deref().or(note.bill_id.as_deref()).unwrap_or_default().to_string();
     let t = target(&mut tx, kind, &doc_id, scope).await?;
     let credited = t.credited.checked_sub(note.amount).ok_or_else(overflow)?.max(Money::ZERO);
-    set_credited(&mut tx, kind, &doc_id, &t, credited).await?;
+    let booked: i64 = sqlx::query_scalar(r#"SELECT "baseAmount" FROM "credit_notes" WHERE "id" = ?1"#)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+    let base_credited = t.base_credited.checked_sub(Money::from_cents(booked)).ok_or_else(overflow)?.max(Money::ZERO);
+    set_credited(&mut tx, kind, &doc_id, &t, credited, base_credited).await?;
     sqlx::query(r#"UPDATE "credit_notes" SET "status" = 'VOID', "updatedAt" = ?1 WHERE "id" = ?2"#)
         .bind(now_iso())
         .bind(id)

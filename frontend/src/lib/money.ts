@@ -42,3 +42,16 @@ export const compactAmount = (v: number) => {
     return String(v);
   }
 };
+
+/**
+ * D30: an amount in a document's own currency ("USD 110.00"); the home currency when `currency`
+ * is empty or the home code.
+ */
+export const moneyIn = (v: number, currency?: string | null) => {
+  if (!currency || currency === region().currency) return money(v);
+  try {
+    return new Intl.NumberFormat(region().locale, { style: 'currency', currency }).format(Number(v) || 0);
+  } catch {
+    return `${currency} ${(Number(v) || 0).toFixed(2)}`;
+  }
+};

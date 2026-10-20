@@ -2,7 +2,8 @@
 //!
 //! What a customer was charged and what they paid, in date order with a running balance:
 //! posted invoices (POSTED or PAID; drafts and voided invoices never count) less posted
-//! customer payments (with any tax the customer withheld, D27) and posted credit notes (voided ones never count). The balance brought
+//! customer payments (with any tax the customer withheld, D27) — all in the home currency as
+//! booked, so foreign-currency invoices (D30) are shown at the amounts the ledger holds and posted credit notes (voided ones never count). The balance brought
 //! forward covers everything before `date_from`; with no end date the closing balance equals
 //! what the customer still owes on their open invoices. A user without `invoices:all` sees
 //! only invoices they created, as on the Invoices page.
@@ -35,15 +36,15 @@ fn overflow() -> AppError {
 const MOVEMENTS: &str = r#"
 SELECT * FROM (
   SELECT i."date" AS "date", 'INVOICE' AS "kind", 0 AS "ord", i."invoiceNumber" AS "number", i."poNumber" AS "reference",
-         i."dueDate" AS "dueDate", i."totalAmount" AS "charge", 0 AS "credit"
+         i."dueDate" AS "dueDate", i."baseTotal" AS "charge", 0 AS "credit"
     FROM "invoices" i
    WHERE i."customerId" = ?1 AND i."status" IN ('POSTED', 'PAID') AND (?2 = 1 OR i."createdById" IS ?3)
   UNION ALL
-  SELECT p."date", 'PAYMENT', 1, p."paymentNumber", i."invoiceNumber", NULL, 0, p."amount" + p."withholdingAmount"
+  SELECT p."date", 'PAYMENT', 1, p."paymentNumber", i."invoiceNumber", NULL, 0, p."baseSettled"
     FROM "payments" p JOIN "invoices" i ON i."id" = p."invoiceId"
    WHERE p."type" = 'AR' AND p."status" = 'POSTED' AND i."customerId" = ?1 AND (?2 = 1 OR i."createdById" IS ?3)
   UNION ALL
-  SELECT n."date", 'CREDIT_NOTE', 2, n."noteNumber", i."invoiceNumber", NULL, 0, n."amount"
+  SELECT n."date", 'CREDIT_NOTE', 2, n."noteNumber", i."invoiceNumber", NULL, 0, n."baseAmount"
     FROM "credit_notes" n JOIN "invoices" i ON i."id" = n."invoiceId"
    WHERE n."type" = 'AR' AND n."status" = 'POSTED' AND i."customerId" = ?1 AND (?2 = 1 OR i."createdById" IS ?3)
 ) ORDER BY "date", "ord", "number""#;

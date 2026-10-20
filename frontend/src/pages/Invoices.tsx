@@ -9,7 +9,7 @@ import ActionMenu from '../components/ActionMenu';
 import { openInvoicePdf, openInvoiceTab, previewInvoice, printInvoice, type InvoiceSettings } from '../utils/invoicePdf';
 import InvoiceSheetForm, { type SheetPayload } from '../components/InvoiceSheetForm';
 import { useAuth } from '../contexts/AuthContext';
-import { money } from '../lib/money';
+import { moneyIn } from '../lib/money';
 import { useTaxCodes } from '../lib/taxes';
 
 interface Invoice {
@@ -23,6 +23,8 @@ interface Invoice {
   totalAmount: number;
   amountPaid?: number;
   amountCredited?: number;
+  /** D30: null for the home currency. */
+  currency?: string | null;
   status: string;
   createdById?: string;
 }
@@ -258,7 +260,6 @@ export default function Invoices() {
     }
   };
 
-  const fmt = (v: number) => money(Number(v));
   // What is still owed: total less payments and credit notes (D21).
   const balanceOf = (r: Invoice) => Number(r.totalAmount) - Number(r.amountPaid ?? 0) - Number(r.amountCredited ?? 0);
   const filtersActive = filters.q !== '' || filters.status !== '' || filters.dateFrom !== '' || filters.dateTo !== '';
@@ -412,9 +413,9 @@ export default function Invoices() {
             { header: 'Customer', accessor: (r) => r.customer?.name || r.billToName || '—' },
             { header: 'Date',     accessor: 'date' },
             { header: 'Due',      accessor: (r) => r.dueDate ?? '—' },
-            { header: 'Amount',   accessor: (r) => fmt(r.totalAmount) },
-            { header: 'Paid',     accessor: (r) => (Number(r.amountPaid ?? 0) > 0 ? fmt(Number(r.amountPaid)) : '—') },
-            { header: 'Balance',  accessor: (r) => (r.status === 'VOID' ? '—' : fmt(balanceOf(r))) },
+            { header: 'Amount',   accessor: (r) => moneyIn(Number(r.totalAmount), r.currency) },
+            { header: 'Paid',     accessor: (r) => (Number(r.amountPaid ?? 0) > 0 ? moneyIn(Number(r.amountPaid), r.currency) : '—') },
+            { header: 'Balance',  accessor: (r) => (r.status === 'VOID' ? '—' : moneyIn(balanceOf(r), r.currency)) },
             { header: 'Status',   accessor: (r) => {
               const options = statusOptions(r.status);
               if (!options.length) return <StatusBadge status={r.status} />;
