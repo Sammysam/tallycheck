@@ -11,6 +11,38 @@
 
 use serde_json::{Number, Value};
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// D29: the company's currency has no minor unit (yen, won, …). Amounts are still held in
+/// hundredths, but every amount the books work out — line totals, tax, conversions — is
+/// rounded to a whole unit, and amounts typed in must be whole. Set from the company's currency
+/// at start-up and whenever it changes.
+static WHOLE_UNITS: AtomicBool = AtomicBool::new(false);
+
+/// ISO 4217 currencies whose minor unit is 0.
+const ZERO_DECIMAL: &[&str] =
+    &["BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "PYG", "RWF", "UGX", "VND", "VUV", "XAF", "XOF", "XPF"];
+/// ISO 4217 currencies with three decimals: amounts in hundredths cannot hold them.
+pub const THREE_DECIMAL: &[&str] = &["BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"];
+
+/// Switches whole-unit rounding on or off for the company's currency code.
+pub fn set_currency(code: &str) {
+    WHOLE_UNITS.store(ZERO_DECIMAL.contains(&code.trim().to_ascii_uppercase().as_str()), Ordering::Relaxed);
+}
+
+/// True when the company's currency has no decimals.
+pub fn whole_units() -> bool {
+    WHOLE_UNITS.load(Ordering::Relaxed)
+}
+
+/// The cents a rounded amount must be a multiple of: 100 for a currency without decimals.
+pub fn rounding_step() -> i64 {
+    if whole_units() {
+        100
+    } else {
+        1
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Money(i64);
@@ -89,9 +121,16 @@ impl Money {
     /// agrees except on rare .xx5 products, e.g. 0.29 × 0.50 = 0.145 → 0.15 here, 0.14 there.
     pub fn line_amount(quantity: Money, unit_price: Money) -> Option<Money> {
         let product = i128::from(quantity.0) * i128::from(unit_price.0); // units of 0.0001
-        let half = if product < 0 { -50 } else { 50 };
-        let cents = (product + half) / 100;
-        i64::try_from(cents).ok().map(Money)
+        let step = 100 * i128::from(rounding_step()); // to the cent, or to a whole unit (D29)
+        let half = if product < 0 { -step / 2 } else { step / 2 };
+        let units = (product + half) / step;
+        i64::try_from(units * i128::from(rounding_step())).ok().map(Money)
+    }
+
+    /// True when the amount can exist in the company's currency (whole units where it has no
+    /// decimals, D29).
+    pub fn fits_currency(self) -> bool {
+        self.0 % rounding_step() == 0
     }
 
     /// `"1234.50"` — the pg/TypeORM rendering of a `numeric(15,2)` column.

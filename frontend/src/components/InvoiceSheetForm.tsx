@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { openInvoicePdf, previewInvoice, printInvoice, type InvoiceSettings } from '../utils/invoicePdf';
 import { amountInWords } from '../utils/amountInWords';
 import { errMsg } from '../api/client';
-import { amount } from '../lib/money';
+import { amount, currencyDigits } from '../lib/money';
 import { company, region } from '../lib/region';
 import { lineCodes, lineParts, summarize, useTaxCodes } from '../lib/taxes';
 
@@ -84,7 +84,8 @@ const fmtDate = (d?: string) => {
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
-const round2 = (n: number) => Number(n.toFixed(2));
+// To the cent, or to a whole unit for a currency without decimals (D29) — as the server rounds.
+const round2 = (n: number) => (currencyDigits() === 0 ? Math.round(n) : Number(n.toFixed(2)));
 
 /** date + n days, as yyyy-mm-dd. */
 const addDays = (date: string, days: number) => {

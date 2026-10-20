@@ -404,6 +404,14 @@ recommendations without answering each one individually; revisit any of them on 
   once) and adds withholding by payment date. Codes in use, or in a group, cannot be deleted.
 - **D28 Dates in the company's style** (2026-10-21): screens print `YYYY-MM-DD` dates with
   `fmtDate` (company locale, e.g. "30 Apr 2026", "Apr 30, 2026"); CSV export keeps ISO dates.
+- **D29 Currencies without decimals** (2026-10-21). Amounts stay in hundredths, but when the
+  company currency has no minor unit (JPY, KRW, VND, … — `app_core::money::ZERO_DECIMAL`) a
+  process-wide switch (`set_currency`, set at start-up and on every `region.currency` save)
+  makes line totals, tax parts and conversions round half-up to whole units, and `IsMoneyNumber`
+  refuses fractional amounts ("…must be a whole amount…"); quantities use `IsQuantity` and keep
+  two decimals. Three-decimal currencies (BHD, IQD, JOD, KWD, LYD, OMR, TND) are refused in
+  settings — hundredths cannot hold them. The switch is global, so tests that turn it on live in
+  their own test binary (`operations/tests/whole_units.rs`).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

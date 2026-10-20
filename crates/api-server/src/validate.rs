@@ -38,8 +38,11 @@ pub enum Rule {
     IsEnum(&'static [&'static str]),
     /// The reference's custom `@IsDateFormat()`: a real calendar date as `YYYY-MM-DD`.
     IsDateFormat,
-    /// `@IsNumber({ maxDecimalPlaces: 2 })`: a finite JSON number with at most two decimals.
+    /// `@IsNumber({ maxDecimalPlaces: 2 })`: a finite JSON number with at most two decimals —
+    /// and, for a currency without decimals, a whole number (D29).
     IsMoneyNumber,
+    /// A quantity: like `IsMoneyNumber` but always allowed two decimals (2.5 hours of yen work).
+    IsQuantity,
     /// `@Min(0)` on a number.
     MinZero,
     /// `@Min(x)` on a number; the text is how JavaScript prints x (e.g. "0.001").
@@ -83,7 +86,8 @@ impl Rule {
             Rule::ArrayUnique => v.as_array().is_some_and(|a| a.iter().enumerate().all(|(i, x)| !a[..i].contains(x))),
             Rule::IsEnum(values) => v.as_str().is_some_and(|s| values.contains(&s)),
             Rule::IsDateFormat => v.as_str().is_some_and(app_core::time::is_date_format),
-            Rule::IsMoneyNumber => app_core::money::Money::from_json(v).is_some(),
+            Rule::IsMoneyNumber => app_core::money::Money::from_json(v).is_some_and(|m| m.fits_currency()),
+            Rule::IsQuantity => app_core::money::Money::from_json(v).is_some(),
             Rule::MinZero => v.as_number().is_some_and(|n| n.as_f64().is_some_and(|x| x >= 0.0)),
             Rule::MinNum(min, _) => v.as_number().is_some_and(|n| n.as_f64().is_some_and(|x| x >= *min)),
             Rule::IsEmail => v.as_str().is_some_and(email::is_email),
@@ -126,7 +130,12 @@ impl Rule {
             Rule::ArrayUnique => format!("All {prop}'s elements must be unique"),
             Rule::IsEnum(values) => format!("{prop} must be one of the following values: {}", values.join(", ")),
             Rule::IsDateFormat => format!("{prop} must be a valid date in YYYY-MM-DD format"),
-            Rule::IsMoneyNumber => format!("{prop} must be a number conforming to the specified constraints"),
+            Rule::IsMoneyNumber if app_core::money::whole_units() => {
+                format!("{prop} must be a whole amount — the company's currency has no decimal places")
+            }
+            Rule::IsMoneyNumber | Rule::IsQuantity => {
+                format!("{prop} must be a number conforming to the specified constraints")
+            }
             Rule::MinZero => format!("{prop} must not be less than 0"),
             Rule::MinNum(_, text) => format!("{prop} must not be less than {text}"),
             Rule::IsEmail => format!("{prop} must be an email"),
@@ -418,7 +427,11 @@ pub fn update_settings(body: Map<String, Value>) -> Result<Vec<(String, String)>
         let value = value.trim();
         let ok = match key.as_str() {
             "region.country" => value.len() == 2 && value.bytes().all(|b| b.is_ascii_uppercase()),
-            "region.currency" => value.len() == 3 && value.bytes().all(|b| b.is_ascii_uppercase()),
+            "region.currency" => {
+                value.len() == 3
+                    && value.bytes().all(|b| b.is_ascii_uppercase())
+                    && !app_core::money::THREE_DECIMAL.contains(&value)
+            }
             "region.locale" => {
                 let mut parts = value.split('-');
                 let lang = parts.next().unwrap_or("");
@@ -440,6 +453,10 @@ pub fn update_settings(body: Map<String, Value>) -> Result<Vec<(String, String)>
         if !ok {
             errors.push(match key.as_str() {
                 "region.country" => "region.country must be a two-letter country code (e.g. LK, GB, US)".to_string(),
+                "region.currency" if app_core::money::THREE_DECIMAL.contains(&value.trim()) => format!(
+                    "{} has three decimal places, which the app cannot keep yet — choose another currency",
+                    value.trim()
+                ),
                 "region.currency" => {
                     "region.currency must be a three-letter currency code (e.g. LKR, USD, EUR)".to_string()
                 }

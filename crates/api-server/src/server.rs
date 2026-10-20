@@ -119,6 +119,10 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
     let secret = app_core::secrets::load_or_create(&config.secrets_dir().join(JWT_SECRET_FILE), JWT_SECRET_LEN)
         .context("loading the JWT signing key")?;
     let files = open_file_store(config)?;
+    // D29: the company's currency decides whether amounts are kept in whole units.
+    if let Some(code) = database::settings::find_all(&db).await?.get("region.currency") {
+        app_core::money::set_currency(code);
+    }
     let added = seed_fresh_install(&db).await.context("creating the chart of accounts")?;
     if added > 0 {
         tracing::info!(added, "fresh install: default chart of accounts created");

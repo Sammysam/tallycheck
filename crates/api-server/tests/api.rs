@@ -2035,3 +2035,16 @@ async fn tax_groups_and_withholding_through_the_api() -> TestResult {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn currencies_with_three_decimals_are_refused() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let r = app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"region.currency": "KWD"}))).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        r.body["message"][0],
+        "KWD has three decimal places, which the app cannot keep yet — choose another currency"
+    );
+    Ok(())
+}
