@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import AuthShell, { PasswordInput } from '../components/AuthShell';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/client';
 
@@ -41,12 +42,10 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm">
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-          <div className="mb-8 text-center">
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">Accounting System</h1>
-            <p className="text-sm text-gray-400 mt-1">Sign in to your account</p>
+    <AuthShell>
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Welcome back</h1>
+            <p className="text-sm text-gray-500 mt-1">Sign in to Cenango Accounting</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -57,19 +56,18 @@ export default function Login() {
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="admin"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                placeholder="Your username"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1.5">Password</label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                 placeholder="••••••••"
               />
             </div>
@@ -81,7 +79,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 px-4 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 bg-orange-600 shadow-sm shadow-orange-600/30 text-white text-sm font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
             >
               {loading && (
                 <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -89,8 +87,6 @@ export default function Login() {
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
-        </div>
-      </div>
-    </div>
+    </AuthShell>
   );
 }

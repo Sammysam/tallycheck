@@ -93,7 +93,7 @@ export default function Employees() {
         </select>
       </div>
 
-      <Table
+      <Table searchable={false}
         data={rows}
         emptyMessage="No employees yet. Add the first one with “+ New Employee”."
         columns={[
