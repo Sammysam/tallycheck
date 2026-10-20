@@ -5,7 +5,7 @@ import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
-import { taxOf, useTaxCodes } from '../lib/taxes';
+import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
 import { money } from '../lib/money';
 
 /**
@@ -247,11 +247,11 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
                 Tax (the amount includes it)
                 <select className="mt-1" value={form.taxCodeId} onChange={(e) => setForm({ ...form, taxCodeId: e.target.value })} aria-label="Tax">
                   <option value="">No tax</option>
-                  {taxCodes.filter((c) => c.isActive || c.id === form.taxCodeId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {lineCodes(taxCodes, form.taxCodeId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {noteTax && Number(form.amount) > 0 && (
                   <span className="block mt-1 font-normal text-gray-500">
-                    {fmt(taxOf(Number(form.amount), noteTax.rate, true))} of tax is reversed with this note.
+                    {fmt(taxInGross(Number(form.amount), noteTax))} of tax is reversed with this note.
                   </span>
                 )}
               </label>

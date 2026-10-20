@@ -388,7 +388,22 @@ recommendations without answering each one individually; revisit any of them on 
   * Settings `tax.defaultSales` / `tax.defaultPurchases` preselect the code on new lines.
     Screens: Administration → Taxes, Reports → Tax Return; invoices with tax print as
     "Tax Invoice" with Subtotal, one row per tax code, and Total (form and PDF alike).
-  * Not built: compound/stacked taxes on one line, withholding tax, country return formats.
+  * Country return formats are not built (the return gives the figures to copy).
+- **D27 Tax groups and withholding tax** (requested by the user 2026-10-21). `tax_codes.kind` is
+  STANDARD, GROUP or WITHHOLDING. A GROUP (`tax_code_components`: ordered standard codes, each
+  optionally compound — charged on the net plus the parts before it) is charged on lines like a
+  standard code; each part is rounded half-up on its own and posts to its own accounts. With
+  prices including tax the net is found from the combined rate, then each part is worked out
+  on it and the last part absorbs the rounding difference. Every taxed line's split is stored in
+  `document_taxes` (sourceType INVOICE_LINE / BILL_LINE / EXPENSE / CREDIT_NOTE); postings and
+  the tax return read it, so later rate or group changes never rewrite saved tax.
+  WITHHOLDING codes are never on lines: a payment may carry `withholdingTaxCodeId` and
+  `withholdingAmount`; money + withheld settles the document; AR: debit the code's sales
+  account (an asset, a tax credit), AP: credit its purchase account (a liability, owed to the
+  tax office). The tax return lists a group's parts on their own rows (totals count each line
+  once) and adds withholding by payment date. Codes in use, or in a group, cannot be deleted.
+- **D28 Dates in the company's style** (2026-10-21): screens print `YYYY-MM-DD` dates with
+  `fmtDate` (company locale, e.g. "30 Apr 2026", "Apr 30, 2026"); CSV export keeps ISO dates.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

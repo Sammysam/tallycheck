@@ -4,7 +4,7 @@ import PageHeader from '../../components/PageHeader';
 import { ReportTable } from '../../components/ReportTable';
 import { sectionRows, type AccountLine } from '../../lib/reportRows';
 import { previousPeriod, samePeriodLastYear } from '../../lib/periods';
-import { fiscalYearStart, todayIso } from '../../lib/region';
+import { fiscalYearStart, fmtDate, todayIso } from '../../lib/region';
 
 interface ProfitLossData {
   revenue: AccountLine[];
@@ -48,7 +48,7 @@ export default function ProfitLoss() {
   };
   useEffect(() => { load(); }, []);
 
-  const head = (r: Range) => `${r.dateFrom} – ${r.dateTo}`;
+  const head = (r: Range) => `${fmtDate(r.dateFrom)} – ${fmtDate(r.dateTo)}`;
   const compareHeader = before && ranBefore ? head(ranBefore) : undefined;
   const cmp = (lines: AccountLine[] | undefined, total: number | undefined) =>
     before ? { lines: lines ?? [], total: total ?? 0 } : undefined;

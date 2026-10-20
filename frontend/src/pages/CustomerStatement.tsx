@@ -4,7 +4,7 @@ import { Printer } from 'lucide-react';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { money } from '../lib/money';
-import { company, fiscalYearStart } from '../lib/region';
+import { company, fiscalYearStart, fmtDate } from '../lib/region';
 
 /** D23: a customer's statement of account — print it, or "Save as PDF" from the print dialog. */
 
@@ -118,11 +118,11 @@ export default function CustomerStatement() {
               </tr>
               {data.lines.map((l) => (
                 <tr key={`${l.type}-${l.number}`}>
-                  <td className="whitespace-nowrap">{l.date}</td>
+                  <td className="whitespace-nowrap"><span data-value={l.date ?? ''}>{fmtDate(l.date)}</span></td>
                   <td>{LABEL[l.type]}</td>
                   <td className="whitespace-nowrap">{l.number}</td>
                   <td>{l.type === 'INVOICE' ? (l.reference ? `PO ${l.reference}` : '') : l.reference ?? ''}</td>
-                  <td className="whitespace-nowrap">{l.dueDate ?? ''}</td>
+                  <td className="whitespace-nowrap">{l.dueDate ? <span data-value={l.dueDate ?? ''}>{fmtDate(l.dueDate)}</span> : ''}</td>
                   <td className="num">{l.charge ? money(l.charge) : ''}</td>
                   <td className="num">{l.credit ? money(l.credit) : ''}</td>
                   <td className="num">{money(l.balance)}</td>

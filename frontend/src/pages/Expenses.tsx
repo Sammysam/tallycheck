@@ -7,7 +7,7 @@ import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { money } from '../lib/money';
 import { region } from '../lib/region';
-import { taxOf, useTaxCodes } from '../lib/taxes';
+import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
 
 interface Expense { id: string; expenseNumber: string; date: string; description: string; amount: number; status: string }
 
@@ -88,13 +88,13 @@ export default function Expenses() {
               {taxCodes.length > 0 && (
                 <select value={form.taxCodeId} onChange={(e) => setForm({ ...form, taxCodeId: e.target.value })} aria-label="Tax">
                   <option value="">No tax</option>
-                  {taxCodes.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {lineCodes(taxCodes).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}
             </div>
             {chosenTax && Number(form.amount) > 0 && (
               <p className="text-xs text-gray-600">
-                The amount includes {chosenTax.name}: {fmt(taxOf(Number(form.amount), chosenTax.rate, true))} tax, reclaimable.
+                The amount includes {chosenTax.name}: {fmt(taxInGross(Number(form.amount), chosenTax))} tax, reclaimable.
               </p>
             )}
             <input placeholder="Receipt URL (optional)" value={form.receiptUrl} onChange={(e) => setForm({ ...form, receiptUrl: e.target.value })} />

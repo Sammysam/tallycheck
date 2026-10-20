@@ -42,6 +42,9 @@ function plainAmount(text: string): string | null {
 }
 
 function cellValue(cell: HTMLTableCellElement): string {
+  // Dates are shown in the local style but exported as YYYY-MM-DD, which Excel reads anywhere.
+  const raw = cell.querySelector<HTMLElement>('[data-value]')?.dataset.value ?? cell.dataset.value;
+  if (raw) return raw;
   const text = (cell.innerText ?? cell.textContent ?? '').replace(/\s+/g, ' ').trim();
   return plainAmount(text) ?? text;
 }

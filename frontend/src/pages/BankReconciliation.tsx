@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
 import { money } from '../lib/money';
+import { fmtDate } from '../lib/region';
 
 /** D22: match a cash or bank account's ledger lines to a bank statement. */
 
@@ -80,7 +81,7 @@ function LineTable({ title, lines, ticked, amount, onToggle, onAll, readOnly }: 
                   <input type="checkbox" aria-label={`Clear ${l.entryNumber}`} checked={ticked.has(l.lineId)} disabled={readOnly}
                     onClick={(e) => e.stopPropagation()} onChange={() => onToggle(l.lineId)} />
                 </td>
-                <td className="px-3 py-1.5 whitespace-nowrap">{l.date}</td>
+                <td className="px-3 py-1.5 whitespace-nowrap"><span data-value={l.date ?? ''}>{fmtDate(l.date)}</span></td>
                 <td className="px-3 py-1.5 whitespace-nowrap">{l.entryNumber}</td>
                 <td className="px-3 py-1.5">{l.description}{l.reference ? <span className="text-gray-500"> · {l.reference}</span> : null}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{fmt(amount(l))}</td>
@@ -220,7 +221,7 @@ export default function BankReconciliation() {
         <div>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 mb-3">
             {[
-              ['Statement date', ws.statementDate],
+              ['Statement date', fmtDate(ws.statementDate)],
               ['Statement balance', fmt(ws.statementBalance)],
               ['Opening (last reconciled)', fmt(ws.openingBalance)],
               ['Cleared balance', fmt(totals.cleared)],
@@ -300,7 +301,7 @@ export default function BankReconciliation() {
               <tbody>
                 {history.map((h) => (
                   <tr key={h.id} className="border-b border-[#efefef] last:border-b-0">
-                    <td className="px-3 py-1.5">{h.statementDate}</td>
+                    <td className="px-3 py-1.5"><span data-value={h.statementDate ?? ''}>{fmtDate(h.statementDate)}</span></td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmt(h.statementBalance)}</td>
                     <td className="px-3 py-1.5"><StatusBadge status={h.status} /></td>
                     <td className="px-3 py-1.5">{h.completedBy ?? '—'}</td>
@@ -343,7 +344,7 @@ export default function BankReconciliation() {
           <p className="text-sm text-gray-800">
             {confirm.kind === 'discard'
               ? 'Throw away this reconciliation and its ticks? Nothing in the ledger changes.'
-              : `Reopen the reconciliation for ${confirm.rec.statementDate}? Its ticks are kept so you can correct them and finish again. Nothing in the ledger changes.`}
+              : `Reopen the reconciliation for ${fmtDate(confirm.rec.statementDate)}? Its ticks are kept so you can correct them and finish again. Nothing in the ledger changes.`}
           </p>
         </Dialog>
       )}

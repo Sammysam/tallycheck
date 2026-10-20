@@ -3,7 +3,7 @@ import api, { errMsg } from '../../api/client';
 import PageHeader from '../../components/PageHeader';
 import { AccountLink, ReportTable, type ReportRow } from '../../components/ReportTable';
 import type { AccountRef } from '../../lib/reportRows';
-import { fiscalYearStart, todayIso } from '../../lib/region';
+import { fiscalYearStart, fmtDate, todayIso } from '../../lib/region';
 
 /**
  * D24: where the cash came from and went, straight from the ledger. Each cash movement is
@@ -66,7 +66,7 @@ export default function CashFlow() {
     <div>
       <PageHeader
         title="Cash Flow"
-        subtitle={data ? `${ran.dateFrom} – ${ran.dateTo} · money in is positive, money out negative` : undefined}
+        subtitle={data ? `${fmtDate(ran.dateFrom)} – ${fmtDate(ran.dateTo)} · money in is positive, money out negative` : undefined}
         action={
           <div className="flex gap-2 items-center">
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="!w-40" aria-label="From" />
@@ -91,14 +91,14 @@ export default function CashFlow() {
       {data && (
         <div className="max-w-3xl space-y-3">
           <ReportTable title="Cash at the start" rows={[
-            { key: 'opening', label: `Cash and bank on ${ran.dateFrom}`, amount: Number(data.openingCash), total: true },
+            { key: 'opening', label: `Cash and bank on ${fmtDate(ran.dateFrom)}`, amount: Number(data.openingCash), total: true },
           ]} />
           <ReportTable title="Operating activities" rows={rows('Operating', data.operating)} />
           <ReportTable title="Investing activities" rows={rows('Investing', data.investing)} />
           <ReportTable title="Financing activities" rows={rows('Financing', data.financing)} />
           <ReportTable title="Summary" rows={[
             { key: 'net', label: 'Net change in cash', amount: Number(data.netChange), total: true },
-            { key: 'closing', label: `Cash and bank on ${ran.dateTo}`, amount: Number(data.closingCash), total: true },
+            { key: 'closing', label: `Cash and bank on ${fmtDate(ran.dateTo)}`, amount: Number(data.closingCash), total: true },
           ]} />
           <p className="text-xs text-gray-500 px-1">
             Each line is the account on the other side of the cash entries. Assets and liabilities count as operating

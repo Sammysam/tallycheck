@@ -248,13 +248,9 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
     }
     let control = accounts::find_by_code(&mut tx, control_code).await?;
     // D26: the tax inside the gross amount goes back to the code's tax account.
-    let (tax, tax_account) = match &dto.tax_code_id {
-        Some(code) => {
-            let c = crate::tax::usable(&mut tx, code).await?;
-            let account = if kind == AR { c.sales_account_id } else { c.purchase_account_id };
-            (crate::tax::tax_of(dto.amount, c.rate, true)?, Some(account))
-        }
-        None => (Money::ZERO, None),
+    let (parts, tax) = match &dto.tax_code_id {
+        Some(code) => crate::tax::line_tax(&mut tx, code, dto.amount, true).await?,
+        None => (Vec::new(), Money::ZERO),
     };
     let net = dto.amount.checked_sub(tax).ok_or_else(overflow)?;
     let number = counters::next_formatted(&mut tx, prefix, 6).await?;
@@ -270,8 +266,9 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
             NewLine { account_id: account.id.clone(), debit: Money::ZERO, credit: net, description: None },
         ]
     };
-    if let (Some(account_id), true) = (tax_account, tax != Money::ZERO) {
-        let (debit, credit) = if kind == AR { (tax, Money::ZERO) } else { (Money::ZERO, tax) };
+    // D27: each part of the tax back to its own code's account.
+    for (account_id, part) in crate::tax::by_account(&mut tx, parts.clone(), kind == AR).await? {
+        let (debit, credit) = if kind == AR { (part, Money::ZERO) } else { (Money::ZERO, part) };
         lines.push(NewLine { account_id, debit, credit, description: Some("Tax".into()) });
     }
     let entry = entries::post(
@@ -313,6 +310,7 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
     .bind(tax.cents())
     .execute(&mut *tx)
     .await?;
+    crate::tax::save_parts(&mut tx, "CREDIT_NOTE", &id, &parts).await?;
     let note = find_one(&mut tx, kind, &id, scope).await?;
     tx.commit().await?;
     Ok(note)

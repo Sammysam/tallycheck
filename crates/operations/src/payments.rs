@@ -6,6 +6,10 @@
 //! * AP: debit 2000 AP, credit the payment account; the bill accumulates `amountPaid` and
 //!   becomes PAID when nothing is outstanding (D13). A DRAFT bill cannot be paid (D14).
 //! * Void (D18): the payment's entry is reversed and the amount is outstanding again.
+//! * Withholding (D27): the payer may hold back tax for the tax office. The amount withheld
+//!   settles the document together with the money paid: on a customer's payment it is a tax
+//!   credit (the withholding code's sales account, an asset); on our payment to a vendor it is
+//!   owed to the tax office (the code's purchase account, a liability).
 
 use crate::invoices;
 use crate::parties::{self, PartyKind};
@@ -35,6 +39,9 @@ pub struct Payment {
     pub payment_account_id: String,
     pub notes: Option<String>,
     pub journal_entry_id: Option<String>,
+    /// D27: tax held back by the payer, and its withholding code.
+    pub withholding_tax_code_id: Option<String>,
+    pub withholding_amount: Money,
     /// POSTED, or VOID once reversed (D18).
     pub status: String,
     pub created_at: String,
@@ -56,6 +63,8 @@ impl Payment {
             "paymentMethod": self.payment_method,
             "paymentAccountId": self.payment_account_id,
             "notes": opt(&self.notes),
+            "withholdingTaxCodeId": opt(&self.withholding_tax_code_id),
+            "withholdingAmount": money_str(self.withholding_amount),
             "journalEntryId": opt(&self.journal_entry_id),
             "status": self.status,
             "createdAt": self.created_at,
@@ -64,7 +73,7 @@ impl Payment {
     }
 }
 
-const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","status","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","status","withholdingTaxCodeId","withholdingAmount","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Payment> {
     Ok(Payment {
@@ -80,6 +89,8 @@ fn from_row(r: &SqliteRow) -> AppResult<Payment> {
         payment_method: r.try_get("paymentMethod")?,
         payment_account_id: r.try_get("paymentAccountId")?,
         notes: r.try_get("notes")?,
+        withholding_tax_code_id: r.try_get("withholdingTaxCodeId")?,
+        withholding_amount: Money::from_cents(r.try_get("withholdingAmount")?),
         journal_entry_id: r.try_get("journalEntryId")?,
         status: r.try_get("status")?,
         created_at: r.try_get("createdAt")?,
@@ -120,6 +131,9 @@ pub struct CreatePayment {
     pub payment_method: String,
     pub payment_account_id: String,
     pub notes: Option<String>,
+    /// D27: tax held back by the payer (0 for none) and its withholding code.
+    pub withholding_tax_code_id: Option<String>,
+    pub withholding_amount: Money,
 }
 
 pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
@@ -131,6 +145,23 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         return Err(AppError::bad_request("billId is required for AP payments"));
     }
     let mut tx = db.begin().await?;
+
+    // D27: what settles the document is the money paid plus any tax withheld.
+    let withholding = match (&dto.withholding_tax_code_id, dto.withholding_amount > Money::ZERO) {
+        (Some(code), true) => {
+            let c = crate::tax::usable(&mut tx, code).await?;
+            if c.kind != crate::tax::WITHHOLDING {
+                return Err(AppError::bad_request(format!("\"{}\" is not a withholding tax code", c.name)));
+            }
+            Some(c)
+        }
+        (None, true) => return Err(AppError::bad_request("Choose the withholding tax code for the amount withheld")),
+        (Some(_), false) => {
+            return Err(AppError::bad_request("Enter the amount withheld, or clear the withholding tax"))
+        }
+        (None, false) => None,
+    };
+    let settled = dto.amount.checked_add(dto.withholding_amount).ok_or_else(overflow)?;
 
     // Validate the referenced documents before touching the ledger.
     let mut invoice = None;
@@ -146,7 +177,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         if balance <= Money::ZERO {
             return Err(AppError::bad_request("Invoice is already fully paid"));
         }
-        if dto.amount > balance {
+        if settled > balance {
             return Err(AppError::bad_request(format!("Payment exceeds the outstanding balance of {balance}")));
         }
         invoice = Some(inv);
@@ -165,7 +196,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         if balance <= Money::ZERO {
             return Err(AppError::bad_request("Bill is already fully paid"));
         }
-        if !is_ar && dto.amount > balance {
+        if !is_ar && settled > balance {
             return Err(AppError::bad_request(format!("Payment exceeds the outstanding balance of {balance}")));
         }
         bill = Some(b);
@@ -185,7 +216,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         ("2000", "PAYMENT_AP", dto.bill_id.clone(), "AP")
     };
     let control = ledger::accounts::find_by_code(&mut tx, control_code).await?;
-    let lines = if is_ar {
+    let mut lines = if is_ar {
         vec![
             NewLine {
                 account_id: dto.payment_account_id.clone(),
@@ -193,11 +224,11 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
                 credit: Money::ZERO,
                 description: None,
             },
-            NewLine { account_id: control.id, debit: Money::ZERO, credit: dto.amount, description: None },
+            NewLine { account_id: control.id, debit: Money::ZERO, credit: settled, description: None },
         ]
     } else {
         vec![
-            NewLine { account_id: control.id, debit: dto.amount, credit: Money::ZERO, description: None },
+            NewLine { account_id: control.id, debit: settled, credit: Money::ZERO, description: None },
             NewLine {
                 account_id: dto.payment_account_id.clone(),
                 debit: Money::ZERO,
@@ -206,6 +237,24 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
             },
         ]
     };
+    if let Some(code) = &withholding {
+        let w = dto.withholding_amount;
+        lines.push(if is_ar {
+            NewLine {
+                account_id: code.sales_account_id.clone(),
+                debit: w,
+                credit: Money::ZERO,
+                description: Some("Tax withheld by the customer".into()),
+            }
+        } else {
+            NewLine {
+                account_id: code.purchase_account_id.clone(),
+                debit: Money::ZERO,
+                credit: w,
+                description: Some("Tax withheld from the vendor".into()),
+            }
+        });
+    }
     let entry = entries::post(
         &mut tx,
         NewEntry {
@@ -222,12 +271,12 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     if is_ar {
         if let Some(inv) = &invoice {
             // Partial payments accumulate — PAID only once the balance is cleared.
-            let paid = inv.amount_paid.checked_add(dto.amount).ok_or_else(overflow)?;
+            let paid = inv.amount_paid.checked_add(settled).ok_or_else(overflow)?;
             let status = invoices::settled_status(&inv.status, inv.total_amount, paid, inv.amount_credited)?;
             invoices::set_paid(&mut tx, inv, paid, status).await?;
         }
     } else if let Some(b) = &bill {
-        let paid = b.amount_paid.checked_add(dto.amount).ok_or_else(overflow)?;
+        let paid = b.amount_paid.checked_add(settled).ok_or_else(overflow)?;
         let status = invoices::settled_status(&b.status, b.total_amount, paid, b.amount_credited)?;
         bills::set_paid(&mut tx, &b.id, paid, status).await?;
     }
@@ -236,8 +285,8 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     let now = now_iso();
     sqlx::query(
         r#"INSERT INTO "payments" ("id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount",
-             "paymentMethod","paymentAccountId","notes","journalEntryId","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14)"#,
+             "paymentMethod","paymentAccountId","notes","journalEntryId","createdAt","updatedAt","withholdingTaxCodeId","withholdingAmount")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14,?15,?16)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -253,6 +302,8 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     .bind(&dto.notes)
     .bind(&entry.id)
     .bind(&now)
+    .bind(withholding.as_ref().map(|c| c.id.clone()))
+    .bind(dto.withholding_amount.cents())
     .execute(&mut *tx)
     .await?;
     let p = find_one(&mut tx, &id).await?;
@@ -272,15 +323,16 @@ pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Payment> {
     if let Some(je) = &p.journal_entry_id {
         entries::reverse(&mut tx, je, today).await?;
     }
+    let settled = p.amount.checked_add(p.withholding_amount).ok_or_else(overflow)?;
     if let Some(iid) = &p.invoice_id {
         let inv = invoices::load_any(&mut tx, iid).await?;
-        let paid = inv.amount_paid.checked_sub(p.amount).ok_or_else(overflow)?.max(Money::ZERO);
+        let paid = inv.amount_paid.checked_sub(settled).ok_or_else(overflow)?.max(Money::ZERO);
         let status = invoices::settled_status(&inv.status, inv.total_amount, paid, inv.amount_credited)?;
         invoices::set_paid(&mut tx, &inv, paid, status).await?;
     }
     if let Some(bid) = &p.bill_id {
         let b = bills::find_one(&mut tx, bid).await?;
-        let paid = b.amount_paid.checked_sub(p.amount).ok_or_else(overflow)?.max(Money::ZERO);
+        let paid = b.amount_paid.checked_sub(settled).ok_or_else(overflow)?.max(Money::ZERO);
         let status = invoices::settled_status(&b.status, b.total_amount, paid, b.amount_credited)?;
         bills::set_paid(&mut tx, &b.id, paid, status).await?;
     }

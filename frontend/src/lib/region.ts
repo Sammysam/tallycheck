@@ -132,3 +132,21 @@ export function fiscalYearStart(today = new Date()): string {
 export function todayIso(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+export const isIsoDate = (v: unknown): v is string => typeof v === 'string' && ISO_DATE.test(v);
+
+/**
+ * A `YYYY-MM-DD` date the way the company's country writes it, spelled so it cannot be misread:
+ * "1 Apr 2026" (en-GB), "Apr 1, 2026" (en-US), "1 avr. 2026" (fr-FR). Other text is returned as is.
+ */
+export function fmtDate(iso?: string | null): string {
+  if (!iso) return '';
+  if (!isIsoDate(iso)) return iso;
+  const [y, m, d] = iso.split('-').map(Number);
+  try {
+    return new Intl.DateTimeFormat(current.locale, { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(y, m - 1, d));
+  } catch {
+    return iso;
+  }
+}

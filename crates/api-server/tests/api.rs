@@ -1865,3 +1865,173 @@ async fn tax_codes_invoices_and_the_tax_return_through_the_api() -> TestResult {
     assert_eq!(deleted.status, StatusCode::BAD_REQUEST, "a code in use is deactivated, not deleted");
     Ok(())
 }
+
+#[tokio::test]
+async fn tax_groups_and_withholding_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let mut acct = std::collections::HashMap::new();
+    for (code, name, t) in [
+        ("2300", "Sales Tax Payable", "LIABILITY"),
+        ("1400", "Tax Receivable", "ASSET"),
+        ("1450", "WHT Receivable", "ASSET"),
+        ("2350", "WHT Payable", "LIABILITY"),
+    ] {
+        let r = app
+            .call(Method::POST, "/api/accounts", Some(&admin), Some(json!({"code": code, "name": name, "type": t})))
+            .await?;
+        acct.insert(code, r.body["id"].as_str().ok_or("acct")?.to_string());
+    }
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (cash, revenue, expense) = (id_of("1000")?, id_of("4000")?, id_of("6000")?);
+    let standard = |name: &str, rate: f64| json!({"name": name, "rate": rate, "salesAccountId": acct["2300"], "purchaseAccountId": acct["1400"]});
+    let mut ids = Vec::new();
+    for (name, rate) in [("State 6%", 6.0), ("County 1%", 1.0), ("Levy 10% on tax-inclusive", 10.0)] {
+        let r = app.call(Method::POST, "/api/tax-codes", Some(&admin), Some(standard(name, rate))).await?;
+        ids.push(r.body["id"].as_str().ok_or("code")?.to_string());
+    }
+    // State 6% + county 1% on the net, then a compound 10% on net + both.
+    let group = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "Local sales tax", "kind": "GROUP", "components": [
+                {"taxCodeId": ids[0]}, {"taxCodeId": ids[1]}, {"taxCodeId": ids[2], "isCompound": true}]})),
+        )
+        .await?;
+    assert_eq!(group.status, StatusCode::CREATED, "{}", group.body);
+    assert_eq!(group.body["rate"], json!(17.7), "6 + 1 + 10% of 107 = 17.7");
+    let one = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "Bad", "kind": "GROUP", "components": [{"taxCodeId": ids[0]}]})),
+        )
+        .await?;
+    assert_eq!(one.status, StatusCode::BAD_REQUEST, "a group needs two parts");
+    let wht = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "WHT 5%", "kind": "WITHHOLDING", "rate": 5,
+                "salesAccountId": acct["1450"], "purchaseAccountId": acct["2350"]})),
+        )
+        .await?;
+    assert_eq!(wht.status, StatusCode::CREATED, "{}", wht.body);
+    let wht_id = wht.body["id"].as_str().ok_or("wht")?.to_string();
+
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme"}))).await?;
+    let mut line = json!({"description": "Goods", "quantity": 1, "unitPrice": 1000, "accountId": revenue,
+        "taxCodeId": group.body["id"]});
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust.body["id"], "date": "2026-04-01", "lines": [line.clone()]})),
+        )
+        .await?;
+    assert_eq!(
+        (inv.body["taxAmount"].as_str(), inv.body["totalAmount"].as_str()),
+        (Some("177.00"), Some("1177.00")),
+        "{}",
+        inv.body
+    );
+    let parts: Vec<&str> = inv.body["lines"][0]["taxes"]
+        .as_array()
+        .ok_or("taxes")?
+        .iter()
+        .filter_map(|t| t["taxAmount"].as_str())
+        .collect();
+    assert_eq!(parts, vec!["60.00", "10.00", "107.00"]);
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+    app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+    // A withholding code is never charged on a line.
+    line["taxCodeId"] = json!(wht_id);
+    let wrong = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust.body["id"], "date": "2026-04-01", "lines": [line]})),
+        )
+        .await?;
+    assert_eq!(wrong.status, StatusCode::BAD_REQUEST);
+
+    // The customer pays 1,127.00 and withholds 50.00: together they settle the invoice.
+    let pay = |amount: f64, withheld: f64| {
+        json!({"type": "AR", "invoiceId": inv_id, "date": "2026-04-20", "amount": amount, "paymentMethod": "BANK_TRANSFER",
+            "paymentAccountId": cash, "withholdingTaxCodeId": wht_id, "withholdingAmount": withheld})
+    };
+    let too_much = app.call(Method::POST, "/api/payments", Some(&admin), Some(pay(1127.0, 50.01))).await?;
+    assert_eq!(too_much.status, StatusCode::BAD_REQUEST, "money plus withholding cannot exceed the balance");
+    let paid = app.call(Method::POST, "/api/payments", Some(&admin), Some(pay(1127.0, 50.0))).await?;
+    assert_eq!(paid.status, StatusCode::CREATED, "{}", paid.body);
+    let after = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    assert_eq!(after.body["status"], "PAID");
+
+    // We pay a vendor 950.00 of a 1,000.00 bill and withhold 50.00 for the tax office.
+    let vendor = app.call(Method::POST, "/api/vendors", Some(&admin), Some(json!({"name": "Consultant"}))).await?;
+    let bill = app
+        .call(
+            Method::POST,
+            "/api/bills",
+            Some(&admin),
+            Some(json!({"vendorId": vendor.body["id"], "date": "2026-04-05",
+                "lines": [{"description": "Advice", "quantity": 1, "unitPrice": 1000, "accountId": expense}]})),
+        )
+        .await?;
+    let bill_id = bill.body["id"].as_str().ok_or("bill")?.to_string();
+    app.call(Method::POST, &format!("/api/bills/{bill_id}/post"), Some(&admin), None).await?;
+    let vendor_pay = json!({"type": "AP", "billId": bill_id, "date": "2026-04-25", "amount": 950, "paymentMethod": "BANK_TRANSFER",
+        "paymentAccountId": cash, "withholdingTaxCodeId": wht_id, "withholdingAmount": 50});
+    let vp = app.call(Method::POST, "/api/payments", Some(&admin), Some(vendor_pay)).await?;
+    assert_eq!(vp.status, StatusCode::CREATED, "{}", vp.body);
+
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    let bal = |code: &str| {
+        tb.body
+            .as_array()
+            .and_then(|rows| rows.iter().find(|r| r["account"]["code"] == code).map(|r| r["balance"].clone()))
+    };
+    assert_eq!(bal("2300"), Some(json!(177)), "all three parts of the group post to the sales tax account");
+    assert_eq!((bal("1450"), bal("2350")), (Some(json!(50)), Some(json!(50))));
+    assert_eq!(bal("1100"), Some(json!(0)));
+    assert_eq!(bal("2000"), Some(json!(0)));
+
+    let ret =
+        app.call(Method::GET, "/api/reports/tax?dateFrom=2026-04-01&dateTo=2026-04-30", Some(&admin), None).await?;
+    let rows = ret.body["rows"].as_array().ok_or("rows")?;
+    let row =
+        |name: &str| rows.iter().find(|r| r["name"] == name).map(|r| (r["salesNet"].clone(), r["outputTax"].clone()));
+    assert_eq!(row("State 6%"), Some((json!(1000), json!(60))));
+    assert_eq!(row("Levy 10% on tax-inclusive"), Some((json!(1000), json!(107))));
+    assert_eq!(ret.body["totals"]["salesNet"], json!(1000), "a line under three parts is one sale");
+    assert_eq!(ret.body["netTax"], json!(177));
+    assert_eq!(
+        (
+            ret.body["withholdingTotals"]["withheldByCustomers"].clone(),
+            ret.body["withholdingTotals"]["withheldFromVendors"].clone()
+        ),
+        (json!(50), json!(50))
+    );
+    // Voiding the payment puts the money and the withholding back on the invoice.
+    let pay_id = paid.body["id"].as_str().ok_or("pay")?;
+    app.call(Method::POST, &format!("/api/payments/{pay_id}/void"), Some(&admin), None).await?;
+    let reopened = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    assert_eq!(
+        (reopened.body["status"].as_str(), reopened.body["amountPaid"].as_str()),
+        (Some("POSTED"), Some("0.00"))
+    );
+    Ok(())
+}

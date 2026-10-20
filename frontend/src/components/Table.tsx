@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Inbox, Search } from 'lucide-react';
+import { fmtDate, isIsoDate } from '../lib/region';
 
 interface Column<T> {
   header: string;
@@ -88,7 +89,9 @@ export default function Table<T extends { id: string }>({
                   >
                     {typeof col.accessor === 'function'
                       ? col.accessor(row)
-                      : String(row[col.accessor] ?? '')}
+                      : isIsoDate(row[col.accessor])
+                        ? <span data-value={String(row[col.accessor])}>{fmtDate(String(row[col.accessor]))}</span>
+                        : String(row[col.accessor] ?? '')}
                   </td>
                 ))}
               </tr>

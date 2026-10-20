@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api, { errMsg } from '../../api/client';
 import PageHeader from '../../components/PageHeader';
 import { money } from '../../lib/money';
-import { todayIso } from '../../lib/region';
+import { fmtDate, todayIso } from '../../lib/region';
 
 /**
  * D26: what to report to the tax office for a period — per tax code, sales and the tax charged
@@ -18,10 +18,13 @@ interface Row {
   purchasesNet: number;
   inputTax: number;
 }
+interface Withheld { taxCodeId: string; name: string; rate: number | null; withheldByCustomers: number; withheldFromVendors: number }
 interface TaxReturnData {
   rows: Row[];
   totals: Omit<Row, 'taxCodeId' | 'name' | 'rate'>;
   netTax: number;
+  withholding: Withheld[];
+  withholdingTotals: { withheldByCustomers: number; withheldFromVendors: number };
 }
 
 const monthStart = () => `${todayIso().slice(0, 7)}-01`;
@@ -43,7 +46,7 @@ export default function TaxReturn() {
     <div>
       <PageHeader
         title="Tax Return"
-        subtitle={`${ran.dateFrom} – ${ran.dateTo} · posted documents by document date`}
+        subtitle={`${fmtDate(ran.dateFrom)} – ${fmtDate(ran.dateTo)} · posted documents by document date`}
         action={
           <div className="flex gap-2 items-center">
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="!w-40" aria-label="From" />
@@ -102,8 +105,36 @@ export default function TaxReturn() {
               </tr>
             </tbody>
           </table>
+          {data.withholding.length > 0 && (
+            <table className="report-table max-w-3xl">
+              <thead>
+                <tr>
+                  <th>Withholding tax</th>
+                  <th className="num">Rate</th>
+                  <th className="num">Withheld by customers (to claim)</th>
+                  <th className="num">Withheld from vendors (to pay over)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.withholding.map((w) => (
+                  <tr key={w.taxCodeId}>
+                    <td>{w.name}</td>
+                    <td className="num">{w.rate === null ? '' : `${w.rate}%`}</td>
+                    <td className="num">{money(w.withheldByCustomers)}</td>
+                    <td className="num">{money(w.withheldFromVendors)}</td>
+                  </tr>
+                ))}
+                <tr className="total">
+                  <td colSpan={2}>Total</td>
+                  <td className="num" data-testid="wht-customers">{money(data.withholdingTotals.withheldByCustomers)}</td>
+                  <td className="num" data-testid="wht-vendors">{money(data.withholdingTotals.withheldFromVendors)}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
           <p className="text-xs text-gray-500 px-1">
-            Credit and debit notes reduce the period they are dated in. Draft and voided documents never count.
+            A tax group's parts are listed separately; a sale taxed by a group counts once in the totals.
+            Withholding is by payment date. Credit and debit notes reduce the period they are dated in. Draft and voided documents never count.
             Check the figures against your country's return form before filing.
           </p>
         </div>

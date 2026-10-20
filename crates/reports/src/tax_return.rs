@@ -1,20 +1,24 @@
-//! Tax return (D26, requested 2026-10-20): what to report to the tax office for a period.
+//! Tax return (D26, D27): what to report to the tax office for a period.
 //!
-//! Per tax code, by document date:
+//! Per standard tax code, by document date:
 //! * Sales: posted or paid invoices' lines, less posted customer credit notes — the net
-//!   amount and the output tax charged.
+//!   amount the tax was charged on and the output tax.
 //! * Purchases: posted or paid bills' lines and posted expenses, less posted vendor debit
-//!   notes — the net amount and the input tax paid.
+//!   notes — the net amount and the input tax.
 //!
-//! Drafts and voided documents never count. Lines without a tax code are shown on their own
-//! row ("No tax code"), so total sales and purchases are complete.
+//! A tax group's parts each have their own row (they may go to different authorities), so a
+//! line taxed by a group appears under each part; the totals count every line once. Drafts and
+//! voided documents never count. Lines without tax are on their own row ("No tax code").
 //! Net tax = output tax − input tax: payable when positive, reclaimable when negative.
+//!
+//! Withholding (D27): tax customers held back from their payments (a credit to claim) and tax
+//! held back from vendors (owed to the tax office), per withholding code, by payment date.
 
 use app_core::money::Money;
 use app_core::{AppError, AppResult};
 use serde_json::{json, Value};
 use sqlx::{Row, SqliteConnection};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 /// The rate (percent × 10 000) as a plain JSON percentage: 18, 8.875, 0.
 fn rate_json(rate: i64) -> Value {
@@ -26,31 +30,43 @@ fn overflow() -> AppError {
     AppError::internal("tax return overflow")
 }
 
-/// One movement: side ('S' sales / 'P' purchases), tax code (or NULL), net, tax.
+/// One part of one line: side ('S' / 'P'), the line, the standard code (or NULL), net, tax.
 const MOVEMENTS: &str = r#"
-SELECT 'S' AS "side", l."taxCodeId" AS "code",
+SELECT 'S' AS "side", 'I:' || l."id" AS "line", dt."taxCodeId" AS "code",
        CASE WHEN i."pricesIncludeTax" = 1 THEN l."amount" - l."taxAmount" ELSE l."amount" END AS "net",
-       l."taxAmount" AS "tax"
+       COALESCE(dt."taxAmount", 0) AS "tax"
   FROM "invoice_lines" l JOIN "invoices" i ON i."id" = l."invoiceId"
+  LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'INVOICE_LINE' AND dt."sourceId" = l."id"
  WHERE i."status" IN ('POSTED', 'PAID') AND (?1 IS NULL OR i."date" >= ?1) AND (?2 IS NULL OR i."date" <= ?2)
 UNION ALL
-SELECT 'S', n."taxCodeId", -(n."amount" - n."taxAmount"), -n."taxAmount"
+SELECT 'S', 'N:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0)
   FROM "credit_notes" n
+  LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'CREDIT_NOTE' AND dt."sourceId" = n."id"
  WHERE n."type" = 'AR' AND n."status" = 'POSTED' AND (?1 IS NULL OR n."date" >= ?1) AND (?2 IS NULL OR n."date" <= ?2)
 UNION ALL
-SELECT 'P', l."taxCodeId",
+SELECT 'P', 'B:' || l."id", dt."taxCodeId",
        CASE WHEN b."pricesIncludeTax" = 1 THEN l."amount" - l."taxAmount" ELSE l."amount" END,
-       l."taxAmount"
+       COALESCE(dt."taxAmount", 0)
   FROM "bill_lines" l JOIN "bills" b ON b."id" = l."billId"
+  LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'BILL_LINE' AND dt."sourceId" = l."id"
  WHERE b."status" IN ('POSTED', 'PAID') AND (?1 IS NULL OR b."date" >= ?1) AND (?2 IS NULL OR b."date" <= ?2)
 UNION ALL
-SELECT 'P', e."taxCodeId", e."amount" - e."taxAmount", e."taxAmount"
+SELECT 'P', 'E:' || e."id", dt."taxCodeId", e."amount" - e."taxAmount", COALESCE(dt."taxAmount", 0)
   FROM "expenses" e
+  LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'EXPENSE' AND dt."sourceId" = e."id"
  WHERE e."status" = 'POSTED' AND (?1 IS NULL OR e."date" >= ?1) AND (?2 IS NULL OR e."date" <= ?2)
 UNION ALL
-SELECT 'P', n."taxCodeId", -(n."amount" - n."taxAmount"), -n."taxAmount"
+SELECT 'P', 'D:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0)
   FROM "credit_notes" n
+  LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'CREDIT_NOTE' AND dt."sourceId" = n."id"
  WHERE n."type" = 'AP' AND n."status" = 'POSTED' AND (?1 IS NULL OR n."date" >= ?1) AND (?2 IS NULL OR n."date" <= ?2)"#;
+
+const WITHHELD: &str = r#"
+SELECT p."type" AS "side", p."withholdingTaxCodeId" AS "code", SUM(p."withholdingAmount") AS "amount"
+  FROM "payments" p
+ WHERE p."status" = 'POSTED' AND p."withholdingAmount" > 0
+   AND (?1 IS NULL OR p."date" >= ?1) AND (?2 IS NULL OR p."date" <= ?2)
+ GROUP BY p."type", p."withholdingTaxCodeId""#;
 
 #[derive(Default, Clone, Copy)]
 struct Sums {
@@ -60,14 +76,24 @@ struct Sums {
     input_tax: Money,
 }
 
+fn add(a: Money, b: Money) -> AppResult<Money> {
+    a.checked_add(b).ok_or_else(overflow)
+}
+
 impl Sums {
-    fn add(&mut self, side: &str, net: Money, tax: Money) -> AppResult<()> {
-        let add = |a: Money, b: Money| a.checked_add(b).ok_or_else(overflow);
+    fn add_net(&mut self, side: &str, net: Money) -> AppResult<()> {
         if side == "S" {
             self.sales_net = add(self.sales_net, net)?;
-            self.output_tax = add(self.output_tax, tax)?;
         } else {
             self.purchases_net = add(self.purchases_net, net)?;
+        }
+        Ok(())
+    }
+
+    fn add_tax(&mut self, side: &str, tax: Money) -> AppResult<()> {
+        if side == "S" {
+            self.output_tax = add(self.output_tax, tax)?;
+        } else {
             self.input_tax = add(self.input_tax, tax)?;
         }
         Ok(())
@@ -91,23 +117,32 @@ pub async fn tax_return(conn: &mut SqliteConnection, date_from: &str, date_to: &
 
     let mut by_code: BTreeMap<Option<String>, Sums> = BTreeMap::new();
     let mut total = Sums::default();
+    let mut counted: HashSet<String> = HashSet::new();
     for r in &rows {
         let side: String = r.try_get("side")?;
+        let line: String = r.try_get("line")?;
         let code: Option<String> = r.try_get("code")?;
         let net = Money::from_cents(r.try_get("net")?);
         let tax = Money::from_cents(r.try_get("tax")?);
-        by_code.entry(code).or_default().add(&side, net, tax)?;
-        total.add(&side, net, tax)?;
+        let row = by_code.entry(code).or_default();
+        row.add_net(&side, net)?;
+        row.add_tax(&side, tax)?;
+        total.add_tax(&side, tax)?;
+        // A line under several parts of a group is one sale: count its net once.
+        if counted.insert(line) {
+            total.add_net(&side, net)?;
+        }
     }
 
     let codes = crate::tax_codes_by_id(conn).await?;
+    let named = |code: &Option<String>| match code.as_ref().and_then(|c| codes.get(c)) {
+        Some((name, rate)) => (name.clone(), rate_json(*rate)),
+        None => ("No tax code".to_string(), Value::Null),
+    };
     let mut lines: Vec<(String, Value)> = by_code
         .into_iter()
         .map(|(code, sums)| {
-            let (name, rate) = match code.as_ref().and_then(|c| codes.get(c)) {
-                Some((name, rate)) => (name.clone(), rate_json(*rate)),
-                None => ("No tax code".to_string(), Value::Null),
-            };
+            let (name, rate) = named(&code);
             let mut v = sums.json();
             if let Value::Object(m) = &mut v {
                 m.insert("taxCodeId".into(), json!(code));
@@ -120,6 +155,36 @@ pub async fn tax_return(conn: &mut SqliteConnection, date_from: &str, date_to: &
         .collect();
     lines.sort_by(|a, b| a.0.cmp(&b.0));
 
+    // Withholding, per code: held back by customers (AR) and from vendors (AP).
+    let mut withheld: BTreeMap<String, (Money, Money)> = BTreeMap::new();
+    let (mut by_customers, mut from_vendors) = (Money::ZERO, Money::ZERO);
+    for r in sqlx::query(WITHHELD).bind(from).bind(to).fetch_all(&mut *conn).await? {
+        let side: String = r.try_get("side")?;
+        let code: Option<String> = r.try_get("code")?;
+        let amount = Money::from_cents(r.try_get("amount")?);
+        let slot = withheld.entry(code.unwrap_or_default()).or_insert((Money::ZERO, Money::ZERO));
+        if side == "AR" {
+            slot.0 = add(slot.0, amount)?;
+            by_customers = add(by_customers, amount)?;
+        } else {
+            slot.1 = add(slot.1, amount)?;
+            from_vendors = add(from_vendors, amount)?;
+        }
+    }
+    let withholding: Vec<Value> = withheld
+        .into_iter()
+        .map(|(code, (customers, vendors))| {
+            let (name, rate) = named(&Some(code.clone()));
+            json!({
+                "taxCodeId": code,
+                "name": name,
+                "rate": rate,
+                "withheldByCustomers": customers.to_json_number(),
+                "withheldFromVendors": vendors.to_json_number(),
+            })
+        })
+        .collect();
+
     let net = total.output_tax.checked_sub(total.input_tax).ok_or_else(overflow)?;
     Ok(json!({
         "dateFrom": date_from,
@@ -127,5 +192,10 @@ pub async fn tax_return(conn: &mut SqliteConnection, date_from: &str, date_to: &
         "rows": lines.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
         "totals": total.json(),
         "netTax": net.to_json_number(),
+        "withholding": withholding,
+        "withholdingTotals": {
+            "withheldByCustomers": by_customers.to_json_number(),
+            "withheldFromVendors": from_vendors.to_json_number(),
+        },
     }))
 }
