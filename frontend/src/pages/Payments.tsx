@@ -6,10 +6,14 @@ import Table from '../components/Table';
 import Pagination from '../components/Pagination';
 import StatusBadge from '../components/StatusBadge';
 import { taxOf, useTaxCodes } from '../lib/taxes';
+import { money, moneyIn } from '../lib/money';
+import { region } from '../lib/region';
 import Dialog from '../components/desktop/Dialog';
-import { money } from '../lib/money';
 
-interface Payment { id: string; paymentNumber: string; type: string; date: string; amount: number; paymentMethod: string; status: string; withholdingAmount?: string }
+interface Payment {
+  id: string; paymentNumber: string; type: string; date: string; amount: number; paymentMethod: string; status: string;
+  withholdingAmount?: string; currency?: string | null; exchangeRate?: number; baseAmount?: string; exchangeDifference?: string;
+}
 
 export default function Payments() {
   const [rows, setRows] = useState<Payment[]>([]);
@@ -25,7 +29,7 @@ export default function Payments() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '' });
+  const [form, setForm] = useState({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
   const [error, setError] = useState('');
   const [voiding, setVoiding] = useState<Payment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -33,6 +37,15 @@ export default function Payments() {
   const withholdingCodes = useTaxCodes().filter((c) => c.kind === 'WITHHOLDING' && c.isActive);
 
   /** Suggests what is withheld (rate × the document's amount before tax) and the money paid. */
+  // D30: the chosen document's currency; a foreign one is paid at the day's rate.
+  const chosenDoc = form.type === 'AR' ? invoices.find((i) => i.id === form.invoiceId) : bills.find((b) => b.id === form.billId);
+  const docCurrency: string = chosenDoc?.currency ?? '';
+  const chooseDoc = (field: 'invoiceId' | 'billId', id: string) => {
+    const doc = (field === 'invoiceId' ? invoices : bills).find((d) => d.id === id);
+    const cur = doc?.currency ?? '';
+    setForm({ ...form, [field]: id, exchangeRate: cur ? String(region().lastRates[cur] ?? doc?.exchangeRate ?? '') : '' });
+  };
+
   const chooseWithholding = (codeId: string) => {
     const code = withholdingCodes.find((c) => c.id === codeId);
     const doc = form.type === 'AR' ? invoices.find((i) => i.id === form.invoiceId) : bills.find((b) => b.id === form.billId);
@@ -97,12 +110,13 @@ export default function Payments() {
         amount: Number(form.amount),
         withholdingTaxCodeId: form.withholdingTaxCodeId || undefined,
         withholdingAmount: form.withholdingTaxCodeId ? Number(form.withholdingAmount) : undefined,
+        exchangeRate: docCurrency && form.exchangeRate ? Number(form.exchangeRate) : undefined,
         invoiceId: form.type === 'AR' ? form.invoiceId : undefined,
         billId:    form.type === 'AP' ? form.billId    : undefined,
       };
       await api.post('/payments', payload);
       setShowForm(false);
-      setForm({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '' });
+      setForm({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to record payment');
@@ -127,7 +141,7 @@ export default function Payments() {
                 <option value="AP">AP — Vendor Payment</option>
               </select>
               {form.type === 'AR'
-                ? <select required value={form.invoiceId} onChange={(e) => setForm({ ...form, invoiceId: e.target.value })}>
+                ? <select required value={form.invoiceId} onChange={(e) => chooseDoc('invoiceId', e.target.value)}>
                     <option value="">Select Posted Invoice</option>
                     {invoices.map((i) => (
                       <option key={i.id} value={i.id}>
@@ -135,7 +149,7 @@ export default function Payments() {
                       </option>
                     ))}
                   </select>
-                : <select required value={form.billId} onChange={(e) => setForm({ ...form, billId: e.target.value })}>
+                : <select required value={form.billId} onChange={(e) => chooseDoc('billId', e.target.value)}>
                     <option value="">Select Posted Bill</option>
                     {bills.map((b) => <option key={b.id} value={b.id}>{b.billNumber} — {b.vendor?.name}</option>)}
                   </select>
@@ -154,6 +168,21 @@ export default function Payments() {
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
               </select>
             </div>
+            {docCurrency && (
+              <div className="form-grid items-end" style={{ gridTemplateColumns: '1fr 2fr' }}>
+                <label className="text-xs font-medium text-gray-600">
+                  Rate today: 1 {docCurrency} = how many {region().currency}?
+                  <input className="mt-1" required type="number" min="0.00000001" step="any" placeholder="Exchange rate"
+                    value={form.exchangeRate} onChange={(e) => setForm({ ...form, exchangeRate: e.target.value })} aria-label="Payment exchange rate" />
+                </label>
+                <p className="text-xs text-gray-600 pb-2">
+                  The amount is in {docCurrency}. {Number(form.amount) > 0 && Number(form.exchangeRate) > 0 && (
+                    <>You receive about {money(Math.round(Number(form.amount) * Number(form.exchangeRate) * 100) / 100)}; any difference
+                    from the invoice's rate ({chosenDoc?.exchangeRate}) is an exchange gain or loss.</>
+                  )}
+                </p>
+              </div>
+            )}
             {withholdingCodes.length > 0 && (
               <div className="form-grid items-end" style={{ gridTemplateColumns: '1fr 1fr 2fr' }}>
                 <label className="text-xs font-medium text-gray-600">
@@ -190,9 +219,11 @@ export default function Payments() {
         { header: '#',      accessor: 'paymentNumber' },
         { header: 'Type',   accessor: 'type' },
         { header: 'Date',   accessor: 'date' },
-        { header: 'Amount', accessor: (r) => fmt(r.amount) },
+        { header: 'Amount', accessor: (r) => moneyIn(Number(r.amount), r.currency) },
         { header: 'Method', accessor: 'paymentMethod' },
-        { header: 'Withheld', accessor: (r) => (Number(r.withholdingAmount ?? 0) ? fmt(Number(r.withholdingAmount)) : '') },
+        { header: 'Withheld', accessor: (r) => (Number(r.withholdingAmount ?? 0) ? moneyIn(Number(r.withholdingAmount), r.currency) : '') },
+        { header: 'In the books', accessor: (r) => (r.currency ? `${money(Number(r.baseAmount))} @ ${r.exchangeRate}` : '') },
+        { header: 'Exchange', accessor: (r) => (Number(r.exchangeDifference ?? 0) ? money(-Number(r.exchangeDifference) * (r.type === 'AR' ? 1 : -1)) : '') },
         { header: 'Status', accessor: (r) => <StatusBadge status={r.status ?? 'POSTED'} /> },
         { header: 'Actions', accessor: (r) => r.status !== 'VOID' && (
           <button onClick={() => setVoiding(r)} className="btn-link" style={{ color: '#dc2626' }}>Void</button>

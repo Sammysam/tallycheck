@@ -2048,3 +2048,151 @@ async fn currencies_with_three_decimals_are_refused() -> TestResult {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn foreign_currency_invoices_bills_payments_and_exchange_differences() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(
+        Method::PATCH,
+        "/api/settings",
+        Some(&admin),
+        Some(json!({"company.name": "Lanka Ltd", "region.currency": "LKR"})),
+    )
+    .await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let vat_acct = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "2300", "name": "VAT Payable", "type": "LIABILITY"})),
+        )
+        .await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (cash, revenue, expense) = (id_of("1000")?, id_of("4000")?, id_of("6000")?);
+    let vat = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "VAT 10%", "rate": 10, "salesAccountId": vat_acct.body["id"], "purchaseAccountId": vat_acct.body["id"]})),
+        )
+        .await?;
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "US Client"}))).await?;
+    let invoice = |amount: f64, tax: bool| {
+        let mut line = json!({"description": "Services", "quantity": 1, "unitPrice": amount, "accountId": revenue});
+        if tax {
+            line["taxCodeId"] = vat.body["id"].clone();
+        }
+        json!({"customerId": cust.body["id"], "date": "2026-04-01", "currency": "usd", "exchangeRate": 300, "lines": [line]})
+    };
+    let no_rate = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust.body["id"], "date": "2026-04-01", "currency": "USD",
+                "lines": [{"description": "x", "quantity": 1, "unitPrice": 1, "accountId": revenue}]})),
+        )
+        .await?;
+    assert_eq!(no_rate.status, StatusCode::BAD_REQUEST, "a foreign invoice needs its rate");
+
+    // USD 100 + VAT 10% at 300 → USD 110 = LKR 33,000 (revenue 30,000, VAT 3,000).
+    let inv = app.call(Method::POST, "/api/invoices", Some(&admin), Some(invoice(100.0, true))).await?;
+    assert_eq!(inv.status, StatusCode::CREATED, "{}", inv.body);
+    assert_eq!((inv.body["currency"].as_str(), inv.body["totalAmount"].as_str()), (Some("USD"), Some("110.00")));
+    assert_eq!(inv.body["baseTotal"].as_str(), Some("33000.00"));
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+    app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+    let tb = |app_body: &Value, code: &str| {
+        app_body
+            .as_array()
+            .and_then(|rows| rows.iter().find(|r| r["account"]["code"] == code).map(|r| r["balance"].clone()))
+    };
+    let t1 = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(
+        (tb(&t1.body, "1100"), tb(&t1.body, "4000"), tb(&t1.body, "2300")),
+        (Some(json!(33000)), Some(json!(30000)), Some(json!(3000)))
+    );
+
+    // Paid USD 60 at 310 (LKR 18,600) for USD 60 booked at 300 (18,000): a gain of 600.
+    let pay = |doc: &str, amount: f64, rate: f64| {
+        json!({"type": "AR", "invoiceId": doc, "date": "2026-04-20", "amount": amount, "exchangeRate": rate,
+            "paymentMethod": "BANK_TRANSFER", "paymentAccountId": cash})
+    };
+    let p1 = app.call(Method::POST, "/api/payments", Some(&admin), Some(pay(&inv_id, 60.0, 310.0))).await?;
+    assert_eq!(p1.status, StatusCode::CREATED, "{}", p1.body);
+    assert_eq!(
+        (p1.body["baseAmount"].as_str(), p1.body["baseSettled"].as_str(), p1.body["exchangeDifference"].as_str()),
+        (Some("18600.00"), Some("18000.00"), Some("-600.00"))
+    );
+    // The rest, USD 50 at 290 (14,500), clears what is left as booked (15,000): a loss of 500.
+    let p2 = app.call(Method::POST, "/api/payments", Some(&admin), Some(pay(&inv_id, 50.0, 290.0))).await?;
+    assert_eq!(
+        (p2.body["baseSettled"].as_str(), p2.body["exchangeDifference"].as_str()),
+        (Some("15000.00"), Some("500.00"))
+    );
+    let paid = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    assert_eq!((paid.body["status"].as_str(), paid.body["baseAmountPaid"].as_str()), (Some("PAID"), Some("33000.00")));
+
+    // A credit note on a USD invoice uses the invoice's rate: no exchange difference.
+    let inv2 = app.call(Method::POST, "/api/invoices", Some(&admin), Some(invoice(50.0, false))).await?;
+    let inv2_id = inv2.body["id"].as_str().ok_or("inv2")?.to_string();
+    app.call(Method::POST, &format!("/api/invoices/{inv2_id}/post"), Some(&admin), None).await?;
+    let cn = app
+        .call(
+            Method::POST,
+            "/api/credit-notes",
+            Some(&admin),
+            Some(json!({"invoiceId": inv2_id, "date": "2026-04-10", "reason": "Discount", "amount": 20, "accountId": revenue})),
+        )
+        .await?;
+    assert_eq!(cn.status, StatusCode::CREATED, "{}", cn.body);
+    let aging = app.call(Method::GET, "/api/reports/ar-aging", Some(&admin), None).await?;
+    assert_eq!(aging.body["grandTotal"], json!(9000), "USD 30 still owed, booked at 300");
+    let p3 = app.call(Method::POST, "/api/payments", Some(&admin), Some(pay(&inv2_id, 30.0, 300.0))).await?;
+    assert_eq!(p3.body["exchangeDifference"].as_str(), Some("0.00"));
+
+    // A EUR bill: 10 at 330 (3,300) paid at 320 (3,200) — we paid less: a gain of 100.
+    let vendor = app.call(Method::POST, "/api/vendors", Some(&admin), Some(json!({"name": "EU Supplier"}))).await?;
+    let bill = app
+        .call(
+            Method::POST,
+            "/api/bills",
+            Some(&admin),
+            Some(json!({"vendorId": vendor.body["id"], "date": "2026-04-05", "currency": "EUR", "exchangeRate": 330,
+                "lines": [{"description": "Parts", "quantity": 1, "unitPrice": 10, "accountId": expense}]})),
+        )
+        .await?;
+    assert_eq!(bill.body["baseTotal"].as_str(), Some("3300.00"), "{}", bill.body);
+    let bill_id = bill.body["id"].as_str().ok_or("bill")?.to_string();
+    app.call(Method::POST, &format!("/api/bills/{bill_id}/post"), Some(&admin), None).await?;
+    let bp = app
+        .call(
+            Method::POST,
+            "/api/payments",
+            Some(&admin),
+            Some(json!({"type": "AP", "billId": bill_id, "date": "2026-04-25", "amount": 10, "exchangeRate": 320,
+                "paymentMethod": "BANK_TRANSFER", "paymentAccountId": cash})),
+        )
+        .await?;
+    assert_eq!(bp.body["exchangeDifference"].as_str(), Some("100.00"), "{}", bp.body);
+
+    let t2 = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(tb(&t2.body, "1100"), Some(json!(0)), "every USD receivable cleared at its booked amount");
+    assert_eq!(tb(&t2.body, "2000"), Some(json!(0)));
+    // Exchange account (an expense): +500 loss − 600 gain − 100 gain = −200, a net gain of 200.
+    assert_eq!(tb(&t2.body, "7900"), Some(json!(-200)));
+    // Cash: 18,600 + 14,500 + 9,000 − 3,200.
+    assert_eq!(tb(&t2.body, "1000"), Some(json!(38900)));
+    let rates = app.call(Method::GET, "/api/settings", Some(&admin), None).await?;
+    assert_eq!((rates.body["fx.rate.USD"].as_str(), rates.body["fx.rate.EUR"].as_str()), (Some("300"), Some("320")));
+    Ok(())
+}

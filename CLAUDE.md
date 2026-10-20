@@ -412,6 +412,19 @@ recommendations without answering each one individually; revisit any of them on 
   two decimals. Three-decimal currencies (BHD, IQD, JOD, KWD, LYD, OMR, TND) are refused in
   settings — hundredths cannot hold them. The switch is global, so tests that turn it on live in
   their own test binary (`operations/tests/whole_units.rs`).
+- **D30 Foreign-currency invoices and bills** (2026-10-21). An invoice or bill may carry a
+  `currency` other than the company's, plus `exchangeRate` (home units per one foreign unit,
+  8 decimals, `fx::RATE_ONE`). Amounts on the document stay in its own currency; it posts to the
+  ledger in the home currency at its rate (`baseTotal`, `invoices::booked`/`bills::booked`). A
+  payment is entered in the document's currency at the day's rate; the books move by
+  `baseAmount`, the receivable/payable clears by `baseSettled` (its share as booked, and the
+  final payment or note clears exactly what is left), and the difference posts to 7900
+  "Foreign Exchange Gain/Loss" (an expense, created when first needed). Credit and debit notes
+  use the document's own rate, so they make no exchange difference. The last rate used per
+  currency is remembered (`fx.rate.XXX`) as the next default. Statements, ageing and the tax
+  return use the as-booked home amounts. Not covered: bank accounts in a foreign currency,
+  revaluing open items at period end, and foreign currencies with other than two decimals
+  (foreign amounts are held in hundredths).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

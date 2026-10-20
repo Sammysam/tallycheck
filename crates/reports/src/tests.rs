@@ -118,6 +118,7 @@ async fn books() -> AppResult<Books> {
         notes: None,
         withholding_tax_code_id: None,
         withholding_amount: Money::ZERO,
+        exchange_rate: None,
     };
     payments::create(&b.db, pay("AR", Some(&inv.id), None, "1000")).await?;
     let voided = invoices::create(&b.db, sale("999", "2026-04-30"), Some("admin")).await?;
@@ -136,6 +137,8 @@ async fn books() -> AppResult<Books> {
             due_date: Some("2026-05-06".into()),
             notes: None,
             prices_include_tax: false,
+            currency: None,
+            exchange_rate: None,
             lines: vec![BillLineInput {
                 description: "stock".into(),
                 quantity: m("4"),

@@ -45,3 +45,9 @@ export const COUNTRIES: CountryPreset[] = [
   { code: 'GB', name: 'United Kingdom', currency: 'GBP', symbol: '£', word: 'Pounds', minorWord: 'Pence', locale: 'en-GB', fiscalYearStart: 4 },
   { code: 'US', name: 'United States', currency: 'USD', symbol: '$', word: 'Dollars', minorWord: 'Cents', locale: 'en-US', fiscalYearStart: 1 },
 ];
+
+/** Currencies offered for foreign-currency invoices and bills (D30); any other code can be typed. */
+export const CURRENCIES: string[] = [...new Set([
+  'USD', 'EUR', 'GBP', 'AUD', 'CAD', 'SGD', 'INR', 'LKR', 'AED', 'SAR', 'QAR', 'JPY', 'CNY', 'CHF', 'NZD', 'MYR',
+  ...COUNTRIES.map((c) => c.currency),
+])].sort();

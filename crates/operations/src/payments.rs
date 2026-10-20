@@ -10,6 +10,10 @@
 //!   settles the document together with the money paid: on a customer's payment it is a tax
 //!   credit (the withholding code's sales account, an asset); on our payment to a vendor it is
 //!   owed to the tax office (the code's purchase account, a liability).
+//! * Foreign currency (D30): the amounts are in the document's currency; the money moves in the
+//!   home currency at the payment's rate. The receivable or payable is cleared at the amount it
+//!   was booked at (all of what is left when the document is settled in full), and the
+//!   difference is a realised exchange gain or loss on the exchange account.
 
 use crate::invoices;
 use crate::parties::{self, PartyKind};
@@ -42,6 +46,14 @@ pub struct Payment {
     /// D27: tax held back by the payer, and its withholding code.
     pub withholding_tax_code_id: Option<String>,
     pub withholding_amount: Money,
+    /// D30: the rate on the payment date, the money in the home currency, the booked amount it
+    /// cleared, and the exchange difference (booked − received − withheld, home currency).
+    pub exchange_rate: i64,
+    pub base_amount: Money,
+    pub base_settled: Money,
+    pub exchange_difference: Money,
+    /// The paid document's currency (None = home), for display.
+    pub currency: Option<String>,
     /// POSTED, or VOID once reversed (D18).
     pub status: String,
     pub created_at: String,
@@ -65,6 +77,11 @@ impl Payment {
             "notes": opt(&self.notes),
             "withholdingTaxCodeId": opt(&self.withholding_tax_code_id),
             "withholdingAmount": money_str(self.withholding_amount),
+            "exchangeRate": crate::fx::rate_json(self.exchange_rate),
+            "baseAmount": money_str(self.base_amount),
+            "baseSettled": money_str(self.base_settled),
+            "exchangeDifference": money_str(self.exchange_difference),
+            "currency": opt(&self.currency),
             "journalEntryId": opt(&self.journal_entry_id),
             "status": self.status,
             "createdAt": self.created_at,
@@ -73,7 +90,9 @@ impl Payment {
     }
 }
 
-const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","status","withholdingTaxCodeId","withholdingAmount","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","status","withholdingTaxCodeId","withholdingAmount","exchangeRate","baseAmount","baseSettled","exchangeDifference","createdAt","updatedAt",
+    COALESCE((SELECT "currency" FROM "invoices" WHERE "id" = "payments"."invoiceId"),
+             (SELECT "currency" FROM "bills" WHERE "id" = "payments"."billId")) AS "currency""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Payment> {
     Ok(Payment {
@@ -91,6 +110,11 @@ fn from_row(r: &SqliteRow) -> AppResult<Payment> {
         notes: r.try_get("notes")?,
         withholding_tax_code_id: r.try_get("withholdingTaxCodeId")?,
         withholding_amount: Money::from_cents(r.try_get("withholdingAmount")?),
+        exchange_rate: r.try_get("exchangeRate")?,
+        base_amount: Money::from_cents(r.try_get("baseAmount")?),
+        base_settled: Money::from_cents(r.try_get("baseSettled")?),
+        exchange_difference: Money::from_cents(r.try_get("exchangeDifference")?),
+        currency: r.try_get("currency")?,
         journal_entry_id: r.try_get("journalEntryId")?,
         status: r.try_get("status")?,
         created_at: r.try_get("createdAt")?,
@@ -134,6 +158,8 @@ pub struct CreatePayment {
     /// D27: tax held back by the payer (0 for none) and its withholding code.
     pub withholding_tax_code_id: Option<String>,
     pub withholding_amount: Money,
+    /// D30: for a foreign-currency document, the rate on the payment date (None = its own rate).
+    pub exchange_rate: Option<i64>,
 }
 
 pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
@@ -209,6 +235,20 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         parties::find_one(&mut tx, PartyKind::Vendor, v).await?;
     }
 
+    // D30: the document's currency and booked rate, and what is still owed on it.
+    let (doc_rate, foreign, outstanding, base_outstanding) = match (&invoice, &bill) {
+        (Some(i), _) => (i.exchange_rate, i.currency.is_some(), i.outstanding()?, i.base_outstanding()?),
+        (_, Some(b)) => (b.exchange_rate, b.currency.is_some(), b.outstanding()?, b.base_outstanding()?),
+        _ => (crate::fx::RATE_ONE, false, Money::ZERO, Money::ZERO),
+    };
+    let rate = if foreign { dto.exchange_rate.filter(|r| *r > 0).unwrap_or(doc_rate) } else { crate::fx::RATE_ONE };
+    let base_amount = crate::fx::to_base(dto.amount, rate)?;
+    let base_withheld = crate::fx::to_base(dto.withholding_amount, rate)?;
+    // What this clears off the books: the booked share, or everything left when settled in full.
+    let base_settled = if settled == outstanding { base_outstanding } else { crate::fx::to_base(settled, doc_rate)? };
+    let difference =
+        base_settled.checked_sub(base_amount).and_then(|d| d.checked_sub(base_withheld)).ok_or_else(overflow)?;
+
     let number = counters::next_formatted(&mut tx, "PAY", 6).await?;
     let (control_code, source_type, source_id, label) = if is_ar {
         ("1100", "PAYMENT_AR", dto.invoice_id.clone(), "AR")
@@ -220,25 +260,42 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         vec![
             NewLine {
                 account_id: dto.payment_account_id.clone(),
-                debit: dto.amount,
+                debit: base_amount,
                 credit: Money::ZERO,
                 description: None,
             },
-            NewLine { account_id: control.id, debit: Money::ZERO, credit: settled, description: None },
+            NewLine { account_id: control.id, debit: Money::ZERO, credit: base_settled, description: None },
         ]
     } else {
         vec![
-            NewLine { account_id: control.id, debit: settled, credit: Money::ZERO, description: None },
+            NewLine { account_id: control.id, debit: base_settled, credit: Money::ZERO, description: None },
             NewLine {
                 account_id: dto.payment_account_id.clone(),
                 debit: Money::ZERO,
-                credit: dto.amount,
+                credit: base_amount,
                 description: None,
             },
         ]
     };
+    // D30: booked − (received + withheld). On a customer payment a positive difference is a loss
+    // (debit); on a vendor payment it is a gain (credit) — and the other way round.
+    if difference != Money::ZERO {
+        let account_id = crate::fx::exchange_account(&mut tx).await?;
+        let abs = if difference > Money::ZERO {
+            difference
+        } else {
+            Money::ZERO.checked_sub(difference).ok_or_else(overflow)?
+        };
+        let debit_side = (difference > Money::ZERO) == is_ar;
+        lines.push(NewLine {
+            account_id,
+            debit: if debit_side { abs } else { Money::ZERO },
+            credit: if debit_side { Money::ZERO } else { abs },
+            description: Some("Exchange difference".into()),
+        });
+    }
     if let Some(code) = &withholding {
-        let w = dto.withholding_amount;
+        let w = base_withheld;
         lines.push(if is_ar {
             NewLine {
                 account_id: code.sales_account_id.clone(),
@@ -272,21 +329,29 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         if let Some(inv) = &invoice {
             // Partial payments accumulate — PAID only once the balance is cleared.
             let paid = inv.amount_paid.checked_add(settled).ok_or_else(overflow)?;
+            let base_paid = inv.base_amount_paid.checked_add(base_settled).ok_or_else(overflow)?;
             let status = invoices::settled_status(&inv.status, inv.total_amount, paid, inv.amount_credited)?;
-            invoices::set_paid(&mut tx, inv, paid, status).await?;
+            invoices::set_paid(&mut tx, inv, paid, base_paid, status).await?;
         }
     } else if let Some(b) = &bill {
         let paid = b.amount_paid.checked_add(settled).ok_or_else(overflow)?;
+        let base_paid = b.base_amount_paid.checked_add(base_settled).ok_or_else(overflow)?;
         let status = invoices::settled_status(&b.status, b.total_amount, paid, b.amount_credited)?;
-        bills::set_paid(&mut tx, &b.id, paid, status).await?;
+        bills::set_paid(&mut tx, &b.id, paid, base_paid, status).await?;
+    }
+    if foreign {
+        let currency =
+            invoice.as_ref().and_then(|i| i.currency.clone()).or(bill.as_ref().and_then(|b| b.currency.clone()));
+        crate::fx::remember_rate(&mut tx, &currency, rate).await?;
     }
 
     let id = new_id();
     let now = now_iso();
     sqlx::query(
         r#"INSERT INTO "payments" ("id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount",
-             "paymentMethod","paymentAccountId","notes","journalEntryId","createdAt","updatedAt","withholdingTaxCodeId","withholdingAmount")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14,?15,?16)"#,
+             "paymentMethod","paymentAccountId","notes","journalEntryId","createdAt","updatedAt","withholdingTaxCodeId","withholdingAmount",
+             "exchangeRate","baseAmount","baseSettled","exchangeDifference")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?14,?15,?16,?17,?18,?19,?20)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -304,6 +369,10 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     .bind(&now)
     .bind(withholding.as_ref().map(|c| c.id.clone()))
     .bind(dto.withholding_amount.cents())
+    .bind(rate)
+    .bind(base_amount.cents())
+    .bind(base_settled.cents())
+    .bind(difference.cents())
     .execute(&mut *tx)
     .await?;
     let p = find_one(&mut tx, &id).await?;
@@ -327,14 +396,16 @@ pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Payment> {
     if let Some(iid) = &p.invoice_id {
         let inv = invoices::load_any(&mut tx, iid).await?;
         let paid = inv.amount_paid.checked_sub(settled).ok_or_else(overflow)?.max(Money::ZERO);
+        let base_paid = inv.base_amount_paid.checked_sub(p.base_settled).ok_or_else(overflow)?.max(Money::ZERO);
         let status = invoices::settled_status(&inv.status, inv.total_amount, paid, inv.amount_credited)?;
-        invoices::set_paid(&mut tx, &inv, paid, status).await?;
+        invoices::set_paid(&mut tx, &inv, paid, base_paid, status).await?;
     }
     if let Some(bid) = &p.bill_id {
         let b = bills::find_one(&mut tx, bid).await?;
         let paid = b.amount_paid.checked_sub(settled).ok_or_else(overflow)?.max(Money::ZERO);
+        let base_paid = b.base_amount_paid.checked_sub(p.base_settled).ok_or_else(overflow)?.max(Money::ZERO);
         let status = invoices::settled_status(&b.status, b.total_amount, paid, b.amount_credited)?;
-        bills::set_paid(&mut tx, &b.id, paid, status).await?;
+        bills::set_paid(&mut tx, &b.id, paid, base_paid, status).await?;
     }
     sqlx::query(r#"UPDATE "payments" SET "status" = 'VOID', "updatedAt" = ?1 WHERE "id" = ?2"#)
         .bind(now_iso())

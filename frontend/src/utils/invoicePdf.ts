@@ -37,6 +37,8 @@ interface PdfInvoice {
   /** D26: the invoice's tax, and whether the line amounts include it. */
   taxAmount?: number | string;
   pricesIncludeTax?: boolean;
+  /** D30: a foreign currency code, or null for the home currency. */
+  currency?: string | null;
   customer?: { name?: string; address?: string | null } | null;
   lines?: PdfLine[];
   /** Per-invoice overrides captured when the invoice was raised. */
@@ -70,7 +72,7 @@ const esc = (s?: string | null) =>
 
 function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
   const co = company();
-  const cur = region().currencySymbol;
+  const cur = invoice.currency || region().currencySymbol;
   const signatoryName =
     invoice.signatoryName?.trim() || settings?.signatoryName?.trim() || '';
   const signatoryTitle =
@@ -203,7 +205,9 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
       </tfoot>
     </table>
 
-    <div class="words"><strong>Amount in words:</strong> ${esc(amountInWords(Number(invoice.totalAmount) || 0, region().currencyWord, region().currencyMinorWord))}</div>
+    <div class="words"><strong>Amount in words:</strong> ${esc(invoice.currency
+      ? amountInWords(Number(invoice.totalAmount) || 0, invoice.currency, 'Cents')
+      : amountInWords(Number(invoice.totalAmount) || 0, region().currencyWord, region().currencyMinorWord))}</div>
 
     ${paymentOptions.length ? `<div class="pay">
       <div class="label">Payment options</div>

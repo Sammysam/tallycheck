@@ -5,6 +5,8 @@ import { errMsg } from '../api/client';
 import { amount, currencyDigits } from '../lib/money';
 import { company, region } from '../lib/region';
 import { lineCodes, lineParts, summarize, useTaxCodes } from '../lib/taxes';
+import CurrencyPicker from './CurrencyPicker';
+import { moneyIn } from '../lib/money';
 
 /**
  * Invoice editor rendered as the invoice document itself — same layout, fonts
@@ -43,6 +45,9 @@ export interface SheetPayload {
   signatoryTitle?: string;
   lines: { description: string; quantity?: number; unitPrice?: number; accountId?: string; taxCodeId?: string }[];
   pricesIncludeTax: boolean;
+  /** D30: omitted for the home currency. */
+  currency?: string;
+  exchangeRate?: number;
 }
 
 interface Props {
@@ -120,6 +125,9 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
       : [newLine(fallbackAccount, region().defaultSalesTax)],
   );
   const [pricesIncludeTax, setPricesIncludeTax] = useState<boolean>(Boolean(initial?.pricesIncludeTax));
+  // D30: the invoice's currency ('' = home) and exchange rate.
+  const [currency, setCurrency] = useState<string>(initial?.currency ?? '');
+  const [rate, setRate] = useState<string>(initial?.currency ? String(initial.exchangeRate) : '');
   const taxCodes = useTaxCodes();
   const [payOptions, setPayOptions] = useState(() =>
     (initial?.paymentOptions
@@ -202,6 +210,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
     totalAmount: total,
     taxAmount: summary.tax,
     pricesIncludeTax,
+    currency: currency || null,
     billToName,
     billToAddress,
     paymentOptions: payOptions.map((o) => o.text.trim()).filter(Boolean).join('\n'),
@@ -243,6 +252,8 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
           taxCodeId: taxCodeId || undefined,
         })),
         pricesIncludeTax,
+        currency: currency || undefined,
+        exchangeRate: currency ? Number(rate) : undefined,
       });
     } catch (err: any) {
       setError(errMsg(err, 'Failed to save invoice'));
@@ -318,6 +329,13 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
               Prices include tax
             </label>
           )}
+          <div className="inv-side-title" style={{ marginTop: '1rem' }}>Currency</div>
+          <CurrencyPicker currency={currency} rate={rate} onChange={(c, r) => { setCurrency(c); setRate(r); }} />
+          {currency && Number(rate) > 0 && (
+            <span className="inv-side-hint" style={{ whiteSpace: 'normal' }}>
+              Booked as about {moneyIn(Math.round(total * Number(rate) * 100) / 100)} in the books.
+            </span>
+          )}
         </aside>
 
         <div className="inv-sheet-wrap">
@@ -385,8 +403,8 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
                 <th style={{ width: 80 }}>Date</th>
                 <th className="c-desc">Description</th>
                 <th style={{ width: 62 }}>Qty</th>
-                <th style={{ width: 110 }}>Unit Price ({region().currencySymbol})</th>
-                <th style={{ width: 105 }}>Price ({region().currencySymbol})</th>
+                <th style={{ width: 110 }}>Unit Price ({currency || region().currencySymbol})</th>
+                <th style={{ width: 105 }}>Price ({currency || region().currencySymbol})</th>
                 <th className="gutter" />
               </tr>
             </thead>
@@ -457,7 +475,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
             </tfoot>
           </table>
 
-          <div className="words"><strong>Amount in words:</strong> {amountInWords(total, region().currencyWord, region().currencyMinorWord)}</div>
+          <div className="words"><strong>Amount in words:</strong> {currency ? amountInWords(total, currency, 'Cents') : amountInWords(total, region().currencyWord, region().currencyMinorWord)}</div>
 
           {/* ── Payment options — editable per invoice ─────────── */}
           <div className="pay">

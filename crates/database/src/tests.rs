@@ -36,6 +36,20 @@ const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
     ("expenses", "taxAmount", true),
     ("payments", "withholdingTaxCodeId", false), // D27
     ("payments", "withholdingAmount", true),
+    ("invoices", "currency", false), // D30
+    ("invoices", "exchangeRate", true),
+    ("invoices", "baseTotal", true),
+    ("invoices", "baseAmountPaid", true),
+    ("invoices", "baseAmountCredited", true),
+    ("bills", "currency", false),
+    ("bills", "exchangeRate", true),
+    ("bills", "baseTotal", true),
+    ("bills", "baseAmountPaid", true),
+    ("bills", "baseAmountCredited", true),
+    ("payments", "exchangeRate", true),
+    ("payments", "baseAmount", true),
+    ("payments", "baseSettled", true),
+    ("payments", "exchangeDifference", true),
 ];
 
 /// Tables this project adds on purpose (approved deviations); the reference has no such table.

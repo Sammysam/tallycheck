@@ -30,6 +30,8 @@ export interface Region {
   /** D26: tax code ids new sales / purchase lines start with ('' for none). */
   defaultSalesTax: string;
   defaultPurchaseTax: string;
+  /** D30: the last exchange rate used per foreign currency (home units per one unit). */
+  lastRates: Record<string, number>;
 }
 
 const NEUTRAL: Region = {
@@ -52,6 +54,7 @@ const NEUTRAL: Region = {
   fiscalYearStart: 1,
   defaultSalesTax: '',
   defaultPurchaseTax: '',
+  lastRates: {},
 };
 
 let current: Region = NEUTRAL;
@@ -83,6 +86,9 @@ export function regionFromSettings(s: Record<string, string>): Region {
     fiscalYearStart: month >= 1 && month <= 12 ? month : 1,
     defaultSalesTax: v('tax.defaultSales', ''),
     defaultPurchaseTax: v('tax.defaultPurchases', ''),
+    lastRates: Object.fromEntries(
+      Object.entries(s).filter(([k]) => k.startsWith('fx.rate.')).map(([k, rate]) => [k.slice(8), Number(rate)]),
+    ),
   };
 }
 

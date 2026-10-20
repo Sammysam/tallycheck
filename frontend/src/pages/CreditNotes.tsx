@@ -6,7 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
 import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
-import { money } from '../lib/money';
+import { money, moneyIn } from '../lib/money';
 
 /**
  * D21. AR: customer credit notes against posted invoices (revenue down, receivable down).
@@ -23,6 +23,7 @@ interface Note {
   reason: string;
   amount: string;
   status: string;
+  currency?: string | null;
 }
 
 interface Account { id: string; code: string; name: string; type: string; isActive: boolean }
@@ -35,6 +36,8 @@ interface Doc {
   balance: number | null;
   firstAccount: string | null;
   firstTax: string | null;
+  /** D30: null for the home currency. */
+  currency: string | null;
 }
 
 const fmt = (v: number | string) => money(Number(v));
@@ -94,7 +97,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
           (r.data.data ?? r.data)
             .filter((i: { status: string }) => i.status === 'POSTED')
             .map((i: { id: string; invoiceNumber: string; customer?: { name: string }; billToName?: string; date: string;
-              totalAmount: string; amountPaid?: string; amountCredited?: string; lines?: DocLine[] }) => ({
+              totalAmount: string; amountPaid?: string; amountCredited?: string; lines?: DocLine[]; currency?: string | null }) => ({
               id: i.id,
               number: i.invoiceNumber,
               party: i.customer?.name || i.billToName || 'one-off',
@@ -102,6 +105,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
               balance: Number(i.totalAmount) - Number(i.amountPaid ?? 0) - Number(i.amountCredited ?? 0),
               firstAccount: i.lines?.find((l) => l.accountId)?.accountId ?? null,
               firstTax: i.lines?.find((l) => l.taxCodeId)?.taxCodeId ?? null,
+              currency: i.currency ?? null,
             }))
             .filter((d: Doc) => (d.balance ?? 0) > 0),
         ),
@@ -111,7 +115,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
         setDocs(
           (r.data.data ?? r.data)
             .filter((b: { status: string }) => b.status === 'POSTED')
-            .map((b: { id: string; billNumber: string; vendor?: { name: string }; date: string; lines?: DocLine[] }) => ({
+            .map((b: { id: string; billNumber: string; vendor?: { name: string }; date: string; lines?: DocLine[]; currency?: string | null }) => ({
               id: b.id,
               number: b.billNumber,
               party: b.vendor?.name ?? '',
@@ -119,6 +123,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
               balance: null,
               firstAccount: b.lines?.find((l) => l.accountId)?.accountId ?? null,
               firstTax: b.lines?.find((l) => l.taxCodeId)?.taxCodeId ?? null,
+              currency: b.currency ?? null,
             })),
         ),
       );
@@ -214,7 +219,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
                 <option value="">Select a posted {t.docLabel.toLowerCase()}</option>
                 {docs.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.number} — {d.party}{d.balance != null ? ` · owed ${fmt(d.balance)}` : ''}
+                    {d.number} — {d.party}{d.currency ? ` (${d.currency})` : ''}{d.balance != null ? ` · owed ${moneyIn(d.balance, d.currency)}` : ''}
                   </option>
                 ))}
               </select>
@@ -225,7 +230,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
                 onChange={(e) => setForm({ ...form, date: e.target.value })} />
             </label>
             <label className="text-xs font-medium text-gray-600">
-              Amount
+              Amount{chosen?.currency ? ` (${chosen.currency})` : ''}
               <input type="number" className="mt-1" required min="0.01" step="0.01" placeholder="Amount"
                 max={chosen?.balance ?? undefined} value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })} />
@@ -273,7 +278,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
           { header: t.docLabel, accessor: (r) => r.documentNumber ?? '—' },
           { header: t.partyLabel, accessor: (r) => r.partyName ?? '—' },
           { header: 'Reason', accessor: 'reason' },
-          { header: 'Amount', accessor: (r) => fmt(r.amount) },
+          { header: 'Amount', accessor: (r) => moneyIn(Number(r.amount), r.currency) },
           { header: 'Status', accessor: (r) => <StatusBadge status={r.status} /> },
           { header: 'Actions', accessor: (r) => r.status !== 'VOID' && (
             <button onClick={() => setVoiding(r)} className="btn-link" style={{ color: '#dc2626' }}>Void</button>

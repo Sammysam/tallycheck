@@ -14,6 +14,7 @@ pub mod banking;
 pub mod bills;
 pub mod credit_notes;
 pub mod expenses;
+pub mod fx;
 pub mod invoices;
 pub mod parties;
 pub mod payments;

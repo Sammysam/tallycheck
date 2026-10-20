@@ -51,6 +51,12 @@ pub struct Bill {
     /// D26: total tax on the lines, and whether the line amounts already include it.
     pub tax_amount: Money,
     pub prices_include_tax: bool,
+    /// D30: the bill's currency (None = home), its exchange rate and its home-currency figures.
+    pub currency: Option<String>,
+    pub exchange_rate: i64,
+    pub base_total: Money,
+    pub base_amount_paid: Money,
+    pub base_amount_credited: Money,
     pub journal_entry_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -58,7 +64,38 @@ pub struct Bill {
     pub vendor: Option<Party>,
 }
 
+/// A bill's figures in the home currency (D30), as `invoices::booked`.
+pub(crate) async fn booked(conn: &mut SqliteConnection, bill: &Bill) -> AppResult<crate::invoices::Booked> {
+    let rate = bill.exchange_rate;
+    let mut total = Money::ZERO;
+    let mut nets = Vec::with_capacity(bill.lines.len());
+    for l in &bill.lines {
+        let net =
+            if bill.prices_include_tax { l.amount.checked_sub(l.tax_amount).ok_or_else(overflow)? } else { l.amount };
+        let net = crate::fx::to_base(net, rate)?;
+        total = total.checked_add(net).ok_or_else(overflow)?;
+        nets.push(net);
+    }
+    let mut parts = Vec::new();
+    for p in bill.lines.iter().flat_map(|l| l.taxes.clone()) {
+        parts.push(crate::tax::TaxPart { amount: crate::fx::to_base(p.amount, rate)?, ..p });
+    }
+    let taxes = crate::tax::by_account(conn, parts, false).await?;
+    for (_, t) in &taxes {
+        total = total.checked_add(*t).ok_or_else(overflow)?;
+    }
+    Ok(crate::invoices::Booked { total, nets, taxes })
+}
+
 impl Bill {
+    /// What is still owed in the home currency, as booked (D30).
+    pub fn base_outstanding(&self) -> AppResult<Money> {
+        self.base_total
+            .checked_sub(self.base_amount_paid)
+            .and_then(|m| m.checked_sub(self.base_amount_credited))
+            .ok_or_else(overflow)
+    }
+
     /// `created`: the insert echo (no `vendor`, sent price/amount as numbers).
     pub fn to_json(&self, created: bool) -> Value {
         let lines: Vec<Value> = self
@@ -96,6 +133,9 @@ impl Bill {
         m.insert("totalAmount".into(), money_str(self.total_amount));
         m.insert("taxAmount".into(), money_str(self.tax_amount));
         m.insert("pricesIncludeTax".into(), json!(self.prices_include_tax));
+        m.insert("currency".into(), opt(&self.currency));
+        m.insert("exchangeRate".into(), crate::fx::rate_json(self.exchange_rate));
+        m.insert("baseTotal".into(), money_str(self.base_total));
         m.insert("journalEntryId".into(), opt(&self.journal_entry_id));
         m.insert("lines".into(), Value::Array(lines));
         m.insert("createdAt".into(), json!(self.created_at));
@@ -104,7 +144,7 @@ impl Bill {
     }
 }
 
-const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","amountCredited","taxAmount","pricesIncludeTax","journalEntryId","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","amountCredited","taxAmount","pricesIncludeTax","currency","exchangeRate","baseTotal","baseAmountPaid","baseAmountCredited","journalEntryId","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Bill> {
     Ok(Bill {
@@ -120,6 +160,11 @@ fn from_row(r: &SqliteRow) -> AppResult<Bill> {
         amount_credited: Money::from_cents(r.try_get("amountCredited")?),
         tax_amount: Money::from_cents(r.try_get("taxAmount")?),
         prices_include_tax: r.try_get::<i64, _>("pricesIncludeTax")? == 1,
+        currency: r.try_get("currency")?,
+        exchange_rate: r.try_get("exchangeRate")?,
+        base_total: Money::from_cents(r.try_get("baseTotal")?),
+        base_amount_paid: Money::from_cents(r.try_get("baseAmountPaid")?),
+        base_amount_credited: Money::from_cents(r.try_get("baseAmountCredited")?),
         journal_entry_id: r.try_get("journalEntryId")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
@@ -208,6 +253,9 @@ pub struct CreateBill {
     pub lines: Vec<BillLineInput>,
     /// D26: the line amounts already include tax.
     pub prices_include_tax: bool,
+    /// D30: a foreign currency (None or the home currency = home) and its exchange rate.
+    pub currency: Option<String>,
+    pub exchange_rate: Option<i64>,
 }
 
 pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
@@ -219,6 +267,8 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     let number = counters::next_formatted(&mut tx, "BILL", 6).await?;
     let id = new_id();
     let now = now_iso();
+    let (currency, rate) = crate::fx::resolve(&mut tx, dto.currency.as_deref(), dto.exchange_rate).await?;
+    crate::fx::remember_rate(&mut tx, &currency, rate).await?;
     let (mut total, mut tax_total) = (Money::ZERO, Money::ZERO);
     let mut amounts = Vec::with_capacity(dto.lines.len());
     for l in &dto.lines {
@@ -234,8 +284,8 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     }
     sqlx::query(
         r#"INSERT INTO "bills" ("id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","createdAt","updatedAt",
-             "taxAmount","pricesIncludeTax")
-           VALUES (?1,?2,?3,?4,?5,'DRAFT',?6,?7,?8,?8,?9,?10)"#,
+             "taxAmount","pricesIncludeTax","currency","exchangeRate")
+           VALUES (?1,?2,?3,?4,?5,'DRAFT',?6,?7,?8,?8,?9,?10,?11,?12)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -247,6 +297,8 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     .bind(&now)
     .bind(tax_total.cents())
     .bind(dto.prices_include_tax)
+    .bind(&currency)
+    .bind(rate)
     .execute(&mut *tx)
     .await?;
     for (l, (amount, tax, parts)) in dto.lines.iter().zip(amounts) {
@@ -269,6 +321,14 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
         crate::tax::save_parts(&mut tx, "BILL_LINE", &line_id, &parts).await?;
     }
     let bill = find_one(&mut tx, &id).await?;
+    // D30: what the payable is booked at in the home currency.
+    let base_total = booked(&mut tx, &bill).await?.total;
+    sqlx::query(r#"UPDATE "bills" SET "baseTotal" = ?1 WHERE "id" = ?2"#)
+        .bind(base_total.cents())
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    let bill = find_one(&mut tx, &id).await?;
     tx.commit().await?;
     Ok(bill)
 }
@@ -283,23 +343,39 @@ impl Bill {
     }
 }
 
-pub(crate) async fn set_credited(tx: &mut Tx, id: &str, amount_credited: Money, status: &str) -> AppResult<()> {
-    sqlx::query(r#"UPDATE "bills" SET "amountCredited" = ?1, "status" = ?2, "updatedAt" = ?3 WHERE "id" = ?4"#)
-        .bind(amount_credited.cents())
-        .bind(status)
-        .bind(now_iso())
-        .bind(id)
-        .execute(&mut **tx)
+pub(crate) async fn set_credited(
+    tx: &mut Tx,
+    id: &str,
+    amount_credited: Money,
+    base_credited: Money,
+    status: &str,
+) -> AppResult<()> {
+    sqlx::query(
+        r#"UPDATE "bills" SET "amountCredited" = ?1, "status" = ?2, "updatedAt" = ?3, "baseAmountCredited" = ?5 WHERE "id" = ?4"#,
+    )
+    .bind(amount_credited.cents())
+    .bind(status)
+    .bind(now_iso())
+    .bind(id)
+    .bind(base_credited.cents())
+    .execute(&mut **tx)
         .await?;
     Ok(())
 }
 
-pub(crate) async fn set_paid(tx: &mut Tx, id: &str, amount_paid: Money, status: &str) -> AppResult<()> {
-    sqlx::query(r#"UPDATE "bills" SET "amountPaid" = ?1, "status" = ?2, "updatedAt" = ?3 WHERE "id" = ?4"#)
+pub(crate) async fn set_paid(
+    tx: &mut Tx,
+    id: &str,
+    amount_paid: Money,
+    base_paid: Money,
+    status: &str,
+) -> AppResult<()> {
+    sqlx::query(r#"UPDATE "bills" SET "amountPaid" = ?1, "status" = ?2, "updatedAt" = ?3, "baseAmountPaid" = ?5 WHERE "id" = ?4"#)
         .bind(amount_paid.cents())
         .bind(status)
         .bind(now_iso())
         .bind(id)
+        .bind(base_paid.cents())
         .execute(&mut **tx)
         .await?;
     Ok(())
@@ -323,28 +399,25 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
         return Err(AppError::bad_request(format!("Bill is already {}", bill.status)));
     }
     let ap = ledger::accounts::find_by_code(&mut tx, "2000").await?;
-    // Each expense line without its tax; the tax goes to the code's purchase account (D26).
+    // In the home currency (D30). Each expense line without its tax; the tax goes to the code's
+    // purchase account (D26), part by part (D27).
+    let figures = booked(&mut tx, &bill).await?;
     let mut lines: Vec<NewLine> = Vec::new();
-    for l in &bill.lines {
-        let net =
-            if bill.prices_include_tax { l.amount.checked_sub(l.tax_amount).ok_or_else(overflow)? } else { l.amount };
+    for (l, net) in bill.lines.iter().zip(&figures.nets) {
         lines.push(NewLine {
             account_id: l.account_id.clone(),
-            debit: net,
+            debit: *net,
             credit: Money::ZERO,
             description: Some(l.description.clone()),
         });
     }
-    // D27: each part of each line's tax to its own code's account.
-    let parts: Vec<_> = bill.lines.iter().flat_map(|l| l.taxes.clone()).collect();
-    let tax_by_account = crate::tax::by_account(&mut tx, parts, false).await?;
-    lines.extend(tax_by_account.into_iter().map(|(account_id, tax)| NewLine {
+    lines.extend(figures.taxes.into_iter().map(|(account_id, tax)| NewLine {
         account_id,
         debit: tax,
         credit: Money::ZERO,
         description: Some("Tax".into()),
     }));
-    lines.push(NewLine { account_id: ap.id, debit: Money::ZERO, credit: bill.total_amount, description: None });
+    lines.push(NewLine { account_id: ap.id, debit: Money::ZERO, credit: figures.total, description: None });
     let entry = entries::post(
         &mut tx,
         NewEntry {

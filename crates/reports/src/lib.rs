@@ -191,9 +191,9 @@ pub fn build_aging(items: Vec<AgingItem>, today: NaiveDate) -> AppResult<Value> 
 pub async fn ar_aging(conn: &mut SqliteConnection, today: NaiveDate) -> AppResult<Value> {
     let rows = sqlx::query(
         r#"SELECT i."id", i."invoiceNumber", COALESCE(NULLIF(c."name", ''), i."billToName", '') AS "name",
-                  i."date", i."dueDate", i."totalAmount" - i."amountPaid" - i."amountCredited" AS "outstanding"
+                  i."date", i."dueDate", i."baseTotal" - i."baseAmountPaid" - i."baseAmountCredited" AS "outstanding"
            FROM "invoices" i LEFT JOIN "customers" c ON c."id" = i."customerId"
-           WHERE i."status" = 'POSTED' AND i."totalAmount" - i."amountPaid" - i."amountCredited" > 0
+           WHERE i."status" = 'POSTED' AND i."baseTotal" - i."baseAmountPaid" - i."baseAmountCredited" > 0
            ORDER BY i.rowid"#,
     )
     .fetch_all(&mut *conn)
@@ -218,7 +218,7 @@ pub async fn ar_aging(conn: &mut SqliteConnection, today: NaiveDate) -> AppResul
 pub async fn ap_aging(conn: &mut SqliteConnection, today: NaiveDate) -> AppResult<Value> {
     let rows = sqlx::query(
         r#"SELECT b."id", b."billNumber", COALESCE(v."name", '') AS "name", b."date", b."dueDate",
-                  b."totalAmount" - b."amountPaid" - b."amountCredited" AS "outstanding"
+                  b."baseTotal" - b."baseAmountPaid" - b."baseAmountCredited" AS "outstanding"
            FROM "bills" b LEFT JOIN "vendors" v ON v."id" = b."vendorId"
            WHERE b."status" = 'POSTED'
            ORDER BY b.rowid"#,

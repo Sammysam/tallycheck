@@ -106,6 +106,7 @@ impl Shop {
             notes: None,
             withholding_tax_code_id: None,
             withholding_amount: Money::ZERO,
+            exchange_rate: None,
         }
     }
 }
@@ -230,6 +231,8 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
             due_date: None,
             notes: None,
             prices_include_tax: false,
+            currency: None,
+            exchange_rate: None,
             lines: vec![line("Paper", "3", "12.5"), line("Ink", "1", "20")],
         },
     )
@@ -266,6 +269,8 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
             due_date: None,
             notes: None,
             prices_include_tax: false,
+            currency: None,
+            exchange_rate: None,
             lines: vec![line("Unposted", "1", "9")],
         },
     )
@@ -394,6 +399,8 @@ async fn voiding_a_payment_reverses_it_and_reopens_the_invoice_and_bill() -> App
             due_date: None,
             notes: None,
             prices_include_tax: false,
+            currency: None,
+            exchange_rate: None,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),
@@ -534,6 +541,8 @@ async fn debit_notes_reduce_what_is_owed_to_the_vendor() -> AppResult<()> {
             due_date: None,
             notes: None,
             prices_include_tax: false,
+            currency: None,
+            exchange_rate: None,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),
@@ -669,6 +678,8 @@ async fn taxes_split_every_document_and_post_to_the_tax_accounts() -> AppResult<
             due_date: None,
             notes: None,
             prices_include_tax: false,
+            currency: None,
+            exchange_rate: None,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),

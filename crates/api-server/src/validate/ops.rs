@@ -16,6 +16,34 @@ fn money(m: &Map<String, Value>, key: &str) -> Option<Money> {
     m.get(key).and_then(Money::from_json)
 }
 
+/// D30: an exchange rate — a positive number with at most 8 decimals, read from the JSON text —
+/// as hundred-millionths (1.5 → 150000000).
+fn exchange_rate(m: &Map<String, Value>) -> Result<Option<i64>, AppError> {
+    let Some(v) = m.get("exchangeRate").filter(|v| !v.is_null()) else { return Ok(None) };
+    let bad =
+        || AppError::validation(vec!["exchangeRate must be a positive number with at most 8 decimal places".into()]);
+    let text = match v {
+        Value::Number(n) => n.to_string(),
+        _ => return Err(bad()),
+    };
+    let (whole, frac) = text.split_once('.').unwrap_or((&text, ""));
+    if whole.is_empty() || whole.starts_with('-') || frac.len() > 8 || text.contains(['e', 'E']) {
+        return Err(bad());
+    }
+    let whole: i64 = whole.parse().map_err(|_| bad())?;
+    let frac: i64 = if frac.is_empty() { 0 } else { format!("{frac:0<8}").parse().map_err(|_| bad())? };
+    let rate = whole.checked_mul(100_000_000).and_then(|w| w.checked_add(frac)).ok_or_else(bad)?;
+    if rate <= 0 {
+        return Err(bad());
+    }
+    Ok(Some(rate))
+}
+
+/// D30: a currency code, upper-cased.
+fn currency(m: &Map<String, Value>) -> Option<String> {
+    opt_string(m, "currency").map(|c| c.trim().to_ascii_uppercase()).filter(|c| !c.is_empty())
+}
+
 // ─── Customers and vendors ──────────────────────────────────────────────────
 
 pub(crate) fn party_rules(v: &mut Validator, optional: bool) {
@@ -84,7 +112,9 @@ pub(crate) fn invoice_rules(v: &mut Validator, optional: bool) {
         .field("paymentOptions", true, &[Rule::IsArray, Rule::IsStringEach, Rule::MaxLengthEach(300)])
         .field("signatoryName", true, &[Rule::IsString, Rule::MaxLength(120)])
         .field("signatoryTitle", true, &[Rule::IsString, Rule::MaxLength(120)])
-        .field("pricesIncludeTax", true, &[Rule::IsBoolean]);
+        .field("pricesIncludeTax", true, &[Rule::IsBoolean])
+        .field("currency", true, &[Rule::IsString, Rule::MaxLength(3)])
+        .field("exchangeRate", true, &[Rule::IsFiniteNumber]);
     nested_array(v, "lines", optional, 1, invoice_line_rules);
 }
 
@@ -127,6 +157,8 @@ pub fn create_invoice(body: Map<String, Value>) -> Result<operations::invoices::
         signatory_title: opt_string(&m, "signatoryTitle"),
         lines: invoice_lines(&m).flatten().unwrap_or_default(),
         prices_include_tax: m.get("pricesIncludeTax").and_then(Value::as_bool).unwrap_or(false),
+        currency: currency(&m),
+        exchange_rate: exchange_rate(&m)?,
     })
 }
 
@@ -148,6 +180,10 @@ pub fn update_invoice(body: Map<String, Value>) -> Result<InvoicePatch, AppError
         signatory_title: nullable(&m, "signatoryTitle"),
         lines: invoice_lines(&m),
         prices_include_tax: m.get("pricesIncludeTax").and_then(Value::as_bool),
+        currency: m
+            .get("currency")
+            .map(|v| v.as_str().map(|c| c.trim().to_ascii_uppercase()).filter(|c| !c.is_empty())),
+        exchange_rate: exchange_rate(&m)?,
     })
 }
 
@@ -212,7 +248,9 @@ pub(crate) fn bill_rules(v: &mut Validator) {
         .field("date", false, &[Rule::IsDateFormat])
         .field("dueDate", true, &[Rule::IsDateFormat])
         .field("notes", true, &[Rule::IsString])
-        .field("pricesIncludeTax", true, &[Rule::IsBoolean]);
+        .field("pricesIncludeTax", true, &[Rule::IsBoolean])
+        .field("currency", true, &[Rule::IsString, Rule::MaxLength(3)])
+        .field("exchangeRate", true, &[Rule::IsFiniteNumber]);
     nested_array(v, "lines", false, 1, bill_line_rules);
 }
 
@@ -243,6 +281,8 @@ pub fn create_bill(body: Map<String, Value>) -> Result<operations::bills::Create
         notes: opt_string(&m, "notes"),
         lines,
         prices_include_tax: m.get("pricesIncludeTax").and_then(Value::as_bool).unwrap_or(false),
+        currency: currency(&m),
+        exchange_rate: exchange_rate(&m)?,
     })
 }
 
@@ -287,7 +327,8 @@ pub(crate) fn payment_rules(v: &mut Validator) {
         .field("paymentAccountId", false, &[Rule::IsUuid])
         .field("notes", true, &[Rule::IsString])
         .field("withholdingTaxCodeId", true, &[Rule::IsUuid])
-        .field("withholdingAmount", true, &[Rule::IsMoneyNumber, Rule::MinZero]);
+        .field("withholdingAmount", true, &[Rule::IsMoneyNumber, Rule::MinZero])
+        .field("exchangeRate", true, &[Rule::IsFiniteNumber]);
 }
 
 pub fn create_payment(body: Map<String, Value>) -> Result<operations::payments::CreatePayment, AppError> {
@@ -307,6 +348,7 @@ pub fn create_payment(body: Map<String, Value>) -> Result<operations::payments::
         notes: opt_string(&m, "notes"),
         withholding_tax_code_id: opt_string(&m, "withholdingTaxCodeId"),
         withholding_amount: money(&m, "withholdingAmount").unwrap_or_default(),
+        exchange_rate: exchange_rate(&m)?,
     })
 }
 
