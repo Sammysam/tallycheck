@@ -26,7 +26,7 @@ import StatusBar from './desktop/StatusBar';
 import Dialog from './desktop/Dialog';
 import { hasCommand, isUnsaved, runCommand, setUnsaved, subscribeCommands } from '../lib/commands';
 import { exportScreen } from '../lib/exportCsv';
-import { companyIsSetUp, region, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
+import { companyIsSetUp, region, SETUP_LATER, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
 import api from '../api/client';
 
 declare const __APP_VERSION__: string;
@@ -84,7 +84,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       .then((r) => {
         setRegion(regionFromSettings(r.data));
         // A new installation: the administrator enters the company before anything else.
-        if (!companyIsSetUp(r.data) && hasPermission('settings')) navigate('/company-setup', { replace: true });
+        if (!companyIsSetUp(r.data) && hasPermission('settings') && !sessionStorage.getItem(SETUP_LATER)) navigate('/company-setup', { replace: true });
       })
       .catch(() => {})
       .finally(() => setRegionReady(true));
