@@ -523,6 +523,36 @@ try {
     await waitFor(`document.body.innerText.includes('Grand Total Outstanding')`, 'AR ageing');
   });
 
+  await check('Reports drill into an account, a customer gets a statement, Ctrl+E exports it (D23)', async () => {
+    await go('/reports/profit-loss');
+    await waitFor(`[...document.querySelectorAll('a.report-link')].some((a) => a.textContent.includes('4000 Revenue'))`, 'revenue link');
+    await evaluate(`[...document.querySelectorAll('a.report-link')].find((a) => a.textContent.includes('4000 Revenue')).click()`);
+    await waitFor(`location.pathname.startsWith('/ledger/account/') && location.search.includes('dateFrom=')`, 'account activity page');
+    await waitFor(`document.querySelector('[data-testid=closing-balance]')?.innerText.includes('2,500.63') && document.body.innerText.includes('INV-9000')`, 'revenue entries');
+    await shot('18b-account-activity');
+
+    await go('/customers');
+    await rowAction('Acme Ltd', 'Statement');
+    await waitFor(`location.pathname.endsWith('/statement') && document.body.innerText.includes('STATEMENT OF ACCOUNT')`, 'statement page');
+    await waitFor(`['INV-9000', 'PAY-000001'].every((t) => document.body.innerText.includes(t)) && document.querySelector('[data-testid=amount-due]').innerText.includes('0.00')`, 'statement lines, nothing due');
+    await shot('18c-statement');
+
+    const dl = join(SHOTS, 'downloads');
+    const before = new Set(readdirSync(dl));
+    await press('e', 'KeyE', 69, 2);
+    const end = Date.now() + 15000;
+    let csv;
+    while (Date.now() < end && !csv) {
+      csv = readdirSync(dl).find((f) => f.endsWith('.csv') && !before.has(f));
+      await sleep(250);
+    }
+    if (!csv) throw new Error('Ctrl+E saved no CSV');
+    await sleep(300);
+    const text = readFileSync(join(dl, csv), 'utf8');
+    if (!csv.startsWith('Customer Statement ') || !text.startsWith('\ufeff')) throw new Error('unexpected file ' + csv);
+    if (!text.includes('INV-9000') || !text.includes('2500.63') || text.includes('LKR')) throw new Error('CSV content:\n' + text.slice(0, 400));
+  });
+
   // ── W4: employees ──────────────────────────────────────────────────────────
   /** Puts a local file into a file input the way a user picking it would (fires change). */
   const pickFile = async (selector, path) => {

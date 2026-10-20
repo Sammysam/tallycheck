@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
 import PageHeader from '../../components/PageHeader';
+import { AccountLink } from '../../components/ReportTable';
 
-interface Row { account: { code: string; name: string; type: string }; debit: number; credit: number; balance: number }
+interface Row { account: { id: string; code: string; name: string; type: string }; debit: number; credit: number; balance: number }
 
 export default function TrialBalance() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -18,39 +19,33 @@ export default function TrialBalance() {
 
   return (
     <div>
-      <PageHeader title="Trial Balance" />
-      {loading ? <p className="text-gray-400">Loading...</p> : (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">Code</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">Account</th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">Type</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600">Debit</th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600">Credit</th>
+      <PageHeader title="Trial Balance" subtitle="All dates · click an account to see its entries" />
+      {loading ? <p className="text-gray-500">Loading...</p> : (
+        <table className="report-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Type</th>
+              <th className="num">Debit</th>
+              <th className="num">Credit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.account.id}>
+                <td><AccountLink account={r.account} /></td>
+                <td className="text-xs text-gray-600">{r.account.type}</td>
+                <td className="num">{Number(r.debit) > 0 ? fmt(r.debit) : ''}</td>
+                <td className="num">{Number(r.credit) > 0 ? fmt(r.credit) : ''}</td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {rows.map((r, i) => (
-                <tr key={i} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono text-xs text-gray-500">{r.account.code}</td>
-                  <td className="px-4 py-2 text-gray-700">{r.account.name}</td>
-                  <td className="px-4 py-2 text-gray-500 text-xs">{r.account.type}</td>
-                  <td className="px-4 py-2 text-right">{Number(r.debit) > 0 ? fmt(r.debit) : ''}</td>
-                  <td className="px-4 py-2 text-right">{Number(r.credit) > 0 ? fmt(r.credit) : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
-              <tr>
-                <td colSpan={3} className="px-4 py-3">Total</td>
-                <td className="px-4 py-3 text-right">{fmt(totalDebit)}</td>
-                <td className="px-4 py-3 text-right">{fmt(totalCredit)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+            ))}
+            <tr className="total">
+              <td colSpan={2}>Total</td>
+              <td className="num">{fmt(totalDebit)}</td>
+              <td className="num">{fmt(totalCredit)}</td>
+            </tr>
+          </tbody>
+        </table>
       )}
     </div>
   );

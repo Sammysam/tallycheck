@@ -1655,3 +1655,50 @@ async fn bank_reconciliation_through_the_api() -> TestResult {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn statements_and_account_activity_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let revenue = id_of("4000")?;
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme"}))).await?;
+    let cust_id = cust.body["id"].as_str().ok_or("cust")?.to_string();
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust_id, "date": "2026-04-01",
+                "lines": [{"description": "Design", "quantity": 1, "unitPrice": 750, "accountId": revenue}]})),
+        )
+        .await?;
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+    app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+
+    let path = format!("/api/customers/{cust_id}/statement?dateFrom=2026-01-01");
+    let st = app.call(Method::GET, &path, Some(&admin), None).await?;
+    assert_eq!(st.status, StatusCode::OK, "{}", st.body);
+    assert_eq!((st.body["customer"]["name"].as_str(), st.body["closingBalance"].clone()), (Some("Acme"), json!(750)));
+    assert_eq!(app.call(Method::GET, &path, Some(&viewer), None).await?.status, StatusCode::FORBIDDEN);
+    let bad =
+        app.call(Method::GET, &format!("/api/customers/{cust_id}/statement?dateFrom=nope"), Some(&admin), None).await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    // The Viewer role has `ledger`, so it may drill into a report figure.
+    let act = app
+        .call(Method::GET, &format!("/api/ledger/activity/{revenue}?dateTo=2026-12-31"), Some(&viewer), None)
+        .await?;
+    assert_eq!(act.status, StatusCode::OK, "{}", act.body);
+    assert_eq!((act.body["account"]["code"].as_str(), act.body["closingBalance"].clone()), (Some("4000"), json!(750)));
+    assert_eq!(act.body["lines"][0]["sourceType"], "INVOICE");
+    Ok(())
+}

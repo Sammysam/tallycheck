@@ -452,3 +452,19 @@ pub async fn debit_notes_void(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     notes_void(&s, credit_notes::AP, a.user(), &id).await
 }
+
+/// D23: a customer's statement — invoices, payments and credit notes with a running balance.
+pub async fn customer_statement(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+    Query(p): Pairs,
+) -> AppResult<Json<Value>> {
+    let q = validate::query_map(p);
+    let from = validate::optional_query_date(&q, "dateFrom")?;
+    let to = validate::optional_query_date(&q, "dateTo")?;
+    let mut c = s.db.read().acquire().await?;
+    let out = operations::statements::customer_statement(&mut c, &id, from.as_deref(), to.as_deref(), &scope(a.user()))
+        .await?;
+    Ok(Json(out))
+}
