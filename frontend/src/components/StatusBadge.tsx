@@ -12,7 +12,7 @@ const colors: Record<string, [string, string]> = {
 export default function StatusBadge({ status }: { status: string }) {
   const [pill, dot] = colors[status] ?? colors.DRAFT;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide ring-1 ring-inset ${pill}`}>
+    <span className={`inline-flex items-center gap-1.5 px-1.5 py-px rounded-sm text-[11px] font-semibold ring-1 ring-inset ${pill}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
       {status}
     </span>

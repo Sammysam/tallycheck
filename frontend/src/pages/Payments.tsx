@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import Pagination from '../components/Pagination';
 
@@ -17,6 +18,9 @@ export default function Payments() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [bills, setBills] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', () => setShowForm(true));
+  useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '' });
   const [error, setError] = useState('');
 

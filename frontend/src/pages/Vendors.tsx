@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 
 interface Vendor { id: string; name: string; email: string; phone: string; address: string }
@@ -8,6 +9,9 @@ interface Vendor { id: string; name: string; email: string; phone: string; addre
 export default function Vendors() {
   const [rows, setRows] = useState<Vendor[]>([]);
   const [showForm, setShowForm] = useState(false);
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', () => setShowForm(true));
+  useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState({ name: '', email: '', phone: '', address: '' });
 
   const load = () => api.get('/vendors').then((r) => setRows(r.data));

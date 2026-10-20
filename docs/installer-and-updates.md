@@ -39,6 +39,6 @@ No certificate is available to this project, so the installers built here are **
 | Automatic updates | **Not enabled.** Tauri's updater (`tauri-plugin-updater`) only works with an internet connection and a signed update feed. It cannot update a PC without internet, so it is not promised. If the office later wants it, it needs an update signing key pair, an HTTPS location for the update manifest, and internet on the main PC. |
 | Offline update package | The signed installer *is* the offline update package. Distribute it with its SHA-256 (`certutil -hashfile <file> SHA256`) so the office can check it before running it. |
 
-Before any update: make a backup (*Tools → Backup and restore…*) and keep it off the PC.
+Before any update: make a backup (*File → Backup and restore…*) and keep it off the PC.
 
 Going back to an older version after an upgrade is not supported, because the database may have been migrated. Restore the pre-upgrade copy or a backup with the older version instead.

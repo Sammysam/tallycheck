@@ -1,50 +1,21 @@
 import { useState, type InputHTMLAttributes, type ReactNode } from 'react';
-import { BarChart3, Eye, EyeOff, Lock, ShieldCheck, WifiOff } from 'lucide-react';
+import { Eye, EyeOff, WifiOff } from 'lucide-react';
 
-/** Sign-in, first-run and 2FA screens: brand panel on the left, the form card on the right. */
+/** Sign-in, first-run and 2FA screens: one centred sign-in window, like a desktop program's. */
 export default function AuthShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen flex bg-[#f4f6fa]">
-      <aside className="auth-panel hidden lg:flex w-[46%] max-w-[640px] flex-col justify-between p-12 text-white">
-        <div>
-          <img src="/Logo_black.png" alt="Cenango" className="sidebar-logo h-8 w-auto" />
-          <p className="mt-2 text-xs font-medium uppercase tracking-[0.2em] text-orange-400">Accounting System</p>
+    <div className="h-screen overflow-auto flex items-center justify-center p-6 bg-[#e9ecef]">
+      <div className="w-full max-w-[420px] bg-white border border-[#cfcfcf] rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.18)] overflow-hidden">
+        <div className="auth-panel px-6 py-5">
+          <img src="/Logo_black.png" alt="Cenango" className="logo-white h-6 w-auto" />
+          <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-orange-300">Accounting System</p>
         </div>
-
-        <div>
-          <h2 className="text-4xl font-bold leading-tight tracking-tight">
-            Your books,<br />
-            <span className="text-orange-400">clear and in order.</span>
-          </h2>
-          <p className="mt-4 max-w-md text-slate-300">
-            Invoices, bills, payroll and reports in one place, running on this computer.
-          </p>
-          <ul className="mt-8 space-y-3 text-sm text-slate-200">
-            {[
-              { icon: WifiOff, text: 'Works fully offline — your data stays on this PC' },
-              { icon: Lock, text: 'Encrypted backups and employee documents' },
-              { icon: BarChart3, text: 'Live profit & loss, balance sheet and ageing' },
-              { icon: ShieldCheck, text: 'Optional two-factor sign-in' },
-            ].map(({ icon: I, text }) => (
-              <li key={text} className="flex items-center gap-3">
-                <span className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-                  <I size={16} className="text-orange-300" />
-                </span>
-                {text}
-              </li>
-            ))}
-          </ul>
+        <div className="px-6 py-5">{children}</div>
+        <div className="flex items-center gap-1.5 px-6 py-2 text-[11px] text-gray-500 bg-[#f3f3f3] border-t border-[#e5e5e5]">
+          <WifiOff size={12} />
+          Works offline. Your data stays on this PC.
         </div>
-
-        <p className="text-xs text-slate-500">© {new Date().getFullYear()} Cenango</p>
-      </aside>
-
-      <main className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-md">
-          <img src="/Logo_black.png" alt="Cenango" className="lg:hidden h-7 w-auto mx-auto mb-8" />
-          <div className="bg-white rounded-3xl border border-gray-200/80 shadow-xl shadow-slate-900/5 p-9">{children}</div>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
@@ -59,11 +30,11 @@ export function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
         type="button"
         tabIndex={-1}
         onClick={() => setShown((s) => !s)}
-        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 rounded-md"
+        className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:bg-gray-100 rounded"
         aria-label={shown ? 'Hide password' : 'Show password'}
         title={shown ? 'Hide password' : 'Show password'}
       >
-        {shown ? <EyeOff size={16} /> : <Eye size={16} />}
+        {shown ? <EyeOff size={15} /> : <Eye size={15} />}
       </button>
     </div>
   );

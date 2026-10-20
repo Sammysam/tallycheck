@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import ProtectedImage from '../components/ProtectedImage';
@@ -22,6 +23,9 @@ export default function Employees() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'' | EmployeeStatus>('');
   const [showForm, setShowForm] = useState(false);
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', () => setShowForm(true));
+  useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState<EmployeeForm>(emptyEmployeeForm);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);

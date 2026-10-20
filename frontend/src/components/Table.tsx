@@ -33,10 +33,8 @@ export default function Table<T extends { id: string }>({
 
   if (data.length === 0) {
     return (
-      <div className="bg-white border border-gray-200/80 rounded-2xl py-16 flex flex-col items-center text-center shadow-sm">
-        <span className="w-12 h-12 rounded-2xl bg-orange-50 text-orange-500 flex items-center justify-center mb-3">
-          <Inbox size={22} />
-        </span>
+      <div className="bg-white border border-[#e0e0e0] rounded-md py-10 flex flex-col items-center text-center">
+        <Inbox size={28} strokeWidth={1.5} className="text-gray-400 mb-2" />
         <p className="text-gray-700 text-sm font-medium">{emptyMessage}</p>
         <p className="text-gray-400 text-xs mt-1">New records will appear here.</p>
       </div>
@@ -47,21 +45,21 @@ export default function Table<T extends { id: string }>({
   const rows = q ? data.filter((row) => JSON.stringify(row).toLowerCase().includes(q)) : data;
 
   return (
-    <div className="rounded-2xl border border-gray-200/80 bg-white shadow-sm overflow-hidden">
+    <div className="rounded-md border border-[#e0e0e0] bg-white overflow-hidden">
       {searchable && data.length > 3 && (
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
-          <label className="relative w-72 max-w-full">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <div className="flex items-center justify-between gap-3 px-2 py-1.5 border-b border-[#e5e5e5] bg-[#fafafa]">
+          <label className="relative w-64 max-w-full">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Filter these rows…"
-              className="!pl-9 !h-9 !bg-gray-50 focus:!bg-white"
+              className="!pl-8 !h-7"
               aria-label="Filter these rows"
             />
           </label>
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-gray-500 pr-1">
             {q ? `${rows.length} of ${data.length}` : `${data.length}`} {data.length === 1 ? 'row' : 'rows'}
           </span>
         </div>
@@ -69,24 +67,24 @@ export default function Table<T extends { id: string }>({
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm border-collapse">
           <thead>
-            <tr className="bg-gray-50/80 border-b border-gray-200/80">
+            <tr className="bg-[#f5f5f5] border-b border-[#d9d9d9]">
               {columns.map((col) => (
                 <th
                   key={col.header}
-                  className={`px-5 py-3 text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${alignOf(col.header, col.className)}`}
+                  className={`sticky top-0 px-3 py-1.5 text-xs font-semibold text-gray-700 whitespace-nowrap border-r border-[#e5e5e5] last:border-r-0 ${alignOf(col.header, col.className)}`}
                 >
                   {col.header}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody>
             {rows.map((row) => (
-              <tr key={row.id} className="hover:bg-orange-50/40 transition-colors">
+              <tr key={row.id} className="border-b border-[#efefef] last:border-b-0 even:bg-[#fbfbfb] hover:bg-[#fff4ec]">
                 {columns.map((col) => (
                   <td
                     key={col.header}
-                    className={`px-5 py-3.5 text-gray-700 align-middle ${alignOf(col.header, col.className)}`}
+                    className={`px-3 py-1.5 text-[#1b1b1b] align-middle ${alignOf(col.header, col.className)}`}
                   >
                     {typeof col.accessor === 'function'
                       ? col.accessor(row)
@@ -97,7 +95,7 @@ export default function Table<T extends { id: string }>({
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-5 py-10 text-center text-sm text-gray-400">
+                <td colSpan={columns.length} className="px-3 py-8 text-center text-sm text-gray-500">
                   Nothing matches “{query}”.
                 </td>
               </tr>

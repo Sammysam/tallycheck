@@ -102,7 +102,7 @@ export default function TwoFactorSetup() {
                 <button
                   type="submit"
                   disabled={loading || code.length !== 6}
-                  className="w-full py-3 px-4 bg-orange-600 shadow-sm shadow-orange-600/30 text-white text-sm font-medium rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                  className="w-full h-8 px-4 bg-orange-600 border border-orange-700 text-white text-sm rounded hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                 >
                   {loading && (
                     <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />

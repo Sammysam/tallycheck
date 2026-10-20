@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
@@ -20,6 +21,9 @@ export default function Bills() {
   const [vendors, setVendors] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', () => setShowForm(true));
+  useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', lines: [emptyLine()] });
   const [error, setError] = useState('');
 

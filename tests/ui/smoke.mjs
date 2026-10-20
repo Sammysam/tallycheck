@@ -103,6 +103,11 @@ const clickText = (text, tag = 'button') => evaluate(`(() => {
   if (!el) throw new Error('no ${tag} with text ' + ${JSON.stringify(text)});
   el.click(); return true; })()`);
 const pageText = () => evaluate('document.body.innerText');
+/** Presses a real key through DevTools. modifiers: 1 Alt, 2 Ctrl, 8 Shift. */
+async function press(key, code, keyCode, modifiers = 0) {
+  await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code, windowsVirtualKeyCode: keyCode, modifiers });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode, modifiers });
+}
 async function shot(name) {
   const { data } = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(data, 'base64'));
@@ -402,6 +407,40 @@ try {
     await rowAction('BILL-000001', 'Post');
     await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('BILL-000001') && tr.innerText.includes('POSTED'))`, 'bill posted');
     await shot('15-bills');
+  });
+
+  await check('Desktop window: menu bar, toolbar and keyboard shortcuts', async () => {
+    await go('/bills');
+    const formOpen = `!!document.querySelector('input[placeholder="Item description"]')`;
+    await press('n', 'KeyN', 78, 2);
+    await waitFor(formOpen, 'Ctrl+N opens a new bill');
+    await type('input[placeholder="Item description"]', 'Unsaved line');
+    await press('Escape', 'Escape', 27);
+    await waitFor(`document.body.innerText.includes('Close it anyway?')`, 'Esc asks before dropping typing');
+    await clickText('Close without saving');
+    await waitFor(`!(${formOpen})`, 'form closed');
+    await clickText('Invoice');
+    await waitFor(`location.pathname === '/invoices' && document.querySelector('h1')?.textContent === 'New Invoice'`, 'toolbar opens a new invoice');
+    await press('Escape', 'Escape', 27);
+    await waitFor(`document.querySelector('h1')?.textContent === 'Invoices'`, 'Esc closes an untouched form');
+    await press('f', 'KeyF', 70, 1);
+    await waitFor(`!!document.querySelector('[role=menu]') && document.querySelector('[role=menu]').innerText.includes('Sign out')`, 'Alt+F opens the File menu');
+    await press('Escape', 'Escape', 27);
+    await waitFor(`!document.querySelector('[role=menu]')`, 'Esc closes the menu');
+    await press('F1', 'F1', 112);
+    await waitFor(`!!document.querySelector('[role=dialog]')?.innerText.includes('Keyboard shortcuts')`, 'F1 shows the shortcuts');
+    await press('Escape', 'Escape', 27);
+    await waitFor(`!document.querySelector('[role=dialog]')`, 'dialog closed');
+    await press('b', 'KeyB', 66, 2);
+    await waitFor(`!document.querySelector('.desk-nav')`, 'Ctrl+B hides the navigation pane');
+    await press('b', 'KeyB', 66, 2);
+    await waitFor(`!!document.querySelector('.desk-nav')`, 'Ctrl+B shows it again');
+    const blocked = await evaluate(`!document.querySelector('main').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`);
+    if (!blocked) throw new Error('the browser right-click menu is still on');
+    await press('F5', 'F5', 116);
+    await sleep(500);
+    if ((await evaluate('location.pathname')) !== '/invoices') throw new Error('F5 left the screen');
+    await shot('15b-desktop-shell');
   });
 
   await check('Expenses page records and posts an expense', async () => {

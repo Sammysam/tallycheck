@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 
 interface Account { id: string; code: string; name: string; type: string; subtype: string }
@@ -8,6 +9,9 @@ interface Account { id: string; code: string; name: string; type: string; subtyp
 export default function Accounts() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showForm, setShowForm] = useState(false);
+  // Ctrl+N / Esc and the toolbar, via the desktop shell.
+  useCommand('new', () => setShowForm(true));
+  useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState({ code: '', name: '', type: 'ASSET', subtype: '' });
 
   const load = () => api.get('/accounts').then((r) => setAccounts(r.data));
