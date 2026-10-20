@@ -6,16 +6,23 @@ import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
 import { region, regionFromSettings, setRegion } from '../lib/region';
-import type { TaxCode } from '../lib/taxes';
+import type { TaxCode, TaxKind } from '../lib/taxes';
 
 /**
- * D26: the company's own tax codes — VAT, GST, sales tax, zero-rated, exempt. Nothing about any
- * country's tax law is built in: the company enters its rates and where each tax posts.
+ * D26/D27: the company's own tax codes. Nothing about any country's tax law is built in:
+ * - Standard: one rate (VAT, GST, sales tax, zero-rated, exempt);
+ * - Group: several standard codes charged together (state + county + city), optionally compound;
+ * - Withholding: tax a payer holds back from a payment for the tax office.
  */
 
 interface Account { id: string; code: string; name: string; type: string; isActive: boolean }
+interface Part { taxCodeId: string; isCompound: boolean }
 
-const emptyForm = { name: '', rate: '', description: '', salesAccountId: '', purchaseAccountId: '', isActive: true };
+const KIND_LABEL: Record<TaxKind, string> = { STANDARD: 'Standard', GROUP: 'Group', WITHHOLDING: 'Withholding' };
+const emptyForm = {
+  name: '', kind: 'STANDARD' as TaxKind, rate: '', description: '', salesAccountId: '', purchaseAccountId: '',
+  isActive: true, components: [] as Part[],
+};
 
 export default function Taxes() {
   const [codes, setCodes] = useState<TaxCode[]>([]);
@@ -35,51 +42,73 @@ export default function Taxes() {
     loadAccounts();
   }, []);
 
-  const liabilities = accounts.filter((a) => a.type === 'LIABILITY' && a.isActive);
-  const assetsAndLiabilities = accounts.filter((a) => (a.type === 'ASSET' || a.type === 'LIABILITY') && a.isActive);
+  const active = (type: string) => accounts.filter((a) => a.type === type && a.isActive);
   const byId = (id: string) => accounts.find((a) => a.id === id);
   const label = (id: string) => {
     const a = byId(id);
     return a ? `${a.code} ${a.name}` : '—';
   };
+  const codeName = (id: string) => codes.find((c) => c.id === id)?.name ?? '?';
+  const standards = codes.filter((c) => c.kind === 'STANDARD' && c.id !== editing);
+
+  /** Accounts for a kind: [sales-side choices, purchase-side choices]. */
+  const choices = (kind: TaxKind): [Account[], Account[]] =>
+    kind === 'WITHHOLDING'
+      ? [active('ASSET'), active('LIABILITY')]
+      : [active('LIABILITY'), [...active('ASSET'), ...active('LIABILITY')]];
+
+  const guess = (kind: TaxKind) => {
+    const [sales, purchase] = choices(kind);
+    const match = (list: Account[], re: RegExp) => list.find((a) => re.test(a.name))?.id ?? '';
+    return kind === 'WITHHOLDING'
+      ? { salesAccountId: match(sales, /withh|wht/i), purchaseAccountId: match(purchase, /withh|wht/i) }
+      : { salesAccountId: match(sales, /tax|vat|gst/i), purchaseAccountId: match(purchase, /tax|vat|gst/i) };
+  };
 
   const startNew = () => {
     setEditing(null);
     setError('');
-    // Usual tax accounts first, if the chart has them.
-    const payable = accounts.find((a) => a.type === 'LIABILITY' && /tax|vat|gst/i.test(a.name));
-    const receivable = accounts.find((a) => a.type === 'ASSET' && /tax|vat|gst/i.test(a.name));
-    setForm({ ...emptyForm, salesAccountId: payable?.id ?? '', purchaseAccountId: receivable?.id ?? payable?.id ?? '' });
+    setForm({ ...emptyForm, ...guess('STANDARD') });
     setShowForm(true);
   };
   useCommand('new', startNew);
   useCommand('close', () => setShowForm(false));
 
+  const chooseKind = (kind: TaxKind) => setForm((f) => ({ ...f, kind, ...guess(kind), components: [] }));
+
   const startEdit = (c: TaxCode) => {
     setEditing(c.id);
     setError('');
     setForm({
-      name: c.name, rate: String(c.rate), description: c.description ?? '',
+      name: c.name, kind: c.kind, rate: String(c.rate), description: c.description ?? '',
       salesAccountId: c.salesAccountId, purchaseAccountId: c.purchaseAccountId, isActive: c.isActive,
+      components: c.components,
     });
     setShowForm(true);
   };
 
-  /** Adds "Tax Payable" and "Tax Receivable" to the chart if they are not there yet. */
-  const createTaxAccounts = async () => {
+  /** Adds the accounts a kind posts to, if the chart does not have them yet. */
+  const createAccounts = async () => {
     setBusy(true);
     setError('');
     try {
       const taken = new Set(accounts.map((a) => a.code));
       const pick = (preferred: string[]) => preferred.find((c) => !taken.has(c)) ?? '';
-      const payableCode = pick(['2300', '2310', '2390']);
-      const receivableCode = pick(['1400', '1410', '1490']);
-      const made = await Promise.all([
-        api.post('/accounts', { code: payableCode, name: 'Tax Payable', type: 'LIABILITY', subtype: 'current_liability' }),
-        api.post('/accounts', { code: receivableCode, name: 'Tax Receivable', type: 'ASSET', subtype: 'current_asset' }),
-      ]);
+      const pair = form.kind === 'WITHHOLDING'
+        ? [
+          { code: pick(['1450', '1460', '1470']), name: 'Withholding Tax Receivable', type: 'ASSET', subtype: 'current_asset' },
+          { code: pick(['2350', '2360', '2370']), name: 'Withholding Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
+        ]
+        : [
+          { code: pick(['2300', '2310', '2390']), name: 'Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
+          { code: pick(['1400', '1410', '1490']), name: 'Tax Receivable', type: 'ASSET', subtype: 'current_asset' },
+        ];
+      const made = await Promise.all(pair.map((a) => api.post('/accounts', a)));
       await loadAccounts();
-      setForm((f) => ({ ...f, salesAccountId: made[0].data.id, purchaseAccountId: made[1].data.id }));
+      const [first, second] = made.map((r) => r.data.id);
+      setForm((f) => (f.kind === 'WITHHOLDING'
+        ? { ...f, salesAccountId: first, purchaseAccountId: second }
+        : { ...f, salesAccountId: first, purchaseAccountId: second }));
     } catch (e) {
       setError(errMsg(e, 'Could not add the tax accounts'));
     } finally {
@@ -87,19 +116,26 @@ export default function Taxes() {
     }
   };
 
+  const togglePart = (id: string, on: boolean) =>
+    setForm((f) => ({
+      ...f,
+      components: on ? [...f.components, { taxCodeId: id, isCompound: false }] : f.components.filter((p) => p.taxCodeId !== id),
+    }));
+  const setCompound = (id: string, on: boolean) =>
+    setForm((f) => ({ ...f, components: f.components.map((p) => (p.taxCodeId === id ? { ...p, isCompound: on } : p)) }));
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const body = {
-        name: form.name.trim(),
-        rate: Number(form.rate),
-        description: form.description.trim() || null,
-        salesAccountId: form.salesAccountId,
-        purchaseAccountId: form.purchaseAccountId,
-        isActive: form.isActive,
-      };
+      const common = { name: form.name.trim(), description: form.description.trim() || null, isActive: form.isActive };
+      const body = form.kind === 'GROUP'
+        ? { ...common, kind: form.kind, components: form.components }
+        : {
+          ...common, kind: form.kind, rate: Number(form.rate),
+          salesAccountId: form.salesAccountId, purchaseAccountId: form.purchaseAccountId,
+        };
       if (editing) await api.patch(`/tax-codes/${editing}`, body);
       else await api.post('/tax-codes', body);
       setShowForm(false);
@@ -124,61 +160,108 @@ export default function Taxes() {
     }
   };
 
-  const active = codes.filter((c) => c.isActive);
+  const lineCodes = codes.filter((c) => c.isActive && c.kind !== 'WITHHOLDING');
+  const [salesChoices, purchaseChoices] = choices(form.kind);
+  const hasAccounts = form.kind === 'WITHHOLDING'
+    ? accounts.some((a) => /withh|wht/i.test(a.name))
+    : accounts.some((a) => a.type === 'LIABILITY' && /tax|vat|gst/i.test(a.name));
 
   return (
     <div>
       <PageHeader
         title="Taxes"
-        subtitle="Your tax codes — VAT, GST, sales tax, zero-rated or exempt — and where each posts."
+        subtitle="Your tax codes — VAT, GST, sales tax, groups of taxes and withholding tax — and where each posts."
         action={<button className="btn btn-primary" onClick={startNew}>+ New Tax Code</button>}
       />
       {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded">{error}</div>}
 
       {showForm && (
-        <div className="card mb-4" style={{ maxWidth: 760 }}>
-          <form onSubmit={submit} className="form-grid" style={{ gridTemplateColumns: '2fr 1fr' }} aria-label="Tax code">
+        <div className="card mb-4" style={{ maxWidth: 820 }}>
+          <form onSubmit={submit} className="form-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr' }} aria-label="Tax code">
             <label className="text-xs font-medium text-gray-600">
               Name (as printed on invoices)
               <input className="mt-1" required maxLength={60} placeholder="e.g. VAT 18%" value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </label>
             <label className="text-xs font-medium text-gray-600">
-              Rate %
-              <input className="mt-1" required type="number" min="0" max="100" step="0.0001" placeholder="e.g. 18" value={form.rate}
-                onChange={(e) => setForm({ ...form, rate: e.target.value })} />
-            </label>
-            <label className="text-xs font-medium text-gray-600">
-              Tax on sales posts to (a liability)
-              <select className="mt-1" required value={form.salesAccountId} onChange={(e) => setForm({ ...form, salesAccountId: e.target.value })} aria-label="Sales tax account">
-                <option value="">Choose an account…</option>
-                {liabilities.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+              Kind
+              <select className="mt-1" value={form.kind} disabled={!!editing} onChange={(e) => chooseKind(e.target.value as TaxKind)} aria-label="Kind">
+                <option value="STANDARD">Standard — one rate</option>
+                <option value="GROUP">Group — several taxes together</option>
+                <option value="WITHHOLDING">Withholding — held back from payments</option>
               </select>
             </label>
-            <label className="text-xs font-medium text-gray-600">
-              Tax on purchases posts to
-              <select className="mt-1" required value={form.purchaseAccountId} onChange={(e) => setForm({ ...form, purchaseAccountId: e.target.value })} aria-label="Purchase tax account">
-                <option value="">Choose an account…</option>
-                {assetsAndLiabilities.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-              </select>
-            </label>
+            {form.kind !== 'GROUP' ? (
+              <label className="text-xs font-medium text-gray-600">
+                Rate %
+                <input className="mt-1" required type="number" min="0" max="100" step="0.0001" placeholder="e.g. 18" value={form.rate}
+                  onChange={(e) => setForm({ ...form, rate: e.target.value })} />
+              </label>
+            ) : <span />}
+
+            {form.kind === 'GROUP' ? (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <p className="text-xs font-medium text-gray-600 mb-1">Taxes in this group, in the order they are charged</p>
+                {standards.length < 2 && <p className="text-xs text-gray-500">Create at least two standard tax codes first.</p>}
+                <div className="space-y-1">
+                  {standards.map((c) => {
+                    const part = form.components.find((p) => p.taxCodeId === c.id);
+                    const position = form.components.findIndex((p) => p.taxCodeId === c.id);
+                    return (
+                      <div key={c.id} className="flex items-center gap-4 text-sm">
+                        <label className="flex items-center gap-2 w-64">
+                          <input type="checkbox" checked={!!part} onChange={(e) => togglePart(c.id, e.target.checked)} aria-label={`Include ${c.name}`} />
+                          {part ? <span className="text-xs text-gray-500 w-4">{position + 1}.</span> : <span className="w-4" />}
+                          {c.name} <span className="text-gray-500">({c.rate}%)</span>
+                        </label>
+                        {part && position > 0 && (
+                          <label className="flex items-center gap-2 text-xs text-gray-600">
+                            <input type="checkbox" checked={part.isCompound} onChange={(e) => setCompound(c.id, e.target.checked)} />
+                            Charged on the price plus the taxes above it (compound)
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <>
+                <label className="text-xs font-medium text-gray-600" style={{ gridColumn: 'span 1' }}>
+                  {form.kind === 'WITHHOLDING' ? 'Withheld by customers goes to (an asset)' : 'Tax on sales goes to (a liability)'}
+                  <select className="mt-1" required value={form.salesAccountId} onChange={(e) => setForm({ ...form, salesAccountId: e.target.value })} aria-label="Sales tax account">
+                    <option value="">Choose an account…</option>
+                    {salesChoices.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs font-medium text-gray-600" style={{ gridColumn: 'span 2' }}>
+                  {form.kind === 'WITHHOLDING' ? 'Withheld from vendors goes to (a liability)' : 'Tax on purchases goes to'}
+                  <select className="mt-1" required value={form.purchaseAccountId} onChange={(e) => setForm({ ...form, purchaseAccountId: e.target.value })} aria-label="Purchase tax account">
+                    <option value="">Choose an account…</option>
+                    {purchaseChoices.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+                  </select>
+                </label>
+                {!hasAccounts && (
+                  <p className="text-xs text-gray-600" style={{ gridColumn: '1 / -1' }}>
+                    No {form.kind === 'WITHHOLDING' ? 'withholding' : ''} tax accounts in the chart yet.{' '}
+                    <button type="button" className="btn-link" disabled={busy} onClick={createAccounts}>
+                      {form.kind === 'WITHHOLDING' ? 'Add Withholding Tax Receivable and Payable' : 'Add Tax Payable and Tax Receivable'}
+                    </button>
+                  </p>
+                )}
+              </>
+            )}
             <label className="text-xs font-medium text-gray-600" style={{ gridColumn: '1 / -1' }}>
               Note (optional)
               <input className="mt-1" maxLength={200} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </label>
-            {!accounts.some((a) => a.type === 'LIABILITY' && /tax|vat|gst/i.test(a.name)) && (
-              <p className="text-xs text-gray-600" style={{ gridColumn: '1 / -1' }}>
-                No tax accounts in the chart yet.{' '}
-                <button type="button" className="btn-link" disabled={busy} onClick={createTaxAccounts}>Add Tax Payable and Tax Receivable</button>
-              </p>
-            )}
             <div className="flex gap-2" style={{ gridColumn: '1 / -1' }}>
               <button type="submit" className="btn btn-primary" disabled={busy}>{editing ? 'Save changes' : 'Save Tax Code'}</button>
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
             </div>
             {editing && (
               <p className="text-xs text-gray-500" style={{ gridColumn: '1 / -1' }}>
-                A new rate applies to new documents only; saved invoices and bills keep the tax they were raised with.
+                Changes apply to new documents only; saved invoices and bills keep the tax they were raised with.
               </p>
             )}
           </form>
@@ -190,9 +273,11 @@ export default function Taxes() {
         emptyMessage="No tax codes yet. Add one for each rate you charge or pay — or none if you are not registered for tax."
         columns={[
           { header: 'Name', accessor: 'name' },
+          { header: 'Kind', accessor: (c) => KIND_LABEL[c.kind] ?? c.kind },
           { header: 'Rate', accessor: (c) => `${c.rate}%` },
-          { header: 'Sales tax account', accessor: (c) => label(c.salesAccountId) },
-          { header: 'Purchase tax account', accessor: (c) => label(c.purchaseAccountId) },
+          { header: 'Posts to', accessor: (c) => (c.kind === 'GROUP'
+            ? c.components.map((p) => `${codeName(p.taxCodeId)}${p.isCompound ? ' (compound)' : ''}`).join(' + ')
+            : `${label(c.salesAccountId)} / ${label(c.purchaseAccountId)}`) },
           { header: 'Status', accessor: (c) => <StatusBadge status={c.isActive ? 'ACTIVE' : 'LEFT'} /> },
           { header: 'Actions', accessor: (c) => (
             <span className="space-x-3">
@@ -204,8 +289,8 @@ export default function Taxes() {
         ]}
       />
 
-      {active.length > 0 && (
-        <div className="card mt-4" style={{ maxWidth: 760 }}>
+      {lineCodes.length > 0 && (
+        <div className="card mt-4" style={{ maxWidth: 820 }}>
           <h3 className="text-sm font-semibold text-gray-700 mb-1">Defaults</h3>
           <p className="text-xs text-gray-500 mb-3">New invoice, bill and expense lines start with these; each line can still be changed.</p>
           <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
@@ -213,14 +298,14 @@ export default function Taxes() {
               Sales (invoices)
               <select className="mt-1" value={defaults.sales} onChange={(e) => saveDefaults({ ...defaults, sales: e.target.value })} aria-label="Default sales tax">
                 <option value="">No tax</option>
-                {active.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {lineCodes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
             <label className="text-xs font-medium text-gray-600">
               Purchases (bills and expenses)
               <select className="mt-1" value={defaults.purchases} onChange={(e) => saveDefaults({ ...defaults, purchases: e.target.value })} aria-label="Default purchase tax">
                 <option value="">No tax</option>
-                {active.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {lineCodes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
           </div>
@@ -241,7 +326,8 @@ export default function Taxes() {
           }
         >
           <p className="text-sm text-gray-800">
-            Delete <strong>{deleting.name}</strong>? A code that is already on documents cannot be deleted — switch it off instead.
+            Delete <strong>{deleting.name}</strong>? A code that is already on documents or in a group cannot be deleted —
+            switch it off instead.
           </p>
         </Dialog>
       )}

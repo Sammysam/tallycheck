@@ -7,7 +7,7 @@ import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { money } from '../lib/money';
 import { region } from '../lib/region';
-import { summarize, useTaxCodes } from '../lib/taxes';
+import { lineCodes, summarize, useTaxCodes } from '../lib/taxes';
 
 interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; totalAmount: number; status: string }
 
@@ -113,7 +113,7 @@ export default function Bills() {
                   {taxCodes.length > 0 && (
                     <select value={line.taxCodeId} onChange={(e) => setLine(i, 'taxCodeId', e.target.value)} aria-label={`Tax for line ${i + 1}`}>
                       <option value="">No tax</option>
-                      {taxCodes.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      {lineCodes(taxCodes).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   )}
                 </div>

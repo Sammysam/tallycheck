@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from './PageHeader';
 import { money } from '../lib/money';
+import { fmtDate } from '../lib/region';
 
 const BUCKETS = [
   { key: 'current', label: 'Current' },
@@ -64,8 +65,8 @@ export default function AgingReport({ kind }: { kind: 'ar' | 'ap' }) {
                     <td>{b.label}</td>
                     <td>{item.number}</td>
                     <td>{item.name}</td>
-                    <td>{item.date}</td>
-                    <td>{item.dueDate ?? '—'}</td>
+                    <td><span data-value={item.date ?? ''}>{fmtDate(item.date)}</span></td>
+                    <td>{item.dueDate ? <span data-value={item.dueDate ?? ''}>{fmtDate(item.dueDate)}</span> : '—'}</td>
                     <td className="num">{money(item.amount)}</td>
                   </tr>
                 )),

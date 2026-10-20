@@ -19,7 +19,7 @@ const n = (v: number | string | null | undefined) => Number(v) || 0;
 const fmtDate = (d?: string | null) => {
   if (!d) return '';
   const date = new Date(d);
-  return isNaN(date.getTime()) ? d : date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return isNaN(date.getTime()) ? d : date.toLocaleDateString(companyRegion().locale, { day: '2-digit', month: 'short', year: 'numeric' });
 };
 const today = () => fmtDate(new Date().toISOString().slice(0, 10));
 

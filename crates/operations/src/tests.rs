@@ -104,6 +104,8 @@ impl Shop {
             payment_method: "BANK_TRANSFER".into(),
             payment_account_id: self.acct["1000"].clone(),
             notes: None,
+            withholding_tax_code_id: None,
+            withholding_amount: Money::ZERO,
         }
     }
 }
@@ -621,6 +623,8 @@ async fn taxes_split_every_document_and_post_to_the_tax_accounts() -> AppResult<
     };
     let code = |name: &str, rate: i64| TaxCodeInput {
         name: Some(name.into()),
+        kind: None,
+        components: None,
         rate: Some(rate),
         description: None,
         sales_account_id: Some(payable.clone()),

@@ -111,9 +111,9 @@ pub async fn create(db: &Db, dto: CreateExpense) -> AppResult<Expense> {
     let mut tx = db.begin().await?;
     require_account(&mut tx, &dto.expense_account_id).await?;
     require_account(&mut tx, &dto.payment_account_id).await?;
-    let tax = match &dto.tax_code_id {
-        Some(code) => crate::tax::tax_of(dto.amount, crate::tax::usable(&mut tx, code).await?.rate, true)?,
-        None => Money::ZERO,
+    let (parts, tax) = match &dto.tax_code_id {
+        Some(code) => crate::tax::line_tax(&mut tx, code, dto.amount, true).await?,
+        None => (Vec::new(), Money::ZERO),
     };
     let number = counters::next_formatted(&mut tx, "EXP", 6).await?;
     let id = new_id();
@@ -136,6 +136,7 @@ pub async fn create(db: &Db, dto: CreateExpense) -> AppResult<Expense> {
     .bind(tax.cents())
     .execute(&mut *tx)
     .await?;
+    crate::tax::save_parts(&mut tx, "EXPENSE", &id, &parts).await?;
     let e = find_one(&mut tx, &id).await?;
     tx.commit().await?;
     Ok(e)
@@ -163,14 +164,10 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Expense> {
     let net = e.amount.checked_sub(e.tax_amount).ok_or_else(overflow)?;
     let mut lines =
         vec![NewLine { account_id: e.expense_account_id.clone(), debit: net, credit: Money::ZERO, description: None }];
-    if let (Some(code), true) = (&e.tax_code_id, e.tax_amount != Money::ZERO) {
-        let account = crate::tax::find_one(&mut tx, code).await?.purchase_account_id;
-        lines.push(NewLine {
-            account_id: account,
-            debit: e.tax_amount,
-            credit: Money::ZERO,
-            description: Some("Tax".into()),
-        });
+    // D27: each part of the tax to its own code's account.
+    let parts = crate::tax::load_parts(&mut tx, "EXPENSE", std::slice::from_ref(&e.id)).await?.remove(&e.id);
+    for (account_id, tax) in crate::tax::by_account(&mut tx, parts.unwrap_or_default(), false).await? {
+        lines.push(NewLine { account_id, debit: tax, credit: Money::ZERO, description: Some("Tax".into()) });
     }
     lines.push(NewLine {
         account_id: e.payment_account_id.clone(),

@@ -23,6 +23,8 @@ interface PdfLine {
   /** D26. */
   taxCodeId?: string | null;
   taxAmount?: number | string;
+  /** D27: the line's tax by standard code (a group's parts). */
+  taxes?: { taxCodeId: string; taxAmount: number | string }[];
 }
 
 interface PdfInvoice {
@@ -60,7 +62,7 @@ const fmtDate = (d?: string | null) => {
   if (!d) return '';
   const date = new Date(d);
   if (isNaN(date.getTime())) return d;
-  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString(region().locale, { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 const esc = (s?: string | null) =>
@@ -84,12 +86,15 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
   // D26: tax per code for the totals block; "Tax Invoice" when the invoice carries tax.
   const taxRows: { name: string; tax: number }[] = [];
   for (const l of lines) {
-    const t = Number(l.taxAmount) || 0;
-    if (!l.taxCodeId || !t) continue;
-    const name = taxCodeById(l.taxCodeId)?.name ?? 'Tax';
-    const row = taxRows.find((r) => r.name === name);
-    if (row) row.tax = Math.round((row.tax + t) * 100) / 100;
-    else taxRows.push({ name, tax: t });
+    const parts = l.taxes?.length ? l.taxes : l.taxCodeId ? [{ taxCodeId: l.taxCodeId, taxAmount: l.taxAmount ?? 0 }] : [];
+    for (const part of parts) {
+      const t = Number(part.taxAmount) || 0;
+      if (!t) continue;
+      const name = taxCodeById(part.taxCodeId)?.name ?? 'Tax';
+      const row = taxRows.find((r) => r.name === name);
+      if (row) row.tax = Math.round((row.tax + t) * 100) / 100;
+      else taxRows.push({ name, tax: t });
+    }
   }
   const tax = Number(invoice.taxAmount) || 0;
   const hasTax = tax !== 0 || lines.some((l) => l.taxCodeId);

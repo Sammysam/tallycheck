@@ -4,7 +4,7 @@ import PageHeader from '../../components/PageHeader';
 import { ReportTable } from '../../components/ReportTable';
 import { sectionRows, type AccountLine } from '../../lib/reportRows';
 import { lastYearEnd, shiftYears } from '../../lib/periods';
-import { todayIso } from '../../lib/region';
+import { fmtDate, todayIso } from '../../lib/region';
 
 interface BalanceSheetData {
   assets: AccountLine[];
@@ -44,8 +44,8 @@ export default function BalanceSheet() {
   useEffect(() => { load(); }, []);
 
   const dates = { dateTo: ranAsOf };
-  const compareHeader = before && ranBefore ? `As of ${ranBefore}` : undefined;
-  const amountHeader = compareHeader ? `As of ${ranAsOf}` : 'Amount';
+  const compareHeader = before && ranBefore ? `As of ${fmtDate(ranBefore)}` : undefined;
+  const amountHeader = compareHeader ? `As of ${fmtDate(ranAsOf)}` : 'Amount';
   const cmp = (lines: AccountLine[] | undefined, total: number | undefined) =>
     before ? { lines: lines ?? [], total: total ?? 0 } : undefined;
   const was = (v: number | undefined) => (before ? Number(v ?? 0) : undefined);
@@ -54,7 +54,7 @@ export default function BalanceSheet() {
     <div>
       <PageHeader
         title="Balance Sheet"
-        subtitle={data ? `As of ${ranAsOf} · click an account to see its entries` : undefined}
+        subtitle={data ? `As of ${fmtDate(ranAsOf)} · click an account to see its entries` : undefined}
         action={
           <div className="flex gap-2 items-center">
             <span className="text-sm text-gray-500">As of</span>

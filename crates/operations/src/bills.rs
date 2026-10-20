@@ -30,6 +30,8 @@ pub struct BillLine {
     /// D26: the line's tax code and its (input) tax, rounded half-up.
     pub tax_code_id: Option<String>,
     pub tax_amount: Money,
+    /// D27: the tax split by standard code.
+    pub taxes: Vec<crate::tax::TaxPart>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +75,10 @@ impl Bill {
                     "accountId": l.account_id,
                     "taxCodeId": opt(&l.tax_code_id),
                     "taxAmount": money_str(l.tax_amount),
+                    "taxes": l.taxes.iter().map(|t| json!({
+                        "taxCodeId": t.tax_code_id,
+                        "taxAmount": money_str(t.amount),
+                    })).collect::<Vec<_>>(),
                 })
             })
             .collect();
@@ -143,9 +149,15 @@ async fn attach(conn: &mut SqliteConnection, bill: &mut Bill) -> AppResult<()> {
                 account_id: r.try_get("accountId")?,
                 tax_code_id: r.try_get("taxCodeId")?,
                 tax_amount: Money::from_cents(r.try_get("taxAmount")?),
+                taxes: Vec::new(),
             })
         })
         .collect::<AppResult<Vec<_>>>()?;
+    let ids: Vec<String> = bill.lines.iter().map(|l| l.id.clone()).collect();
+    let mut parts = crate::tax::load_parts(&mut *conn, "BILL_LINE", &ids).await?;
+    for l in &mut bill.lines {
+        l.taxes = parts.remove(&l.id).unwrap_or_default();
+    }
     bill.vendor = parties::get(conn, PartyKind::Vendor, &bill.vendor_id).await?;
     Ok(())
 }
@@ -211,17 +223,14 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     let mut amounts = Vec::with_capacity(dto.lines.len());
     for l in &dto.lines {
         let amount = Money::line_amount(l.quantity, l.unit_price).ok_or_else(overflow)?;
-        let (gross, tax) = match &l.tax_code_id {
-            Some(code) => {
-                let rate = crate::tax::usable(&mut tx, code).await?.rate;
-                let (_, tax, gross) = crate::tax::split(amount, rate, dto.prices_include_tax)?;
-                (gross, tax)
-            }
-            None => (amount, Money::ZERO),
+        let (parts, tax) = match &l.tax_code_id {
+            Some(code) => crate::tax::line_tax(&mut tx, code, amount, dto.prices_include_tax).await?,
+            None => (Vec::new(), Money::ZERO),
         };
+        let gross = if dto.prices_include_tax { amount } else { amount.checked_add(tax).ok_or_else(overflow)? };
         total = total.checked_add(gross).ok_or_else(overflow)?;
         tax_total = tax_total.checked_add(tax).ok_or_else(overflow)?;
-        amounts.push((amount, tax));
+        amounts.push((amount, tax, parts));
     }
     sqlx::query(
         r#"INSERT INTO "bills" ("id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","createdAt","updatedAt",
@@ -240,12 +249,13 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     .bind(dto.prices_include_tax)
     .execute(&mut *tx)
     .await?;
-    for (l, (amount, tax)) in dto.lines.iter().zip(amounts) {
+    for (l, (amount, tax, parts)) in dto.lines.iter().zip(amounts) {
+        let line_id = new_id();
         sqlx::query(
             r#"INSERT INTO "bill_lines" ("id","billId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount")
                VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
         )
-        .bind(new_id())
+        .bind(&line_id)
         .bind(&id)
         .bind(&l.description)
         .bind(l.quantity.cents())
@@ -256,6 +266,7 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
         .bind(tax.cents())
         .execute(&mut *tx)
         .await?;
+        crate::tax::save_parts(&mut tx, "BILL_LINE", &line_id, &parts).await?;
     }
     let bill = find_one(&mut tx, &id).await?;
     tx.commit().await?;
@@ -314,7 +325,6 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
     let ap = ledger::accounts::find_by_code(&mut tx, "2000").await?;
     // Each expense line without its tax; the tax goes to the code's purchase account (D26).
     let mut lines: Vec<NewLine> = Vec::new();
-    let mut tax_by_account: Vec<(String, Money)> = Vec::new();
     for l in &bill.lines {
         let net =
             if bill.prices_include_tax { l.amount.checked_sub(l.tax_amount).ok_or_else(overflow)? } else { l.amount };
@@ -324,14 +334,10 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
             credit: Money::ZERO,
             description: Some(l.description.clone()),
         });
-        if let (Some(code), true) = (&l.tax_code_id, l.tax_amount != Money::ZERO) {
-            let account = crate::tax::find_one(&mut tx, code).await?.purchase_account_id;
-            match tax_by_account.iter_mut().find(|(a, _)| *a == account) {
-                Some((_, t)) => *t = t.checked_add(l.tax_amount).ok_or_else(overflow)?,
-                None => tax_by_account.push((account, l.tax_amount)),
-            }
-        }
     }
+    // D27: each part of each line's tax to its own code's account.
+    let parts: Vec<_> = bill.lines.iter().flat_map(|l| l.taxes.clone()).collect();
+    let tax_by_account = crate::tax::by_account(&mut tx, parts, false).await?;
     lines.extend(tax_by_account.into_iter().map(|(account_id, tax)| NewLine {
         account_id,
         debit: tax,

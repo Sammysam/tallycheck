@@ -34,10 +34,13 @@ const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
     ("bills", "pricesIncludeTax", true),
     ("expenses", "taxCodeId", false),
     ("expenses", "taxAmount", true),
+    ("payments", "withholdingTaxCodeId", false), // D27
+    ("payments", "withholdingAmount", true),
 ];
 
 /// Tables this project adds on purpose (approved deviations); the reference has no such table.
-const APPROVED_EXTRA_TABLES: &[&str] = &["credit_notes", "bank_reconciliations", "reconciled_lines", "tax_codes"]; // D21, D22, D26
+const APPROVED_EXTRA_TABLES: &[&str] =
+    &["credit_notes", "bank_reconciliations", "reconciled_lines", "tax_codes", "tax_code_components", "document_taxes"]; // D21, D22, D26, D27
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =

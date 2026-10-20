@@ -315,7 +315,7 @@ try {
     await waitFor(`document.querySelector('[data-testid=rec-difference]').innerText.includes('0.00') && !document.querySelector('[data-testid=rec-difference]').innerText.includes('1,000')`, 'zero difference');
     await shot('10b-reconcile');
     await clickText('Finish');
-    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('2026-04-30') && tr.innerText.includes('COMPLETED'))`, 'completed in history');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes(new Intl.DateTimeFormat('en-LK', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(2026, 3, 30))) && tr.innerText.includes('COMPLETED'))`, 'completed in history');
   });
 
   // ── W2 screens ───────────────────────────────────────────────────────────
@@ -584,7 +584,7 @@ try {
       sel.value = 'lastYear'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await clickText('Run');
     const lastYear = new Date().getFullYear() - 1;
-    await waitFor(`[...document.querySelectorAll('th')].some((th) => th.textContent === 'Change') && [...document.querySelectorAll('th')].some((th) => th.textContent.startsWith('${lastYear}-01-01'))`, 'comparison columns');
+    await waitFor(`[...document.querySelectorAll('th')].some((th) => th.textContent === 'Change') && [...document.querySelectorAll('th')].some((th) => th.textContent.startsWith(new Intl.DateTimeFormat('en-LK', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(${lastYear}, 0, 1))))`, 'comparison columns');
     await shot('18d-profit-loss-compare');
   });
 
@@ -864,6 +864,51 @@ try {
     await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('VAT 18%') && tr.innerText.includes('180.00'))`, 'VAT row in the return');
     await waitFor(`document.querySelector('[data-testid=net-tax]').innerText.includes('180.00')`, 'tax to pay');
     await shot('32-tax-return');
+  });
+
+  await check('Tax groups and withholding tax through the screens (D27)', async () => {
+    // Two standard codes, then a group of them built on the Taxes screen.
+    const accounts = (await api('GET', '/api/accounts')).body;
+    const acc = (code) => accounts.find((a) => a.code === code).id;
+    for (const [name, rate] of [['State 6%', 6], ['City 2%', 2]]) {
+      const r = await api('POST', '/api/tax-codes', { name, rate, salesAccountId: acc('2300'), purchaseAccountId: acc('1400') });
+      if (r.status !== 201) throw new Error(name + ' answered ' + r.status);
+    }
+    await go('/taxes');
+    await clickText('+ New Tax Code');
+    await type('input[placeholder="e.g. VAT 18%"]', 'State + City');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Kind"]');
+      sel.value = 'GROUP'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`!!document.querySelector('input[aria-label="Include State 6%"]')`, 'group parts');
+    await evaluate(`document.querySelector('input[aria-label="Include State 6%"]').click()`);
+    await evaluate(`document.querySelector('input[aria-label="Include City 2%"]').click()`);
+    await clickText('Save Tax Code');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('State + City') && tr.innerText.includes('8%'))`, 'group row');
+
+    // A withholding code, then a customer payment with 5% held back from the 1,180 tax invoice.
+    await api('POST', '/api/accounts', { code: '1450', name: 'Withholding Tax Receivable', type: 'ASSET' });
+    await api('POST', '/api/accounts', { code: '2350', name: 'Withholding Tax Payable', type: 'LIABILITY' });
+    const fresh = (await api('GET', '/api/accounts')).body;
+    const wht = await api('POST', '/api/tax-codes', { name: 'WHT 5%', kind: 'WITHHOLDING', rate: 5,
+      salesAccountId: fresh.find((a) => a.code === '1450').id, purchaseAccountId: fresh.find((a) => a.code === '2350').id });
+    if (wht.status !== 201) throw new Error('WHT answered ' + wht.status);
+    await go('/payments');
+    await clickText('+ Record Payment');
+    await waitFor(`[...(document.querySelectorAll('form select')[1]?.options ?? [])].some((o) => o.textContent.includes('Walk-in Client'))`, 'taxed invoice option');
+    await pick(1, 'Walk-in Client');
+    await pick(3, '1000');
+    await fillDates('2026-10-01');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Withholding tax"]');
+      sel.value = [...sel.options].find((o) => o.textContent === 'WHT 5%').value;
+      sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`document.querySelector('input[placeholder="Amount withheld"]')?.value === '50.00' && document.querySelector('input[placeholder="Amount"]').value === '1130.00'`, '5% of the 1,000 before VAT suggested');
+    await shot('33-payment-withholding');
+    await clickText('Record Payment');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('1,130.00') && tr.innerText.includes('50.00'))`, 'payment with withholding listed');
+    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.billToName === 'Walk-in Client');
+    if (inv.status !== 'PAID') throw new Error('the withholding should complete the payment, invoice is ' + inv.status);
+    const ret = (await api('GET', '/api/reports/tax?dateFrom=2026-01-01&dateTo=2026-12-31')).body;
+    if (ret.withholdingTotals.withheldByCustomers !== 50) throw new Error('return shows ' + JSON.stringify(ret.withholdingTotals));
   });
 
   await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {

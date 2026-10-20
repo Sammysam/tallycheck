@@ -4,7 +4,7 @@ import { amountInWords } from '../utils/amountInWords';
 import { errMsg } from '../api/client';
 import { amount } from '../lib/money';
 import { company, region } from '../lib/region';
-import { summarize, useTaxCodes } from '../lib/taxes';
+import { lineCodes, lineParts, summarize, useTaxCodes } from '../lib/taxes';
 
 /**
  * Invoice editor rendered as the invoice document itself — same layout, fonts
@@ -80,7 +80,7 @@ const fmtDate = (d?: string) => {
   if (!d) return '';
   const date = new Date(d);
   if (isNaN(date.getTime())) return d;
-  return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString(region().locale, { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -213,6 +213,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
       amount: lineAmount(l),
       taxCodeId: l.taxCodeId || null,
       taxAmount: summary.lineTax[i],
+      taxes: lineParts(lineAmount(l), l.taxCodeId, pricesIncludeTax),
     })),
   });
 
@@ -303,7 +304,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
                   onChange={(e) => setLine(i, 'taxCodeId', e.target.value)}
                 >
                   <option value="">No tax</option>
-                  {taxCodes.filter((c) => c.isActive || c.id === line.taxCodeId).map((c) => (
+                  {lineCodes(taxCodes, line.taxCodeId).map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>

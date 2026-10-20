@@ -116,6 +116,8 @@ async fn books() -> AppResult<Books> {
         payment_method: "CASH".into(),
         payment_account_id: b.acct["1000"].clone(),
         notes: None,
+        withholding_tax_code_id: None,
+        withholding_amount: Money::ZERO,
     };
     payments::create(&b.db, pay("AR", Some(&inv.id), None, "1000")).await?;
     let voided = invoices::create(&b.db, sale("999", "2026-04-30"), Some("admin")).await?;

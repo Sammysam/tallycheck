@@ -18,6 +18,7 @@ import {
 } from '../lib/payroll';
 import { acknowledgementPage, bankAdvicePage, epfFormPage, etfFormPage, renderPdf, slipPages } from '../utils/payrollPdf';
 import { region } from '../lib/region';
+import { fmtDate } from '../lib/region';
 
 const EMPTY_COMPANY: CompanyDetails = {
   companyName: null, epfRegNo: null, etfRegNo: null, careOf: null,
@@ -517,7 +518,7 @@ export default function PayrollRun() {
             <ul className="space-y-1">
               {run.remittances.map((r) => (
                 <li key={r.id} className="flex justify-between">
-                  <span>{r.date} · {REMIT_LABEL[r.type]}{r.reference ? ` · ${r.reference}` : ''}{r.createdByName ? ` · by ${r.createdByName}` : ''}</span>
+                  <span>{fmtDate(r.date)} · {REMIT_LABEL[r.type]}{r.reference ? ` · ${r.reference}` : ''}{r.createdByName ? ` · by ${r.createdByName}` : ''}</span>
                   <span className="font-medium">{rs(r.amount)}</span>
                 </li>
               ))}

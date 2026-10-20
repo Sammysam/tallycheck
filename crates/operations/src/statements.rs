@@ -2,7 +2,7 @@
 //!
 //! What a customer was charged and what they paid, in date order with a running balance:
 //! posted invoices (POSTED or PAID; drafts and voided invoices never count) less posted
-//! customer payments and posted credit notes (voided ones never count). The balance brought
+//! customer payments (with any tax the customer withheld, D27) and posted credit notes (voided ones never count). The balance brought
 //! forward covers everything before `date_from`; with no end date the closing balance equals
 //! what the customer still owes on their open invoices. A user without `invoices:all` sees
 //! only invoices they created, as on the Invoices page.
@@ -39,7 +39,7 @@ SELECT * FROM (
     FROM "invoices" i
    WHERE i."customerId" = ?1 AND i."status" IN ('POSTED', 'PAID') AND (?2 = 1 OR i."createdById" IS ?3)
   UNION ALL
-  SELECT p."date", 'PAYMENT', 1, p."paymentNumber", i."invoiceNumber", NULL, 0, p."amount"
+  SELECT p."date", 'PAYMENT', 1, p."paymentNumber", i."invoiceNumber", NULL, 0, p."amount" + p."withholdingAmount"
     FROM "payments" p JOIN "invoices" i ON i."id" = p."invoiceId"
    WHERE p."type" = 'AR' AND p."status" = 'POSTED' AND i."customerId" = ?1 AND (?2 = 1 OR i."createdById" IS ?3)
   UNION ALL

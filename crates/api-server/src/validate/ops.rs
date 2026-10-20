@@ -285,7 +285,9 @@ pub(crate) fn payment_rules(v: &mut Validator) {
         .field("amount", false, &[Rule::IsMoneyNumber, Rule::MinNum(0.01, "0.01")])
         .field("paymentMethod", false, &[Rule::IsEnum(PAYMENT_METHODS)])
         .field("paymentAccountId", false, &[Rule::IsUuid])
-        .field("notes", true, &[Rule::IsString]);
+        .field("notes", true, &[Rule::IsString])
+        .field("withholdingTaxCodeId", true, &[Rule::IsUuid])
+        .field("withholdingAmount", true, &[Rule::IsMoneyNumber, Rule::MinZero]);
 }
 
 pub fn create_payment(body: Map<String, Value>) -> Result<operations::payments::CreatePayment, AppError> {
@@ -303,6 +305,8 @@ pub fn create_payment(body: Map<String, Value>) -> Result<operations::payments::
         payment_method: opt_string(&m, "paymentMethod").unwrap_or_default(),
         payment_account_id: opt_string(&m, "paymentAccountId").unwrap_or_default(),
         notes: opt_string(&m, "notes"),
+        withholding_tax_code_id: opt_string(&m, "withholdingTaxCodeId"),
+        withholding_amount: money(&m, "withholdingAmount").unwrap_or_default(),
     })
 }
 
@@ -347,15 +351,40 @@ fn rate_of(v: &Value) -> Option<i64> {
     (0..=1_000_000).contains(&rate).then_some(rate)
 }
 
+const TAX_KINDS: &[&str] = &["STANDARD", "GROUP", "WITHHOLDING"];
+
 pub fn tax_code(body: Map<String, Value>, optional: bool) -> Result<operations::tax::TaxCodeInput, AppError> {
+    // A group has no rate or accounts of its own, so those are checked by kind in `tax::create`.
     let mut v = Validator::new(body);
     v.field("name", optional, &[Rule::IsString, Rule::IsNotEmpty, Rule::MaxLength(60)])
-        .field("rate", optional, &[Rule::IsFiniteNumber])
+        .field("kind", true, &[Rule::IsEnum(TAX_KINDS)])
+        .field("rate", true, &[Rule::IsFiniteNumber])
         .field("description", true, &[Rule::IsString, Rule::MaxLength(200)])
-        .field("salesAccountId", optional, &[Rule::IsUuid])
-        .field("purchaseAccountId", optional, &[Rule::IsUuid])
-        .field("isActive", true, &[Rule::IsBoolean]);
+        .field("salesAccountId", true, &[Rule::IsUuid])
+        .field("purchaseAccountId", true, &[Rule::IsUuid])
+        .field("isActive", true, &[Rule::IsBoolean])
+        .field("components", true, &[Rule::IsArray]);
     let m = v.finish()?;
+    let components = match m.get("components") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(items)) => {
+            let mut parts = Vec::new();
+            for item in items {
+                let id = item.get("taxCodeId").and_then(Value::as_str).filter(|s| app_core::ids::is_uuid(s));
+                let compound = item.get("isCompound").map_or(Some(false), Value::as_bool);
+                match (id, compound) {
+                    (Some(id), Some(c)) => parts.push((id.to_string(), c)),
+                    _ => {
+                        return Err(AppError::validation(vec![
+                            "each component must have a taxCodeId (UUID) and an optional isCompound boolean".into(),
+                        ]))
+                    }
+                }
+            }
+            Some(parts)
+        }
+        Some(_) => None,
+    };
     let rate = match m.get("rate") {
         None | Some(Value::Null) => None,
         Some(r) => Some(rate_of(r).ok_or_else(|| {
@@ -364,6 +393,8 @@ pub fn tax_code(body: Map<String, Value>, optional: bool) -> Result<operations::
     };
     Ok(operations::tax::TaxCodeInput {
         name: opt_string(&m, "name").map(|n| n.trim().to_string()),
+        kind: opt_string(&m, "kind"),
+        components,
         rate,
         description: nullable(&m, "description"),
         sales_account_id: opt_string(&m, "salesAccountId"),

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { money } from '../lib/money';
+import { fmtDate } from '../lib/region';
 
 /** D23: every ledger line of one account with a running balance — the drill-down from reports. */
 
@@ -90,7 +91,7 @@ export default function AccountActivity() {
             </tr>
             {data.lines.map((l, i) => (
               <tr key={`${l.entryId}-${i}`}>
-                <td className="whitespace-nowrap">{l.date}</td>
+                <td className="whitespace-nowrap"><span data-value={l.date ?? ''}>{fmtDate(l.date)}</span></td>
                 <td className="whitespace-nowrap">{l.entryNumber}</td>
                 <td>{l.description}{l.lineDescription ? <span className="text-gray-500"> · {l.lineDescription}</span> : null}</td>
                 <td>{l.reference ?? ''}</td>
