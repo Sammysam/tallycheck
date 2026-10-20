@@ -187,6 +187,6 @@ async fn rates_and_company_settings_round_trip() -> AppResult<()> {
         runs::update_company(&db, vec![("careOf".into(), None), ("telephone".into(), Some("011".into()))]).await?;
     assert_eq!(company["careOf"], Value::Null);
     assert_eq!(company["telephone"], "011");
-    assert_eq!(company["companyName"], "CENANGO (PVT) LTD");
+    assert_eq!(company["companyName"], Value::Null, "D25: no company name ships with the app");
     Ok(())
 }

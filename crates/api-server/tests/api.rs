@@ -435,8 +435,9 @@ async fn settings_are_trimmed_and_merged_with_defaults() -> TestResult {
         .await?;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.body["signatoryName"], "Jane Doe");
-    assert_eq!(r.body["signatoryTitle"], "Director");
-    assert_eq!(r.body["payroll.companyName"], "CENANGO (PVT) LTD");
+    // D25: a fresh install carries no company's details.
+    assert_eq!(r.body["signatoryTitle"], "");
+    assert_eq!(r.body["payroll.companyName"], "");
     assert!(r.body.get("other").is_none());
     let bad = app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"signatoryTitle": 5}))).await?;
     assert_nest_error(
@@ -1736,5 +1737,45 @@ async fn cash_flow_through_the_api() -> TestResult {
     assert_eq!(not_cash.status, StatusCode::BAD_REQUEST);
     let viewer_like = app.call(Method::GET, "/api/reports/cash-flow", Some(&clerk), None).await?;
     assert_eq!(viewer_like.status, StatusCode::OK, "the Accountant role has reports");
+    Ok(())
+}
+
+#[tokio::test]
+async fn company_and_region_settings_are_validated_and_drive_the_financial_year() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let fresh = app.call(Method::GET, "/api/settings", Some(&admin), None).await?;
+    assert!(fresh.body.get("company.name").is_none(), "a fresh install has no company yet");
+
+    let good = json!({
+        "company.name": "  Lanka Traders  ", "company.address": "1 Main Street\nColombo", "company.taxNumber": "VAT-123",
+        "region.country": "GB", "region.currency": "GBP", "region.locale": "en-GB", "region.fiscalYearStart": "4",
+        "region.currencySymbol": "£", "region.currencyWord": "Pounds", "region.currencyMinorWord": "Pence",
+        "company.logo": "data:image/png;base64,iVBORw0KGgo=",
+    });
+    let saved = app.call(Method::PATCH, "/api/settings", Some(&admin), Some(good)).await?;
+    assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
+    assert_eq!(
+        (saved.body["company.name"].as_str(), saved.body["region.currency"].as_str()),
+        (Some("Lanka Traders"), Some("GBP"))
+    );
+
+    for (key, value) in [
+        ("region.currency", "pounds"),
+        ("region.country", "GBR"),
+        ("region.locale", "English"),
+        ("region.fiscalYearStart", "13"),
+        ("company.logo", "/Logo_black.png"),
+        ("company.logo", "data:text/html;base64,PHNjcmlwdD4="),
+        ("company.name", "   "),
+    ] {
+        let r = app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({ key: value }))).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{key}={value} must be refused");
+    }
+
+    // The P&L's default range starts on the first day of the financial year (April here).
+    let pl = app.call(Method::GET, "/api/reports/profit-loss", Some(&admin), None).await?;
+    let from = pl.body["dateFrom"].as_str().unwrap_or("").to_string();
+    assert!(from.ends_with("-04-01"), "default dateFrom {from}");
     Ok(())
 }

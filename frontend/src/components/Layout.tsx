@@ -26,6 +26,8 @@ import StatusBar from './desktop/StatusBar';
 import Dialog from './desktop/Dialog';
 import { hasCommand, isUnsaved, runCommand, setUnsaved, subscribeCommands } from '../lib/commands';
 import { exportScreen } from '../lib/exportCsv';
+import { companyIsSetUp, region, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
+import api from '../api/client';
 
 declare const __APP_VERSION__: string;
 
@@ -73,6 +75,20 @@ export default function Layout({ children }: { children: ReactNode }) {
   const canClose = useSyncExternalStore(subscribeCommands, () => hasCommand('close'));
 
   const isAdmin = user?.role === 'Admin';
+
+  // D25: the company's details and currency, loaded once; every screen formats with them.
+  const [regionReady, setRegionReady] = useState(false);
+  useSyncExternalStore(subscribeRegion, region);
+  useEffect(() => {
+    api.get('/settings')
+      .then((r) => {
+        setRegion(regionFromSettings(r.data));
+        // A new installation: the administrator enters the company before anything else.
+        if (!companyIsSetUp(r.data) && hasPermission('settings')) navigate('/company-setup', { replace: true });
+      })
+      .catch(() => {})
+      .finally(() => setRegionReady(true));
+  }, [hasPermission, navigate]);
 
   // ── Actions shared by the menu bar, toolbar and keyboard ───────────────
   const newRecord = useCallback(() => {
@@ -165,7 +181,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       main.removeEventListener('input', onInput);
       main.removeEventListener('submit', onSubmit);
     };
-  }, [refreshKey]);
+  }, [refreshKey, regionReady]);
 
   // ── Keyboard: desktop shortcuts on, browser shortcuts off ──────────────
   useEffect(() => {
@@ -299,6 +315,8 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   const closeDialog = () => setDialog(null);
 
+  if (!regionReady) return <div className="desk-shell" />;
+
   return (
     <div className="desk-shell">
       <div className="desk-chrome">
@@ -353,7 +371,6 @@ export default function Layout({ children }: { children: ReactNode }) {
               <p className="font-semibold text-gray-900">Cenango Accounting</p>
               <p className="text-gray-600">Version {__APP_VERSION__}</p>
               <p className="text-gray-500 mt-1">Offline accounting, employees and payroll.</p>
-              <p className="text-gray-500">© Cenango (Pvt) Ltd</p>
             </div>
           </div>
         </Dialog>

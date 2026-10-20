@@ -17,6 +17,7 @@ import {
   type RunDetail,
 } from '../lib/payroll';
 import { acknowledgementPage, bankAdvicePage, epfFormPage, etfFormPage, renderPdf, slipPages } from '../utils/payrollPdf';
+import { region } from '../lib/region';
 
 const EMPTY_COMPANY: CompanyDetails = {
   companyName: null, epfRegNo: null, etfRegNo: null, careOf: null,
@@ -127,7 +128,7 @@ export default function PayrollRun() {
         body.append('file', new File([blob], `Salary slip ${month} - ${l.employeeCode}.pdf`, { type: 'application/pdf' }));
         body.append('title', `Salary slip - ${month}`);
         body.append('category', 'PAYSLIP');
-        body.append('notes', `${run.runNumber} / net Rs. ${amt(l.netSalary)}`);
+        body.append('notes', `${run.runNumber} / net ${region().currencySymbol} ${amt(l.netSalary)}`);
         await api.post(`/employees/${l.employeeId}/documents`, body);
       } catch (err) {
         errors.push(`${l.employeeName}: ${errMsg(err, 'upload failed')}`);

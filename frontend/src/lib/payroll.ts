@@ -1,3 +1,5 @@
+import { amount } from './money';
+
 export type PayrollRunStatus = 'DRAFT' | 'POSTED' | 'PAID' | 'VOID';
 export type RemittanceType = 'EPF' | 'ETF' | 'PAYE' | 'STAMP_DUTY' | 'WELFARE';
 
@@ -168,7 +170,7 @@ export function n(v: number | string | null | undefined): number {
   return Number(v ?? 0);
 }
 
-/** Rupees without the prefix, for dense tables. */
+/** An amount without the currency, for dense tables. */
 export function amt(v: number | string | null | undefined): string {
-  return n(v).toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return amount(n(v));
 }

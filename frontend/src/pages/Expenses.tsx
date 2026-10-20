@@ -5,6 +5,7 @@ import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
+import { money } from '../lib/money';
 
 interface Expense { id: string; expenseNumber: string; date: string; description: string; amount: number; status: string }
 
@@ -54,7 +55,7 @@ export default function Expenses() {
     catch (err: any) { alert(err?.response?.data?.message ?? 'Action failed'); }
   };
 
-  const fmt = (v: number) => new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(Number(v));
+  const fmt = (v: number) => money(Number(v));
 
   return (
     <div>

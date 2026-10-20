@@ -4,6 +4,7 @@ import PageHeader from '../../components/PageHeader';
 import { ReportTable } from '../../components/ReportTable';
 import { sectionRows, type AccountLine } from '../../lib/reportRows';
 import { lastYearEnd, shiftYears } from '../../lib/periods';
+import { todayIso } from '../../lib/region';
 
 interface BalanceSheetData {
   assets: AccountLine[];
@@ -22,7 +23,7 @@ type CompareWith = '' | 'lastYear' | 'yearEnd';
 export default function BalanceSheet() {
   const [data, setData] = useState<BalanceSheetData | null>(null);
   const [before, setBefore] = useState<BalanceSheetData | null>(null);
-  const [asOf, setAsOf] = useState(new Date().toISOString().split('T')[0]);
+  const [asOf, setAsOf] = useState(todayIso());
   const [compareWith, setCompareWith] = useState<CompareWith>('');
   // A balance sheet is cumulative: an account link shows everything up to the date it was run for.
   const [ranAsOf, setRanAsOf] = useState(asOf);

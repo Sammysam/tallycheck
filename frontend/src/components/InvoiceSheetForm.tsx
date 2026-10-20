@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { COMPANY, openInvoicePdf, previewInvoice, printInvoice, type InvoiceSettings } from '../utils/invoicePdf';
+import { openInvoicePdf, previewInvoice, printInvoice, type InvoiceSettings } from '../utils/invoicePdf';
 import { amountInWords } from '../utils/amountInWords';
 import { errMsg } from '../api/client';
+import { amount } from '../lib/money';
+import { company, region } from '../lib/region';
 
 /**
  * Invoice editor rendered as the invoice document itself — same layout, fonts
@@ -68,7 +70,7 @@ const defaultAccountId = (accounts: any[]) =>
 const keyed = (text: string) => ({ _key: uid(), text });
 
 const num = (v: number) =>
-  new Intl.NumberFormat('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v) || 0);
+  amount(v);
 
 const fmtDate = (d?: string) => {
   if (!d) return '';
@@ -89,6 +91,7 @@ const addDays = (date: string, days: number) => {
 };
 
 export default function InvoiceSheetForm({ customers, accounts, settings, initial, onSubmit, onCancel }: Props) {
+  const co = company();
   const editing = Boolean(initial);
 
   const [customerId, setCustomerId] = useState<string>(initial?.customerId ?? '');
@@ -113,14 +116,14 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
   const [payOptions, setPayOptions] = useState(() =>
     (initial?.paymentOptions
       ? String(initial.paymentOptions).split(/\r?\n/).filter(Boolean)
-      : COMPANY.paymentOptions
+      : company().paymentOptions
     ).map(keyed),
   );
   const [sigName, setSigName] = useState<string>(
-    initial?.signatoryName ?? settings.signatoryName?.trim() ?? COMPANY.signatoryName,
+    initial?.signatoryName ?? settings.signatoryName?.trim() ?? '',
   );
   const [sigTitle, setSigTitle] = useState<string>(
-    initial?.signatoryTitle ?? settings.signatoryTitle?.trim() ?? COMPANY.signatoryTitle,
+    initial?.signatoryTitle ?? settings.signatoryTitle?.trim() ?? '',
   );
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -279,9 +282,9 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
         <div className="inv-sheet-wrap">
         <div className="inv-sheet">
           {/* ── Letterhead ─────────────────────────────────────── */}
-          <div className="logo-row"><img src={COMPANY.logo} alt="logo" /></div>
+          <div className="logo-row">{co.logo ? <img src={co.logo} alt="logo" /> : <div className="co-name">{co.name}</div>}</div>
           <div className="rule" />
-          <div className="contact">{COMPANY.contactLine}<br />{COMPANY.emailWebLine}</div>
+          <div className="contact">{co.contactLine}{co.emailWebLine && <><br />{co.emailWebLine}</>}{co.taxNumber && <><br />Tax No: {co.taxNumber}</>}</div>
           <div className="rule" />
 
           <h1>Invoice</h1>
@@ -290,8 +293,8 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
           <div className="meta">
             <div>
               <div className="label">Remit To:</div>
-              <div>{COMPANY.name}</div>
-              {COMPANY.remitAddress.map((l) => <div key={l}>{l}</div>)}
+              <div>{co.name}</div>
+              {co.addressLines.map((l) => <div key={l}>{l}</div>)}
             </div>
             <div className="meta-right">
               <div className="meta-row">
@@ -341,8 +344,8 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
                 <th style={{ width: 80 }}>Date</th>
                 <th className="c-desc">Description</th>
                 <th style={{ width: 62 }}>Qty</th>
-                <th style={{ width: 110 }}>Unit Price (Rs.)</th>
-                <th style={{ width: 105 }}>Price (Rs.)</th>
+                <th style={{ width: 110 }}>Unit Price ({region().currencySymbol})</th>
+                <th style={{ width: 105 }}>Price ({region().currencySymbol})</th>
                 <th className="gutter" />
               </tr>
             </thead>
@@ -397,7 +400,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
             </tfoot>
           </table>
 
-          <div className="words"><strong>Amount in words:</strong> {amountInWords(total)}</div>
+          <div className="words"><strong>Amount in words:</strong> {amountInWords(total, region().currencyWord, region().currencyMinorWord)}</div>
 
           {/* ── Payment options — editable per invoice ─────────── */}
           <div className="pay">
@@ -447,7 +450,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
             />
           </div>
 
-          <div className="sysnote">{COMPANY.footerNote}</div>
+          {co.footerNote && <div className="sysnote">{co.footerNote}</div>}
         </div>
 
         {/* ── Actions ──────────────────────────────────────────── */}

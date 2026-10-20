@@ -9,6 +9,7 @@ import ActionMenu from '../components/ActionMenu';
 import { openInvoicePdf, openInvoiceTab, previewInvoice, printInvoice, type InvoiceSettings } from '../utils/invoicePdf';
 import InvoiceSheetForm, { type SheetPayload } from '../components/InvoiceSheetForm';
 import { useAuth } from '../contexts/AuthContext';
+import { money } from '../lib/money';
 
 interface Invoice {
   id: string;
@@ -254,7 +255,7 @@ export default function Invoices() {
     }
   };
 
-  const fmt = (v: number) => new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(Number(v));
+  const fmt = (v: number) => money(Number(v));
   // What is still owed: total less payments and credit notes (D21).
   const balanceOf = (r: Invoice) => Number(r.totalAmount) - Number(r.amountPaid ?? 0) - Number(r.amountCredited ?? 0);
   const filtersActive = filters.q !== '' || filters.status !== '' || filters.dateFrom !== '' || filters.dateTo !== '';
@@ -300,7 +301,7 @@ export default function Invoices() {
                 <input
                   required
                   className="mt-1"
-                  placeholder="e.g. Samir Husain"
+                  placeholder="e.g. Jane Smith"
                   value={sigForm.signatoryName}
                   onChange={(e) => { setSigSaved(false); setSigForm({ ...sigForm, signatoryName: e.target.value }); }}
                 />

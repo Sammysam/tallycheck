@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
+import { money } from '../lib/money';
 
 interface Entry { id: string; entryNumber: string; date: string; description: string; status: string; lines: any[] }
 
@@ -11,7 +12,7 @@ export default function Ledger() {
 
   useEffect(() => { api.get('/ledger/entries').then((r) => setRows(r.data)); }, []);
 
-  const fmt = (v: number) => new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(v);
+  const fmt = (v: number) => money(Number(v));
 
   return (
     <div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 import PageHeader from '../components/PageHeader';
 import BooksLock from '../components/BooksLock';
+import CompanyForm from '../components/CompanyForm';
 
 const emptyForm = { signatoryName: '', signatoryTitle: '' };
 
@@ -41,6 +42,12 @@ export default function Settings() {
     <div>
       <PageHeader title="Settings" />
 
+      <div className="card mb-4" style={{ maxWidth: 900 }}>
+        <h3 className="text-sm font-semibold text-gray-700 mb-1">Company</h3>
+        <p className="text-xs text-gray-500 mb-4">Your company details, logo, currency and financial year.</p>
+        <CompanyForm />
+      </div>
+
       {loading ? (
         <div className="card text-sm text-gray-500">Loading…</div>
       ) : (
@@ -57,7 +64,7 @@ export default function Settings() {
                 <input
                   required
                   className="mt-1"
-                  placeholder="e.g. Samir Husain"
+                  placeholder="e.g. Jane Smith"
                   value={form.signatoryName}
                   onChange={(e) => { setSaved(false); setForm({ ...form, signatoryName: e.target.value }); }}
                 />
