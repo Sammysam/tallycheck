@@ -43,6 +43,8 @@ export const navigation = [
       { label: 'Bills',    to: '/bills',    permission: 'bills' },
       { label: 'Expenses', to: '/expenses', permission: 'expenses' },
       { label: 'Payments', to: '/payments', permission: 'payments' },
+      { label: 'Credit Notes', to: '/credit-notes', permission: 'invoices' },
+      { label: 'Debit Notes',  to: '/debit-notes',  permission: 'bills' },
     ],
   },
   {

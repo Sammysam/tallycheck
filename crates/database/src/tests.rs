@@ -19,7 +19,15 @@ const PG_CONSTRAINTS: &str = include_str!("../tests/fixtures/reference_pg_constr
 const PG_INDEXES: &str = include_str!("../tests/fixtures/reference_pg_indexes.txt");
 
 /// Columns this project adds on purpose (approved deviations), appended after the reference's.
-const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[("bills", "amountPaid", true), ("payments", "status", true)]; // D13, D18
+const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
+    ("bills", "amountPaid", true),        // D13
+    ("payments", "status", true),         // D18
+    ("invoices", "amountCredited", true), // D21
+    ("bills", "amountCredited", true),    // D21
+];
+
+/// Tables this project adds on purpose (approved deviations); the reference has no such table.
+const APPROVED_EXTRA_TABLES: &[&str] = &["credit_notes"]; // D21
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =
@@ -44,7 +52,9 @@ async fn tables_columns_and_nullability_match_reference_postgres() -> AppResult<
     .await?
     .into_iter()
     .collect();
-    assert_eq!(tables, expected.keys().cloned().collect::<BTreeSet<_>>());
+    let mut reference_tables: BTreeSet<String> = expected.keys().cloned().collect();
+    reference_tables.extend(APPROVED_EXTRA_TABLES.iter().map(|t| t.to_string()));
+    assert_eq!(tables, reference_tables);
     for (table, cols) in &expected {
         let mut cols = cols.clone();
         for (t, c, not_null) in APPROVED_EXTRA_COLUMNS {

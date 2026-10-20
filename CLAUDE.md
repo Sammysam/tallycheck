@@ -291,6 +291,23 @@ recommendations without answering each one individually; revisit any of them on 
   `{lockedThrough}`; `PUT /api/books/lock` `{lockedThrough: "YYYY-MM-DD" | null}` is Admin only
   (403 otherwise), the date may not be after today, audited as "Changed the books lock date"
   with "Locked through …" / "Unlocked". Shown and changed under Settings → Lock the books.
+- **D20 Default chart on a fresh install** (requested by the user 2026-10-20). When the server
+  starts (or `create-admin` runs) on a database with no users, `seed_fresh_install` adds the D10
+  default chart (1000 Cash, 1100 AR, 2000 AP, 3000, 4000, 6000, …) next to the payroll accounts,
+  so nobody has to press "Seed". Only missing codes are added, and never once a user exists, so
+  an imported database or a chart someone has changed is left alone.
+- **D21 Credit notes and debit notes** (requested by the user 2026-10-20). Table `credit_notes`
+  (type AR/AP, `noteNumber` CN-/DN-000001, invoiceId or billId, date, reason, amount, accountId,
+  status POSTED/VOID, journalEntryId, createdById) and `amountCredited` on invoices and bills
+  (exposed in invoice JSON; internal on bills like `amountPaid`). AR: debit a revenue account,
+  credit 1100; AP: debit 2000, credit an expense or asset account. Only against a POSTED
+  document, never more than outstanding = total − paid − credited, not dated before the
+  document. The document becomes PAID when payments + credits cover it, POSTED again when a
+  void reopens it. `POST /api/credit-notes` / `/api/debit-notes` (permissions `invoices` /
+  `bills`, credit notes follow `invoices:all` scope), `GET` lists, `POST …/:id/void` reverses the
+  entry dated today. Invoices and bills with notes cannot be voided or unposted until the notes
+  are voided. Payments and AR/AP ageing use the same outstanding figure. Refunding money a
+  customer already paid is not covered (a note cannot exceed what is owed).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
@@ -316,8 +333,8 @@ answer 201.
 - The copied frontend fails `npm run lint` (77 errors, 10 warnings) exactly as the reference
   does, and `npm audit --omit=dev` reports advisories in react-router, form-data and dompurify.
   Upgrades need a decision; they are not "minimal changes".
-- Fresh installs: run `POST /accounts/seed` (D10) to get 1000 Cash, 1100 AR, 2000 AP …; the
-  migration still seeds only the 11 payroll accounts, as the reference did.
+- Fresh installs get the default chart automatically (D20); the migration itself still seeds
+  only the 11 payroll accounts, as the reference did, so imports are unaffected.
 - `currentBalance` on bank accounts is never updated by postings (balances come from the
     ledger); there is no Banking screen in the frontend.
 - W6: no code-signing certificate is available, so installers built here are unsigned

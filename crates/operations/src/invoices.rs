@@ -69,6 +69,8 @@ pub struct Invoice {
     pub payment_terms: Option<String>,
     pub total_amount: Money,
     pub amount_paid: Money,
+    /// Taken off by posted credit notes (D21).
+    pub amount_credited: Money,
     pub journal_entry_id: Option<String>,
     pub created_by_id: Option<String>,
     pub created_at: String,
@@ -129,6 +131,7 @@ impl Invoice {
             if view == View::UpdatedLines { money_num(self.total_amount) } else { money_str(self.total_amount) },
         );
         m.insert("amountPaid".into(), money_str(self.amount_paid));
+        m.insert("amountCredited".into(), money_str(self.amount_credited));
         m.insert("journalEntryId".into(), opt(&self.journal_entry_id));
         m.insert("createdById".into(), opt(&self.created_by_id));
         m.insert("lines".into(), Value::Array(lines));
@@ -140,7 +143,7 @@ impl Invoice {
 
 const COLUMNS: &str = r#"i."id", i."invoiceNumber", i."poNumber", i."customerId", i."date", i."dueDate", i."status", i."notes",
     i."billToName", i."billToAddress", i."paymentOptions", i."signatoryName", i."signatoryTitle", i."paymentTerms",
-    i."totalAmount", i."amountPaid", i."journalEntryId", i."createdById", i."createdAt", i."updatedAt""#;
+    i."totalAmount", i."amountPaid", i."amountCredited", i."journalEntryId", i."createdById", i."createdAt", i."updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Invoice> {
     Ok(Invoice {
@@ -160,6 +163,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Invoice> {
         payment_terms: r.try_get("paymentTerms")?,
         total_amount: Money::from_cents(r.try_get("totalAmount")?),
         amount_paid: Money::from_cents(r.try_get("amountPaid")?),
+        amount_credited: Money::from_cents(r.try_get("amountCredited")?),
         journal_entry_id: r.try_get("journalEntryId")?,
         created_by_id: r.try_get("createdById")?,
         created_at: r.try_get("createdAt")?,
@@ -603,6 +607,9 @@ async fn unpost_in(tx: &mut Tx, id: &str, scope: &Scope, today: &str) -> AppResu
     if inv.amount_paid > Money::ZERO {
         return Err(AppError::bad_request("Payments have been received — reverse them before returning this to draft"));
     }
+    if inv.amount_credited > Money::ZERO {
+        return Err(AppError::bad_request("Credit notes have been issued — void them before returning this to draft"));
+    }
     let before = inv.clone();
     if let Some(je) = inv.journal_entry_id.take() {
         entries::reverse(tx, &je, today).await?;
@@ -622,6 +629,9 @@ async fn void_in(tx: &mut Tx, id: &str, scope: &Scope, today: &str) -> AppResult
     }
     if inv.amount_paid > Money::ZERO {
         return Err(AppError::bad_request("Cannot void a part-paid invoice — reverse the payments first"));
+    }
+    if inv.amount_credited > Money::ZERO {
+        return Err(AppError::bad_request("Cannot void an invoice with credit notes — void the credit notes first"));
     }
     let before = inv.clone();
     if let Some(je) = &inv.journal_entry_id {
@@ -775,6 +785,38 @@ pub async fn find_all(db: &Db, query: &InvoiceQuery, scope: &Scope) -> AppResult
 /// For payments: the invoice regardless of scope (the reference's payments service ignored it).
 pub(crate) async fn load_any(conn: &mut SqliteConnection, id: &str) -> AppResult<Invoice> {
     load(conn, id).await?.ok_or_else(|| not_found(id))
+}
+
+impl Invoice {
+    /// What the customer still owes: total - payments - credit notes.
+    pub fn outstanding(&self) -> AppResult<Money> {
+        self.total_amount
+            .checked_sub(self.amount_paid)
+            .and_then(|m| m.checked_sub(self.amount_credited))
+            .ok_or_else(overflow)
+    }
+}
+
+/// Status once payments or credits change: PAID when nothing is owed, POSTED again when
+/// something is (after a void), otherwise unchanged. Used for invoices and bills alike.
+pub(crate) fn settled_status(status: &str, total: Money, paid: Money, credited: Money) -> AppResult<&str> {
+    let covered = paid.checked_add(credited).ok_or_else(overflow)?;
+    Ok(match status {
+        POSTED if covered >= total => PAID,
+        PAID if covered < total => POSTED,
+        other => other,
+    })
+}
+
+pub(crate) async fn set_credited(tx: &mut Tx, id: &str, amount_credited: Money, status: &str) -> AppResult<()> {
+    sqlx::query(r#"UPDATE "invoices" SET "amountCredited" = ?1, "status" = ?2, "updatedAt" = ?3 WHERE "id" = ?4"#)
+        .bind(amount_credited.cents())
+        .bind(status)
+        .bind(now_iso())
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 pub(crate) async fn set_paid(tx: &mut Tx, inv: &Invoice, amount_paid: Money, status: &str) -> AppResult<()> {

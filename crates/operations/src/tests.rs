@@ -445,3 +445,106 @@ async fn nothing_posts_on_or_before_the_books_lock_date() -> AppResult<()> {
     invoices::post(&s.db, &draft.id, &ADMIN()).await?;
     Ok(())
 }
+
+fn note(kind: &str, doc: &str, amount: &str, account: &str) -> crate::credit_notes::CreateNote {
+    crate::credit_notes::CreateNote {
+        kind: kind.into(),
+        document_id: doc.into(),
+        date: "2026-04-20".into(),
+        reason: "Discount agreed".into(),
+        amount: m(amount),
+        account_id: account.into(),
+    }
+}
+
+#[tokio::test]
+async fn credit_notes_reduce_what_the_customer_owes_and_can_be_voided() -> AppResult<()> {
+    use crate::credit_notes;
+    let s = shop().await?;
+    let revenue = s.acct["4000"].clone();
+    let inv = invoices::create(&s.db, s.invoice(vec![("1", "1000", true)]), Some("admin")).await?;
+
+    let draft = credit_notes::create(&s.db, note("AR", &inv.id, "100", &revenue), &ADMIN()).await;
+    assert_eq!(bad_request(&draft).as_deref(), Some("Only a posted invoice can be reduced — this one is DRAFT"));
+    invoices::post(&s.db, &inv.id, &ADMIN()).await?;
+    payments::create(&s.db, s.pay("AR", Some(&inv.id), None, "600")).await?;
+
+    let too_much = credit_notes::create(&s.db, note("AR", &inv.id, "400.01", &revenue), &ADMIN()).await;
+    assert_eq!(bad_request(&too_much).as_deref(), Some("Credit note exceeds the outstanding balance of 400.00"));
+    let wrong_account = credit_notes::create(&s.db, note("AR", &inv.id, "50", &s.acct["1000"]), &ADMIN()).await;
+    assert_eq!(bad_request(&wrong_account).as_deref(), Some("Choose an active revenue account for a credit note"));
+    let mut early = note("AR", &inv.id, "50", &revenue);
+    early.date = "2026-03-31".into();
+    let early = credit_notes::create(&s.db, early, &ADMIN()).await;
+    assert_eq!(bad_request(&early).as_deref(), Some("Credit note cannot be dated before its invoice (2026-04-01)"));
+
+    let cn = credit_notes::create(&s.db, note("AR", &inv.id, "150", &revenue), &ADMIN()).await?;
+    assert_eq!((cn.note_number.as_str(), cn.status.as_str()), ("CN-000001", "POSTED"));
+    assert_eq!(cn.document_number.as_deref(), Some(inv.invoice_number.as_str()));
+    assert_eq!(s.balance("1100").await?, m("250"), "1000 - 600 paid - 150 credited");
+    assert_eq!(s.balance("4000").await?, m("850"), "revenue is reduced by the credit");
+    let pay_more = payments::create(&s.db, s.pay("AR", Some(&inv.id), None, "250.01")).await;
+    assert_eq!(bad_request(&pay_more).as_deref(), Some("Payment exceeds the outstanding balance of 250.00"));
+
+    // The rest as a second credit note settles the invoice.
+    let rest = credit_notes::create(&s.db, note("AR", &inv.id, "250", &revenue), &ADMIN()).await?;
+    let mut c = s.db.read().acquire().await?;
+    let settled = invoices::find_one(&mut c, &inv.id, &ADMIN()).await?;
+    drop(c);
+    assert_eq!((settled.status.as_str(), settled.amount_credited), ("PAID", m("400")));
+    let none_left = credit_notes::create(&s.db, note("AR", &inv.id, "1", &revenue), &ADMIN()).await;
+    assert!(bad_request(&none_left).unwrap_or_default().starts_with("This invoice is fully settled"));
+
+    // Voiding a note puts its amount back and reopens the invoice.
+    let voided = credit_notes::void(&s.db, "AR", &rest.id, &ADMIN(), TODAY).await?;
+    assert_eq!(voided.status, "VOID");
+    let mut c = s.db.read().acquire().await?;
+    let reopened = invoices::find_one(&mut c, &inv.id, &ADMIN()).await?;
+    drop(c);
+    assert_eq!((reopened.status.as_str(), reopened.amount_credited), ("POSTED", m("150")));
+    assert_eq!(s.balance("1100").await?, m("250"));
+    let twice = credit_notes::void(&s.db, "AR", &rest.id, &ADMIN(), TODAY).await;
+    assert_eq!(bad_request(&twice).as_deref(), Some("Credit note is already voided"));
+    let blocked = invoices::void(&s.db, &inv.id, &ADMIN(), TODAY).await;
+    assert!(bad_request(&blocked).is_some(), "an invoice with payments or credit notes is not voided");
+    assert_eq!(credit_notes::find_all(&s.db, "AR", &ADMIN()).await?.len(), 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn debit_notes_reduce_what_is_owed_to_the_vendor() -> AppResult<()> {
+    use crate::credit_notes;
+    let s = shop().await?;
+    let expense = s.acct["6000"].clone();
+    let bill = bills::create(
+        &s.db,
+        CreateBill {
+            vendor_id: s.vendor.clone(),
+            date: "2026-04-03".into(),
+            due_date: None,
+            notes: None,
+            lines: vec![BillLineInput {
+                description: "Paper".into(),
+                quantity: m("1"),
+                unit_price: m("300"),
+                account_id: expense.clone(),
+            }],
+        },
+    )
+    .await?;
+    bills::post(&s.db, &bill.id).await?;
+    let wrong = credit_notes::create(&s.db, note("AP", &bill.id, "10", &s.acct["4000"]), &ADMIN()).await;
+    assert_eq!(bad_request(&wrong).as_deref(), Some("Choose an active expense or asset account for a debit note"));
+    let dn = credit_notes::create(&s.db, note("AP", &bill.id, "100", &expense), &ADMIN()).await?;
+    assert_eq!(dn.note_number, "DN-000001");
+    assert_eq!(s.balance("2000").await?, m("200"));
+    assert_eq!(s.balance("6000").await?, m("200"));
+    payments::create(&s.db, s.pay("AP", None, Some(&bill.id), "200")).await?;
+    let mut c = s.db.read().acquire().await?;
+    let paid = bills::find_one(&mut c, &bill.id).await?;
+    drop(c);
+    assert_eq!(paid.status, "PAID", "payment plus debit note settle the bill");
+    let v = bills::void(&s.db, &bill.id, TODAY).await;
+    assert!(bad_request(&v).is_some());
+    Ok(())
+}

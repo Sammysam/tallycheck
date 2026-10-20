@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use operations::invoices::{self, Scope, View};
 use operations::parties::{self, Party, PartyKind};
-use operations::{banking, bills, expenses, payments};
+use operations::{banking, bills, credit_notes, expenses, payments};
 use serde_json::{json, Value};
 
 type Pairs = Query<Vec<(String, String)>>;
@@ -394,4 +394,61 @@ pub async fn payments_void(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let p = payments::void(&s.db, &id, &today()).await?;
     Ok((StatusCode::CREATED, Json(p.to_json(false))))
+}
+
+// ─── Credit notes (AR, `invoices` permission) and debit notes (AP, `bills`) — D21 ───────
+
+async fn notes_list(s: &AppState, kind: &str, user: &User) -> AppResult<Json<Value>> {
+    let rows = credit_notes::find_all(&s.db, kind, &scope(user)).await?;
+    Ok(Json(Value::Array(rows.iter().map(|n| n.to_json()).collect())))
+}
+
+async fn notes_create(s: &AppState, kind: &str, user: &User, body: JsonBody) -> AppResult<(StatusCode, Json<Value>)> {
+    let dto = ops::create_note(body.object(), kind)?;
+    Ok((StatusCode::CREATED, Json(credit_notes::create(&s.db, dto, &scope(user)).await?.to_json())))
+}
+
+async fn notes_void(s: &AppState, kind: &str, user: &User, id: &str) -> AppResult<(StatusCode, Json<Value>)> {
+    let note = credit_notes::void(&s.db, kind, id, &scope(user), &today()).await?;
+    Ok((StatusCode::CREATED, Json(note.to_json())))
+}
+
+pub async fn credit_notes_list(State(s): State<AppState>, a: Authorized<perm::Invoices>) -> AppResult<Json<Value>> {
+    notes_list(&s, credit_notes::AR, a.user()).await
+}
+
+pub async fn credit_notes_create(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    body: JsonBody,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    notes_create(&s, credit_notes::AR, a.user(), body).await
+}
+
+pub async fn credit_notes_void(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    notes_void(&s, credit_notes::AR, a.user(), &id).await
+}
+
+pub async fn debit_notes_list(State(s): State<AppState>, a: Authorized<perm::Bills>) -> AppResult<Json<Value>> {
+    notes_list(&s, credit_notes::AP, a.user()).await
+}
+
+pub async fn debit_notes_create(
+    State(s): State<AppState>,
+    a: Authorized<perm::Bills>,
+    body: JsonBody,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    notes_create(&s, credit_notes::AP, a.user(), body).await
+}
+
+pub async fn debit_notes_void(
+    State(s): State<AppState>,
+    a: Authorized<perm::Bills>,
+    Path(id): Path<String>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    notes_void(&s, credit_notes::AP, a.user(), &id).await
 }

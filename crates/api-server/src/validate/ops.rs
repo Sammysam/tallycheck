@@ -294,3 +294,23 @@ pub fn create_payment(body: Map<String, Value>) -> Result<operations::payments::
         notes: opt_string(&m, "notes"),
     })
 }
+
+/// D21: a credit note (`kind` AR, against `invoiceId`) or debit note (AP, against `billId`).
+pub fn create_note(body: Map<String, Value>, kind: &str) -> Result<operations::credit_notes::CreateNote, AppError> {
+    let doc_field = if kind == operations::credit_notes::AR { "invoiceId" } else { "billId" };
+    let mut v = Validator::new(body);
+    v.field(doc_field, false, &[Rule::IsUuid])
+        .field("date", false, &[Rule::IsDateFormat])
+        .field("reason", false, &[Rule::IsString, Rule::IsNotEmpty, Rule::MaxLength(500)])
+        .field("amount", false, &[Rule::IsMoneyNumber, Rule::MinNum(0.01, "0.01")])
+        .field("accountId", false, &[Rule::IsUuid]);
+    let m = v.finish()?;
+    Ok(operations::credit_notes::CreateNote {
+        kind: kind.to_string(),
+        document_id: opt_string(&m, doc_field).unwrap_or_default(),
+        date: opt_string(&m, "date").unwrap_or_default(),
+        reason: opt_string(&m, "reason").unwrap_or_default().trim().to_string(),
+        amount: money(&m, "amount").unwrap_or_default(),
+        account_id: opt_string(&m, "accountId").unwrap_or_default(),
+    })
+}

@@ -1476,3 +1476,107 @@ async fn payments_are_voided_and_the_books_locked_through_the_api() -> TestResul
     assert!(actions.iter().any(|(a, _)| *a == "Voided a payment"), "{actions:?}");
     Ok(())
 }
+
+#[tokio::test]
+async fn a_fresh_install_gets_the_default_chart_once() -> TestResult {
+    let app = App::new().await?;
+    let codes = |db: &database::Db| {
+        let db = db.clone();
+        async move {
+            let rows: Vec<String> = sqlx::query_scalar(r#"SELECT "code" FROM "accounts""#).fetch_all(db.read()).await?;
+            Ok::<_, sqlx::Error>(rows)
+        }
+    };
+    let before = codes(&app.db).await?;
+    assert!(!before.contains(&"1000".to_string()), "the migration alone seeds only payroll accounts");
+
+    let added = api_server::seed_fresh_install(&app.db).await?;
+    assert!(added > 0);
+    let after = codes(&app.db).await?;
+    for code in ["1000", "1100", "2000", "3000", "4000", "6000"] {
+        assert!(after.contains(&code.to_string()), "missing {code}");
+    }
+    assert_eq!(after.len(), after.iter().collect::<std::collections::BTreeSet<_>>().len(), "no duplicate codes");
+
+    // Once someone uses the app, a deleted default account is not brought back.
+    let admin = app.signed_in("admin", "Admin").await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let inventory = accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == "1200").ok_or("1200")?
+        ["id"]
+        .as_str()
+        .ok_or("id")?
+        .to_string();
+    let deleted = app.call(Method::DELETE, &format!("/api/accounts/{inventory}"), Some(&admin), None).await?;
+    assert!(deleted.status.is_success(), "{}", deleted.body);
+    assert_eq!(api_server::seed_fresh_install(&app.db).await?, 0);
+    assert!(!codes(&app.db).await?.contains(&"1200".to_string()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn credit_and_debit_notes_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let revenue = id_of("4000")?;
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme"}))).await?;
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust.body["id"], "date": "2026-04-01",
+                "lines": [{"description": "Design", "quantity": 1, "unitPrice": 500, "accountId": revenue}]})),
+        )
+        .await?;
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+    app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+
+    let body = json!({"invoiceId": inv_id, "date": "2026-04-10", "reason": "Late delivery discount",
+        "amount": 120.5, "accountId": revenue});
+    let denied = app.call(Method::POST, "/api/credit-notes", Some(&viewer), Some(body.clone())).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN, "credit notes need the invoices permission");
+    let invalid = app.call(Method::POST, "/api/credit-notes", Some(&admin), Some(json!({"invoiceId": inv_id}))).await?;
+    assert_eq!(invalid.status, StatusCode::BAD_REQUEST);
+
+    let cn = app.call(Method::POST, "/api/credit-notes", Some(&admin), Some(body)).await?;
+    assert_eq!(cn.status, StatusCode::CREATED, "{}", cn.body);
+    assert_eq!((cn.body["noteNumber"].as_str(), cn.body["amount"].as_str()), (Some("CN-000001"), Some("120.50")));
+    assert_eq!(cn.body["partyName"], "Acme");
+    let after = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    assert_eq!(after.body["amountCredited"], "120.50");
+    let aging = app.call(Method::GET, "/api/reports/ar-aging", Some(&admin), None).await?;
+    assert_eq!(aging.body["grandTotal"], json!(379.5), "ageing shows only what is still owed");
+
+    // The note's own entry is undone from the note, not the ledger screen.
+    let je = cn.body["journalEntryId"].as_str().ok_or("je")?;
+    let sneaky = app.call(Method::POST, &format!("/api/ledger/entries/{je}/reverse"), Some(&admin), None).await?;
+    assert_eq!(sneaky.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        sneaky.body["message"],
+        "This entry was posted by a credit note. Void or unpost it from that screen instead."
+    );
+
+    let cn_id = cn.body["id"].as_str().ok_or("cn")?;
+    let voided = app.call(Method::POST, &format!("/api/credit-notes/{cn_id}/void"), Some(&admin), None).await?;
+    assert_eq!((voided.status, voided.body["status"].as_str()), (StatusCode::CREATED, Some("VOID")));
+    let list = app.call(Method::GET, "/api/credit-notes", Some(&admin), None).await?;
+    assert_eq!(list.body.as_array().map(Vec::len), Some(1));
+    // A debit-note route never finds a credit note.
+    let wrong_kind = app.call(Method::POST, &format!("/api/debit-notes/{cn_id}/void"), Some(&admin), None).await?;
+    assert_eq!(wrong_kind.status, StatusCode::NOT_FOUND);
+
+    let log = app.call(Method::GET, "/api/audit-logs", Some(&admin), None).await?;
+    let data = log.body["data"].as_array().ok_or("data")?;
+    assert_eq!(data[0]["action"], "Voided a credit note");
+    assert!(data.iter().any(|e| e["action"] == "Created a credit note" && e["detail"] == "CN-000001"));
+    Ok(())
+}

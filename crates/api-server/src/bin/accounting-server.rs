@@ -202,6 +202,7 @@ async fn create_admin(config: &AppConfig, username: &str) -> anyhow::Result<()> 
         bail!("password must be at least 8 characters");
     }
     let db = database::Db::open(&config.database_path()).await?;
+    api_server::seed_fresh_install(&db).await?;
     let created = auth::users::bootstrap_admin(&db, username, &password).await?;
     db.close().await;
     if created {
