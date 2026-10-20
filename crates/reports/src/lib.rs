@@ -6,6 +6,8 @@
 //! * AR / AP ageing list the open documents, as the reference does: POSTED invoices with an
 //!   outstanding balance and POSTED bills, aged from their due date (or their date).
 
+pub mod cash_flow;
+
 use app_core::money::{as_json_number, Money};
 use app_core::{AppError, AppResult};
 use chrono::NaiveDate;

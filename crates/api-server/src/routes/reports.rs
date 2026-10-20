@@ -88,3 +88,29 @@ pub async fn ap_aging(
     let mut c = s.db.read().acquire().await?;
     Ok(Json(reports::ap_aging(&mut c, day).await?))
 }
+
+/// D24: `GET /api/reports/cash-flow?dateFrom&dateTo&cashAccounts=id,id` — dates as for profit
+/// and loss; `cashAccounts` defaults to the 10xx asset accounts.
+pub async fn cash_flow(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Reports>,
+    Query(p): Pairs,
+) -> AppResult<Json<Value>> {
+    let q = validate::query_map(p);
+    let from = raw_date(&q, "dateFrom")?;
+    let to = raw_date(&q, "dateTo")?;
+    let year_start = NaiveDate::from_ymd_opt(today().year(), 1, 1).unwrap_or_else(today).to_string();
+    let from = from.unwrap_or(year_start);
+    let to = to.unwrap_or_else(|| today().to_string());
+    let mut c = s.db.read().acquire().await?;
+    let mut ids: Vec<String> = match q.get("cashAccounts").and_then(Value::as_str) {
+        Some(list) if !list.trim().is_empty() => list.split(',').map(|id| id.trim().to_string()).collect(),
+        _ => reports::cash_flow::default_cash_accounts(&mut c).await?,
+    };
+    ids.sort();
+    ids.dedup();
+    if ids.len() > 50 || ids.iter().any(|id| !app_core::ids::is_uuid(id)) {
+        return Err(AppError::validation(vec!["cashAccounts must be a comma-separated list of account ids".into()]));
+    }
+    Ok(Json(reports::cash_flow::cash_flow(&mut c, &from, &to, &ids).await?))
+}

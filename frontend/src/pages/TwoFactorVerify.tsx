@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import AuthShell from '../components/AuthShell';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { signInError } from '../lib/signInError';
 
 export default function TwoFactorVerify() {
   const { tempToken, completeAuth } = useAuth();
@@ -30,8 +31,8 @@ export default function TwoFactorVerify() {
       done.current = true;
       completeAuth(data.accessToken);
       navigate('/');
-    } catch {
-      setError('Invalid code — try again');
+    } catch (err) {
+      setError(signInError(err, 'code'));
     } finally {
       setLoading(false);
     }

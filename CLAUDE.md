@@ -335,6 +335,21 @@ recommendations without answering each one individually; revisit any of them on 
   * Export (toolbar, File menu, Ctrl+E): every table on the screen into one UTF-8 CSV named after
     the screen heading, amounts as plain numbers, action/checkbox columns left out, text that
     Excel would run as a formula prefixed with an apostrophe (`lib/exportCsv.ts`).
+- **D24 Cash flow, comparisons, sign-in messages** (requested by the user 2026-10-20).
+  * `GET /api/reports/cash-flow?dateFrom&dateTo&cashAccounts=id,id` (permission `reports`; dates
+    as for P&L; cashAccounts default = active 10xx asset accounts). Direct method from the
+    ledger: for each entry in the period touching a cash account, every other line's
+    (credit − debit) is cash in/out, grouped by that account. Investing = assets whose subtype
+    contains fixed/non_current/noncurrent/long_term/investment; Financing = equity and
+    liabilities whose subtype contains long_term/non_current/noncurrent/loan; everything else
+    Operating. Cash-to-cash moves drop out. The handler refuses (500) if opening + net change ≠
+    the cash accounts' ledger balance, which cannot happen while entries balance.
+  * P&L "Compare: previous period / same period last year" and Balance Sheet "Compare: same date
+    last year / last year end": a second request, a comparison column and a Change column
+    (frontend only, `lib/periods.ts`).
+  * Sign-in screens show the server's reason for 429 (too many attempts), a turned-off account
+    (403, only after the right password), an unreachable server and server errors; a wrong
+    username or password stays one message (`lib/signInError.ts`).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
@@ -354,9 +369,6 @@ answer 201.
 - Reference quirks to decide in their wave: bills never accumulate partial AP payments; a
   part-paid bill can be voided; `POST /accounts/seed` does nothing after the payroll migration
   seeded 11 accounts.
-- The login page shows its own fixed "Invalid username or password" for every error, so a
-  throttled (429) or inactive (403) user does not see the real reason. Changing it is a
-  frontend change; not done in W0.
 - The copied frontend fails `npm run lint` (77 errors, 10 warnings) exactly as the reference
   does, and `npm audit --omit=dev` reports advisories in react-router, form-data and dompurify.
   Upgrades need a decision; they are not "minimal changes".

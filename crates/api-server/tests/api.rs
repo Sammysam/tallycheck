@@ -1702,3 +1702,39 @@ async fn statements_and_account_activity_through_the_api() -> TestResult {
     assert_eq!(act.body["lines"][0]["sourceType"], "INVOICE");
     Ok(())
 }
+
+#[tokio::test]
+async fn cash_flow_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let clerk = app.signed_in("clerk", "Accountant").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (cash, equity) = (id_of("1000")?, id_of("3000")?);
+    let entry = json!({"date": "2026-04-01", "description": "Capital", "lines": [
+        {"accountId": cash, "debit": 500, "credit": 0}, {"accountId": equity, "debit": 0, "credit": 500}]});
+    app.call(Method::POST, "/api/ledger/entries", Some(&admin), Some(entry)).await?;
+
+    // Without cashAccounts the 10xx accounts are cash.
+    let cf = app
+        .call(Method::GET, "/api/reports/cash-flow?dateFrom=2026-01-01&dateTo=2026-12-31", Some(&admin), None)
+        .await?;
+    assert_eq!(cf.status, StatusCode::OK, "{}", cf.body);
+    assert_eq!(cf.body["cashAccounts"][0]["code"], "1000");
+    assert_eq!((cf.body["financing"]["total"].clone(), cf.body["closingCash"].clone()), (json!(500), json!(500)));
+    let bad = app.call(Method::GET, "/api/reports/cash-flow?cashAccounts=nope", Some(&admin), None).await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let revenue = id_of("4000")?;
+    let not_cash =
+        app.call(Method::GET, &format!("/api/reports/cash-flow?cashAccounts={revenue}"), Some(&admin), None).await?;
+    assert_eq!(not_cash.status, StatusCode::BAD_REQUEST);
+    let viewer_like = app.call(Method::GET, "/api/reports/cash-flow", Some(&clerk), None).await?;
+    assert_eq!(viewer_like.status, StatusCode::OK, "the Accountant role has reports");
+    Ok(())
+}

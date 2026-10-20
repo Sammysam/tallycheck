@@ -28,29 +28,49 @@ export interface ReportRow {
   key: string;
   label: ReactNode;
   amount: number;
+  /** The same line for the comparison period (D24), when one is shown. */
+  compare?: number;
   /** Bold, with a rule above: a subtotal or total. */
   total?: boolean;
 }
 
-/** One block of a financial statement as a grid: label on the left, amount on the right. */
-export function ReportTable({ title, rows, amountHeader = 'Amount' }: { title: string; rows: ReportRow[]; amountHeader?: string }) {
+const cents = (v: number) => Math.round(v * 100);
+
+/**
+ * One block of a financial statement as a grid: label on the left, amount on the right. With
+ * `compareHeader`, a comparison column and a Change column (amount − comparison) follow.
+ */
+export function ReportTable({ title, rows, amountHeader = 'Amount', compareHeader }: {
+  title: string;
+  rows: ReportRow[];
+  amountHeader?: string;
+  compareHeader?: string;
+}) {
+  const span = compareHeader ? 4 : 2;
   return (
     <table className="report-table">
       <thead>
         <tr>
           <th>{title}</th>
           <th className="num">{amountHeader}</th>
+          {compareHeader && <th className="num">{compareHeader}</th>}
+          {compareHeader && <th className="num">Change</th>}
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => (
-          <tr key={r.key} className={r.total ? 'total' : ''}>
-            <td>{r.label}</td>
-            <td className={`num ${r.amount < 0 ? 'neg' : ''}`}>{money(r.amount)}</td>
-          </tr>
-        ))}
+        {rows.map((r) => {
+          const change = (cents(r.amount) - cents(r.compare ?? 0)) / 100;
+          return (
+            <tr key={r.key} className={r.total ? 'total' : ''}>
+              <td>{r.label}</td>
+              <td className={`num ${r.amount < 0 ? 'neg' : ''}`}>{money(r.amount)}</td>
+              {compareHeader && <td className={`num ${(r.compare ?? 0) < 0 ? 'neg' : ''}`}>{money(r.compare ?? 0)}</td>}
+              {compareHeader && <td className={`num ${change < 0 ? 'neg' : ''}`}>{money(change)}</td>}
+            </tr>
+          );
+        })}
         {rows.length === 0 && (
-          <tr><td colSpan={2} className="empty">No accounts with a balance.</td></tr>
+          <tr><td colSpan={span} className="empty">No accounts with a balance.</td></tr>
         )}
       </tbody>
     </table>

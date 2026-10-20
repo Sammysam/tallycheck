@@ -553,6 +553,26 @@ try {
     if (!text.includes('INV-9000') || !text.includes('2500.63') || text.includes('LKR')) throw new Error('CSV content:\n' + text.slice(0, 400));
   });
 
+  await check('Cash flow ends at the cash balance; P&L compares with last year (D24)', async () => {
+    await go('/reports/cash-flow');
+    await waitFor(`document.body.innerText.includes('Net cash from operating activities') && document.body.innerText.includes('Net change in cash')`, 'cash flow sections');
+    const cf = (await api('GET', '/api/reports/cash-flow?dateFrom=&dateTo=')).body;
+    const tb = (await api('GET', '/api/ledger/trial-balance')).body;
+    const cash = tb.find((r) => r.account.code === '1000');
+    if (Math.round(cf.closingCash * 100) !== Math.round((cash.debit - cash.credit) * 100))
+      throw new Error(`cash flow closes at ${cf.closingCash}, the ledger has ${cash.debit - cash.credit}`);
+    await shot('19b-cash-flow');
+
+    await go('/reports/profit-loss');
+    await waitFor(`!!document.querySelector('select[aria-label="Compare with"]')`, 'compare picker');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Compare with"]');
+      sel.value = 'lastYear'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await clickText('Run');
+    const lastYear = new Date().getFullYear() - 1;
+    await waitFor(`[...document.querySelectorAll('th')].some((th) => th.textContent === 'Change') && [...document.querySelectorAll('th')].some((th) => th.textContent.startsWith('${lastYear}-01-01'))`, 'comparison columns');
+    await shot('18d-profit-loss-compare');
+  });
+
   // ── W4: employees ──────────────────────────────────────────────────────────
   /** Puts a local file into a file input the way a user picking it would (fires change). */
   const pickFile = async (selector, path) => {
@@ -805,6 +825,13 @@ try {
     await waitFor(`document.querySelector('[data-testid=lock-status]')?.innerText.includes('not locked')`, 'unlocked');
   });
 
+  await check('An administrator turns a user off', async () => {
+    const users = (await api('GET', '/api/users')).body;
+    const clerk = (users.data ?? users).find((u) => u.username === 'clerk.one');
+    const r = await api('PATCH', `/api/users/${clerk.id}`, { isActive: false });
+    if (r.status !== 200) throw new Error('deactivating answered ' + r.status);
+  });
+
   await check('second login goes through 2FA verify', async () => {
     await evaluate(`localStorage.removeItem('accessToken')`);
     await go('/login');
@@ -825,6 +852,25 @@ try {
     await evaluate(`document.querySelector('button[type=submit]').click()`);
     await waitFor(`document.body.innerText.includes('Invalid username or password')`, 'error message');
     await shot('08-login-error');
+  });
+
+  await check('Sign-in explains a turned-off account and too many attempts (item 11)', async () => {
+    const signIn = async (user, password) => {
+      await go('/login');
+      await type('input[type=text]', user);
+      await type('input[type=password]', password);
+      await evaluate(`document.querySelector('button[type=submit]').click()`);
+    };
+    await signIn('clerk.one', 'clerkpass1');
+    await waitFor(`document.body.innerText.includes('This account has been turned off')`, 'turned-off message');
+    // Five failures lock the name for a while; the next try says so instead of "invalid".
+    await evaluate(`(async () => {
+      for (let i = 0; i < 5; i++) await fetch('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: 'nobody', password: 'wrong-password' }) });
+      return true; })()`);
+    await signIn('nobody', 'wrong-password');
+    await waitFor(`document.body.innerText.includes('Too many failed attempts. Try again in')`, 'throttle message');
+    await shot('08b-login-throttled');
   });
 } catch (e) {
   failures.push('harness');
