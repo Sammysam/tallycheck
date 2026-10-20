@@ -308,6 +308,19 @@ recommendations without answering each one individually; revisit any of them on 
   entry dated today. Invoices and bills with notes cannot be voided or unposted until the notes
   are voided. Payments and AR/AP ageing use the same outstanding figure. Refunding money a
   customer already paid is not covered (a note cannot exceed what is owed).
+- **D22 Bank reconciliation** (requested by the user 2026-10-20). Tables `bank_reconciliations`
+  (accountId, statementDate, statementBalance, openingBalance = previous completed statement
+  balance, status DRAFT/COMPLETED, completedAt/By) and `reconciled_lines` (journalLineId PK →
+  reconciliationId), so journal lines stay immutable and a line is cleared at most once. Any
+  active ASSET account can be reconciled; one DRAFT per account; statement dates move forward.
+  Candidates: lines on the account dated ≤ statement date not cleared elsewhere; a REVERSED entry
+  and its reversal, both unticked, are left off (they net to zero). Complete only when
+  opening + ticked debits − ticked credits = statement balance exactly. Only the latest completed
+  one can be undone (back to DRAFT, ticks kept). Nothing posts to the ledger: bank charges are
+  journal entries first. Routes under `/api/reconciliations` (permission `ledger`): GET
+  `?accountId=`, POST start, GET/DELETE `:id`, PUT `:id/lines` `{lineIds}`, POST `:id/complete`,
+  POST `:id/undo`. Screen: Accounting → Bank Reconciliation. The unused `bank_accounts` table
+  is untouched.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

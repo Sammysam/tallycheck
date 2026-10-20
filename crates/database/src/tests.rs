@@ -27,7 +27,7 @@ const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
 ];
 
 /// Tables this project adds on purpose (approved deviations); the reference has no such table.
-const APPROVED_EXTRA_TABLES: &[&str] = &["credit_notes"]; // D21
+const APPROVED_EXTRA_TABLES: &[&str] = &["credit_notes", "bank_reconciliations", "reconciled_lines"]; // D21, D22
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =

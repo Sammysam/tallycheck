@@ -213,6 +213,16 @@ pub fn summarize(method: &str, path: &str) -> String {
     if resource == "settings" {
         return "Updated company settings".into();
     }
+    if resource == "reconciliations" {
+        return match (method, last) {
+            (_, "complete") => "Completed a bank reconciliation",
+            (_, "undo") => "Undid a bank reconciliation",
+            (_, "lines") => "Saved a bank reconciliation in progress",
+            ("DELETE", _) => "Discarded a bank reconciliation",
+            _ => "Started a bank reconciliation",
+        }
+        .into();
+    }
     if resource == "books" && last == "lock" {
         return "Changed the books lock date".into();
     }

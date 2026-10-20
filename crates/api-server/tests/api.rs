@@ -1580,3 +1580,78 @@ async fn credit_and_debit_notes_through_the_api() -> TestResult {
     assert!(data.iter().any(|e| e["action"] == "Created a credit note" && e["detail"] == "CN-000001"));
     Ok(())
 }
+
+#[tokio::test]
+async fn bank_reconciliation_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let clerk = app.signed_in("clerk", "Viewer").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (cash, equity, revenue) = (id_of("1000")?, id_of("3000")?, id_of("4000")?);
+    let post = |date: &str, debit: &str, credit: &str, amount: f64| {
+        json!({"date": date, "description": "test", "lines": [
+            {"accountId": debit, "debit": amount, "credit": 0}, {"accountId": credit, "debit": 0, "credit": amount}]})
+    };
+    app.call(Method::POST, "/api/ledger/entries", Some(&admin), Some(post("2026-04-01", &cash, &equity, 1000.0)))
+        .await?;
+    app.call(Method::POST, "/api/ledger/entries", Some(&admin), Some(post("2026-04-15", &cash, &revenue, 200.25)))
+        .await?;
+
+    let start = json!({"accountId": cash, "statementDate": "2026-04-30", "statementBalance": 1000});
+    // The Viewer role has `ledger`, so it may reconcile; an income account may not be reconciled.
+    let not_bank = app
+        .call(
+            Method::POST,
+            "/api/reconciliations",
+            Some(&clerk),
+            Some(json!({"accountId": revenue, "statementDate": "2026-04-30", "statementBalance": 0})),
+        )
+        .await?;
+    assert_eq!(not_bank.status, StatusCode::BAD_REQUEST);
+    let ws = app.call(Method::POST, "/api/reconciliations", Some(&clerk), Some(start)).await?;
+    assert_eq!(ws.status, StatusCode::CREATED, "{}", ws.body);
+    assert_eq!(ws.body["difference"], json!(1000));
+    let id = ws.body["id"].as_str().ok_or("id")?.to_string();
+    let lines = ws.body["lines"].as_array().ok_or("lines")?;
+    assert_eq!(lines.len(), 2);
+    let first = lines[0]["lineId"].as_str().ok_or("line")?.to_string();
+
+    let ticked = app
+        .call(Method::PUT, &format!("/api/reconciliations/{id}/lines"), Some(&clerk), Some(json!({"lineIds": [first]})))
+        .await?;
+    assert_eq!((ticked.body["clearedBalance"].clone(), ticked.body["difference"].clone()), (json!(1000), json!(0)));
+    let bad = app
+        .call(Method::PUT, &format!("/api/reconciliations/{id}/lines"), Some(&clerk), Some(json!({"lineIds": "x"})))
+        .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let done = app.call(Method::POST, &format!("/api/reconciliations/{id}/complete"), Some(&clerk), None).await?;
+    assert_eq!((done.body["status"].as_str(), done.body["completedBy"].as_str()), (Some("COMPLETED"), Some("clerk")));
+
+    let history = app.call(Method::GET, &format!("/api/reconciliations?accountId={cash}"), Some(&admin), None).await?;
+    assert_eq!(history.body.as_array().map(Vec::len), Some(1));
+    let undone = app.call(Method::POST, &format!("/api/reconciliations/{id}/undo"), Some(&admin), None).await?;
+    assert_eq!(undone.body["status"], "DRAFT");
+    let gone = app.call(Method::DELETE, &format!("/api/reconciliations/{id}"), Some(&admin), None).await?;
+    assert_eq!(gone.status, StatusCode::NO_CONTENT);
+
+    let log = app.call(Method::GET, "/api/audit-logs", Some(&admin), None).await?;
+    let actions: Vec<&str> =
+        log.body["data"].as_array().ok_or("data")?.iter().filter_map(|e| e["action"].as_str()).collect();
+    for want in [
+        "Started a bank reconciliation",
+        "Saved a bank reconciliation in progress",
+        "Completed a bank reconciliation",
+        "Undid a bank reconciliation",
+        "Discarded a bank reconciliation",
+    ] {
+        assert!(actions.contains(&want), "{want} missing from {actions:?}");
+    }
+    Ok(())
+}
