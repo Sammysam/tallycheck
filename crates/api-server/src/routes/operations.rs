@@ -385,3 +385,13 @@ pub async fn payments_get(
     let mut c = s.db.read().acquire().await?;
     Ok(Json(payments::find_one(&mut c, &id).await?.to_json(false)))
 }
+
+/// D18: reverses the payment's entry and makes the amount outstanding again.
+pub async fn payments_void(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payments>,
+    Path(id): Path<String>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let p = payments::void(&s.db, &id, &today()).await?;
+    Ok((StatusCode::CREATED, Json(p.to_json(false))))
+}

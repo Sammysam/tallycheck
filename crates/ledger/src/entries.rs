@@ -114,7 +114,40 @@ pub async fn post(tx: &mut Tx, entry: NewEntry) -> AppResult<JournalEntry> {
     insert(tx, entry, None).await
 }
 
+/// Settings key holding the books lock date (D19).
+pub const LOCK_KEY: &str = "booksLockedThrough";
+
+/// The last locked date (`YYYY-MM-DD`), if the books are locked.
+pub async fn locked_through(conn: &mut SqliteConnection) -> AppResult<Option<DateStr>> {
+    let value: Option<String> = sqlx::query_scalar(r#"SELECT "value" FROM "settings" WHERE "key" = ?1"#)
+        .bind(LOCK_KEY)
+        .fetch_optional(conn)
+        .await?;
+    Ok(value.filter(|v| !v.is_empty()))
+}
+
+/// Sets (or with `None` clears) the lock date inside the caller's transaction.
+pub async fn set_locked_through(tx: &mut Tx, date: Option<&str>) -> AppResult<()> {
+    database::settings::upsert(tx, LOCK_KEY, date.unwrap_or("")).await
+}
+
+/// D19: nothing reaches the ledger dated on or before the lock date. Every posting —
+/// documents, payroll, manual entries and reversals — comes through `insert`, so this is
+/// the one place the rule lives. Reversals are dated today, so a locked period can still be
+/// corrected in the open one.
+async fn check_not_locked(tx: &mut Tx, date: &str) -> AppResult<()> {
+    if let Some(lock) = locked_through(tx).await? {
+        if date <= lock.as_str() {
+            return Err(AppError::bad_request(format!(
+                "The books are locked up to and including {lock}. Use a later date, or ask an administrator to change the lock date."
+            )));
+        }
+    }
+    Ok(())
+}
+
 async fn insert(tx: &mut Tx, entry: NewEntry, reversal_of: Option<&str>) -> AppResult<JournalEntry> {
+    check_not_locked(tx, &entry.date).await?;
     let id = new_id();
     let number = counters::next_formatted(tx, "JE", 6).await?;
     let now = now_iso();
