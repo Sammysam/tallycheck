@@ -161,6 +161,8 @@ fn singular(resource: &str) -> &str {
         "accounts" => "account",
         "expenses" => "expense",
         "payments" => "payment",
+        "credit-notes" => "credit note",
+        "debit-notes" => "debit note",
         "banking" => "bank account",
         "users" => "user",
         "roles" => "role",
@@ -278,10 +280,11 @@ pub fn summarize(method: &str, path: &str) -> String {
     format!("{} {} {noun}", verb(method), article(noun))
 }
 
-/// `detailFrom(body)`: the first truthy of invoiceNumber, billNumber, title, name, code.
+/// `detailFrom(body)`: the first truthy of invoiceNumber, billNumber, title, name, code
+/// (plus `noteNumber`, D21, which no reference response carries).
 pub fn detail_from(body: &Value) -> Option<String> {
     let obj = body.as_object()?;
-    ["invoiceNumber", "billNumber", "title", "name", "code"].iter().find_map(|k| match obj.get(*k) {
+    ["invoiceNumber", "billNumber", "noteNumber", "title", "name", "code"].iter().find_map(|k| match obj.get(*k) {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         Some(Value::Number(n)) if n.as_f64() != Some(0.0) => Some(n.to_string()),
         Some(Value::Bool(true)) => Some("true".into()),

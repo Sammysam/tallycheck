@@ -20,6 +20,7 @@ interface Invoice {
   dueDate: string;
   totalAmount: number;
   amountPaid?: number;
+  amountCredited?: number;
   status: string;
   createdById?: string;
 }
@@ -254,7 +255,8 @@ export default function Invoices() {
   };
 
   const fmt = (v: number) => new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR' }).format(Number(v));
-  const balanceOf = (r: Invoice) => Number(r.totalAmount) - Number(r.amountPaid ?? 0);
+  // What is still owed: total less payments and credit notes (D21).
+  const balanceOf = (r: Invoice) => Number(r.totalAmount) - Number(r.amountPaid ?? 0) - Number(r.amountCredited ?? 0);
   const filtersActive = filters.q !== '' || filters.status !== '' || filters.dateFrom !== '' || filters.dateTo !== '';
 
   return (

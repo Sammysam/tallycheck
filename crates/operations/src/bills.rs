@@ -41,6 +41,8 @@ pub struct Bill {
     pub total_amount: Money,
     /// Sum of AP payments recorded against the bill (D13).
     pub amount_paid: Money,
+    /// Taken off by posted debit notes (D21). Internal, like the amount paid.
+    pub amount_credited: Money,
     pub journal_entry_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -86,7 +88,7 @@ impl Bill {
     }
 }
 
-const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","journalEntryId","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","amountCredited","journalEntryId","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Bill> {
     Ok(Bill {
@@ -99,6 +101,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Bill> {
         notes: r.try_get("notes")?,
         total_amount: Money::from_cents(r.try_get("totalAmount")?),
         amount_paid: Money::from_cents(r.try_get("amountPaid")?),
+        amount_credited: Money::from_cents(r.try_get("amountCredited")?),
         journal_entry_id: r.try_get("journalEntryId")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
@@ -227,6 +230,27 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     Ok(bill)
 }
 
+impl Bill {
+    /// What is still owed to the vendor: total - payments - debit notes.
+    pub fn outstanding(&self) -> AppResult<Money> {
+        self.total_amount
+            .checked_sub(self.amount_paid)
+            .and_then(|m| m.checked_sub(self.amount_credited))
+            .ok_or_else(overflow)
+    }
+}
+
+pub(crate) async fn set_credited(tx: &mut Tx, id: &str, amount_credited: Money, status: &str) -> AppResult<()> {
+    sqlx::query(r#"UPDATE "bills" SET "amountCredited" = ?1, "status" = ?2, "updatedAt" = ?3 WHERE "id" = ?4"#)
+        .bind(amount_credited.cents())
+        .bind(status)
+        .bind(now_iso())
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn set_paid(tx: &mut Tx, id: &str, amount_paid: Money, status: &str) -> AppResult<()> {
     sqlx::query(r#"UPDATE "bills" SET "amountPaid" = ?1, "status" = ?2, "updatedAt" = ?3 WHERE "id" = ?4"#)
         .bind(amount_paid.cents())
@@ -294,6 +318,9 @@ pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Bill> {
     if bill.status == "PAID" {
         // The reference's source file garbled the dash ("â€”"); the intended text is sent.
         return Err(AppError::bad_request("Cannot void a paid bill — reverse the payment first"));
+    }
+    if bill.amount_credited > Money::ZERO {
+        return Err(AppError::bad_request("Cannot void a bill with debit notes — void the debit notes first"));
     }
     if bill.amount_paid > Money::ZERO {
         // D15: voiding would leave the payments' debit to AP with no bill behind it.

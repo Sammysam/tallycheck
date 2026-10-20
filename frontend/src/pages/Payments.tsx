@@ -105,7 +105,7 @@ export default function Payments() {
                     <option value="">Select Posted Invoice</option>
                     {invoices.map((i) => (
                       <option key={i.id} value={i.id}>
-                        {i.invoiceNumber} — {i.customer?.name || i.billToName || 'one-off'} · balance {fmt(Number(i.totalAmount) - Number(i.amountPaid ?? 0))}
+                        {i.invoiceNumber} — {i.customer?.name || i.billToName || 'one-off'} · balance {fmt(Number(i.totalAmount) - Number(i.amountPaid ?? 0) - Number(i.amountCredited ?? 0))}
                       </option>
                     ))}
                   </select>

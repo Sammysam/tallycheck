@@ -15,5 +15,7 @@ pub mod state;
 pub mod upload;
 pub mod validate;
 
-pub use server::{build_router, init_logging, open_file_store, start, ServerHandle, STORAGE_KEY_FILE};
+pub use server::{
+    build_router, init_logging, open_file_store, seed_fresh_install, start, ServerHandle, STORAGE_KEY_FILE,
+};
 pub use state::AppState;

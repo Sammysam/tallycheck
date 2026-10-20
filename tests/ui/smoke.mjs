@@ -244,9 +244,9 @@ try {
 
   await check('Accounts page creates accounts through the form', async () => {
     await go('/accounts');
-    await waitFor(`document.body.innerText.includes('Salaries Payable')`, 'seeded payroll accounts');
-    await newAccount('1000', 'Cash', 'ASSET');
-    await newAccount('3000', 'Owners Capital', 'EQUITY');
+    // D20: a fresh install already has the default chart as well as the payroll accounts.
+    await waitFor(`['Salaries Payable', 'Accounts Receivable', 'Accounts Payable', 'Cash'].every((t) => document.body.innerText.includes(t))`, 'default chart on a fresh install');
+    await newAccount('3100', 'Owners Capital', 'EQUITY');
     await newAccount('9999', 'Temporary', 'EXPENSE');
     await shot('09-accounts');
   });
@@ -266,7 +266,7 @@ try {
       const id = (code) => accounts.find((a) => a.code === code).id;
       const r = await fetch('/api/ledger/entries', { method: 'POST', headers: h, body: JSON.stringify({
         date: '2026-04-01', description: 'Opening capital', reference: 'OPEN-1',
-        lines: [{ accountId: id('1000'), debit: 1000.5, credit: 0 }, { accountId: id('3000'), debit: 0, credit: 1000.5 }] }) });
+        lines: [{ accountId: id('1000'), debit: 1000.5, credit: 0 }, { accountId: id('3100'), debit: 0, credit: 1000.5 }] }) });
       return r.status;
     })()`);
     if (posted !== 201) throw new Error(`posting returned ${posted}`);
@@ -310,7 +310,7 @@ try {
     const b = [...row.querySelectorAll('button')].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
     if (!b) throw new Error('no button ' + ${JSON.stringify(label)}); b.click(); return true; })()`);
 
-  await check('Seeding adds the missing default accounts (D10)', async () => {
+  await check('Seeding again adds nothing twice (D10, D20)', async () => {
     const r = await api('POST', '/api/accounts/seed');
     if (r.status !== 204) throw new Error('seed returned ' + r.status);
     const list = await api('GET', '/api/accounts');
@@ -698,6 +698,43 @@ try {
     const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-9000');
     if (inv.status !== 'POSTED' || inv.amountPaid !== '0.00') throw new Error(`invoice is ${inv.status} with ${inv.amountPaid} paid`);
     await shot('27-payment-void');
+  });
+
+  await check('Credit and debit notes reduce what is owed, and can be voided (D21)', async () => {
+    const setAmount = async (value) => {
+      await evaluate(`(() => { const el = document.querySelector('input[placeholder=Amount]'); el.focus(); el.select(); return true; })()`);
+      await send('Input.insertText', { text: value });
+    };
+    await go('/credit-notes');
+    await clickText('+ New Credit Note');
+    await waitFor(`[...(document.querySelectorAll('form select')[0]?.options ?? [])].some((o) => o.textContent.includes('INV-9000'))`, 'invoice option');
+    await pick(0, 'INV-9000');
+    await waitFor(`document.querySelector('input[placeholder=Amount]').value === '2500.63'`, 'amount defaults to what is owed');
+    await setAmount('500');
+    await type('input[placeholder^="e.g. 10%"]', 'Discount for late delivery');
+    await clickText('Save Note');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('CN-000001') && tr.innerText.includes('INV-9000'))`, 'credit note row');
+    const inv = async () => (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-9000');
+    if ((await inv()).amountCredited !== '500.00') throw new Error('invoice not credited');
+    const ar = (await api('GET', '/api/reports/ar-aging')).body.grandTotal;
+    if (ar !== 2000.63) throw new Error('AR ageing shows ' + ar);
+    await shot('29-credit-notes');
+    await rowAction('CN-000001', 'Void');
+    await waitFor(`!!document.querySelector('[role=dialog]')`, 'void confirmation');
+    await clickText('Void note');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('CN-000001') && tr.innerText.includes('VOID'))`, 'credit note voided');
+    if ((await inv()).amountCredited !== '0.00') throw new Error('void did not restore the invoice');
+
+    await go('/debit-notes');
+    await clickText('+ New Debit Note');
+    await waitFor(`[...(document.querySelectorAll('form select')[0]?.options ?? [])].some((o) => o.textContent.includes('BILL-000001'))`, 'bill option');
+    await pick(0, 'BILL-000001');
+    await setAmount('10');
+    await type('input[placeholder^="e.g. 10%"]', 'Two reams returned');
+    await clickText('Save Note');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('DN-000001') && tr.innerText.includes('Paper Co'))`, 'debit note row');
+    const ap = (await api('GET', '/api/reports/ap-aging')).body.grandTotal;
+    if (ap !== 27.5) throw new Error('AP ageing shows ' + ap);
   });
 
   await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {

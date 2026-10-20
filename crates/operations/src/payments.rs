@@ -7,7 +7,7 @@
 //!   becomes PAID when nothing is outstanding (D13). A DRAFT bill cannot be paid (D14).
 //! * Void (D18): the payment's entry is reversed and the amount is outstanding again.
 
-use crate::invoices::{self, PAID};
+use crate::invoices;
 use crate::parties::{self, PartyKind};
 use crate::{bills, money_num, money_str, opt, overflow};
 use app_core::ids::new_id;
@@ -142,7 +142,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         if inv.status == invoices::DRAFT {
             return Err(AppError::bad_request("Post the invoice before recording a payment against it"));
         }
-        let balance = inv.total_amount.checked_sub(inv.amount_paid).ok_or_else(overflow)?;
+        let balance = inv.outstanding()?;
         if balance <= Money::ZERO {
             return Err(AppError::bad_request("Invoice is already fully paid"));
         }
@@ -161,7 +161,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         if b.status == "DRAFT" {
             return Err(AppError::bad_request("Post the bill before recording a payment against it"));
         }
-        let balance = b.total_amount.checked_sub(b.amount_paid).ok_or_else(overflow)?;
+        let balance = b.outstanding()?;
         if balance <= Money::ZERO {
             return Err(AppError::bad_request("Bill is already fully paid"));
         }
@@ -223,12 +223,12 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         if let Some(inv) = &invoice {
             // Partial payments accumulate — PAID only once the balance is cleared.
             let paid = inv.amount_paid.checked_add(dto.amount).ok_or_else(overflow)?;
-            let status = if paid >= inv.total_amount { PAID } else { inv.status.as_str() };
+            let status = invoices::settled_status(&inv.status, inv.total_amount, paid, inv.amount_credited)?;
             invoices::set_paid(&mut tx, inv, paid, status).await?;
         }
     } else if let Some(b) = &bill {
         let paid = b.amount_paid.checked_add(dto.amount).ok_or_else(overflow)?;
-        let status = if paid >= b.total_amount { "PAID" } else { b.status.as_str() };
+        let status = invoices::settled_status(&b.status, b.total_amount, paid, b.amount_credited)?;
         bills::set_paid(&mut tx, &b.id, paid, status).await?;
     }
 
@@ -275,13 +275,13 @@ pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Payment> {
     if let Some(iid) = &p.invoice_id {
         let inv = invoices::load_any(&mut tx, iid).await?;
         let paid = inv.amount_paid.checked_sub(p.amount).ok_or_else(overflow)?.max(Money::ZERO);
-        let status = if inv.status == PAID && paid < inv.total_amount { invoices::POSTED } else { inv.status.as_str() };
+        let status = invoices::settled_status(&inv.status, inv.total_amount, paid, inv.amount_credited)?;
         invoices::set_paid(&mut tx, &inv, paid, status).await?;
     }
     if let Some(bid) = &p.bill_id {
         let b = bills::find_one(&mut tx, bid).await?;
         let paid = b.amount_paid.checked_sub(p.amount).ok_or_else(overflow)?.max(Money::ZERO);
-        let status = if b.status == "PAID" && paid < b.total_amount { "POSTED" } else { b.status.as_str() };
+        let status = invoices::settled_status(&b.status, b.total_amount, paid, b.amount_credited)?;
         bills::set_paid(&mut tx, &b.id, paid, status).await?;
     }
     sqlx::query(r#"UPDATE "payments" SET "status" = 'VOID', "updatedAt" = ?1 WHERE "id" = ?2"#)

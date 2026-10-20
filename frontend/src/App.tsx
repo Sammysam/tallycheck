@@ -19,6 +19,7 @@ import Invoices from './pages/Invoices';
 import Bills from './pages/Bills';
 import Expenses from './pages/Expenses';
 import Payments from './pages/Payments';
+import CreditNotes from './pages/CreditNotes';
 import Ledger from './pages/Ledger';
 import TrialBalance from './pages/reports/TrialBalance';
 import ProfitLoss from './pages/reports/ProfitLoss';
@@ -66,6 +67,8 @@ export default function App() {
                   <Route path="/bills"                    element={<Bills />} />
                   <Route path="/expenses"                 element={<Expenses />} />
                   <Route path="/payments"                 element={<Payments />} />
+                  <Route path="/credit-notes"             element={<CreditNotes kind="AR" key="AR" />} />
+                  <Route path="/debit-notes"              element={<CreditNotes kind="AP" key="AP" />} />
                   <Route path="/ledger"                   element={<Ledger />} />
                   <Route path="/reports/trial-balance"    element={<TrialBalance />} />
                   <Route path="/reports/profit-loss"      element={<ProfitLoss />} />

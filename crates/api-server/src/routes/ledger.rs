@@ -72,6 +72,8 @@ fn document_name(source_type: &str) -> Option<&'static str> {
         "BILL" => "a bill",
         "EXPENSE" => "an expense",
         "PAYMENT_AR" | "PAYMENT_AP" => "a payment",
+        "CREDIT_NOTE" => "a credit note",
+        "DEBIT_NOTE" => "a debit note",
         "PAYROLL" | "PAYROLL_PAYMENT" | "PAYROLL_REMITTANCE" => "a payroll run",
         _ => return None,
     })

@@ -119,6 +119,10 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
     let secret = app_core::secrets::load_or_create(&config.secrets_dir().join(JWT_SECRET_FILE), JWT_SECRET_LEN)
         .context("loading the JWT signing key")?;
     let files = open_file_store(config)?;
+    let added = seed_fresh_install(&db).await.context("creating the chart of accounts")?;
+    if added > 0 {
+        tracing::info!(added, "fresh install: default chart of accounts created");
+    }
     bootstrap_admin_from_env(&db).await?;
 
     let listener = TcpListener::bind(config.bind).await.with_context(|| format!("binding {}", config.bind))?;
@@ -160,6 +164,17 @@ pub fn lock_data_dir(dir: &Path) -> anyhow::Result<std::fs::File> {
         }
         Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
     }
+}
+
+/// D20: a fresh install (no users yet) gets the full default chart of accounts — 1000 Cash,
+/// 1100 AR, 2000 AP, 4000 Revenue, … — so invoices, bills and payments work from the first
+/// day without anyone pressing "Seed". Only missing codes are added, and never once the app is
+/// in use: an imported database or a chart someone has changed is left alone.
+pub async fn seed_fresh_install(db: &Db) -> app_core::AppResult<usize> {
+    if auth::users::any_users(db).await? {
+        return Ok(0);
+    }
+    ledger::accounts::seed(db).await
 }
 
 async fn bootstrap_admin_from_env(db: &Db) -> anyhow::Result<()> {
