@@ -5,6 +5,7 @@ import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
+import { taxOf, useTaxCodes } from '../lib/taxes';
 import { money } from '../lib/money';
 
 /**
@@ -25,7 +26,7 @@ interface Note {
 }
 
 interface Account { id: string; code: string; name: string; type: string; isActive: boolean }
-interface DocLine { accountId: string | null }
+interface DocLine { accountId: string | null; taxCodeId?: string | null }
 interface Doc {
   id: string;
   number: string;
@@ -33,6 +34,7 @@ interface Doc {
   date: string;
   balance: number | null;
   firstAccount: string | null;
+  firstTax: string | null;
 }
 
 const fmt = (v: number | string) => money(Number(v));
@@ -64,7 +66,7 @@ const TEXT = {
   },
 } as const;
 
-const emptyForm = () => ({ documentId: '', date: todayIso(), amount: '', reason: '', accountId: '' });
+const emptyForm = () => ({ documentId: '', date: todayIso(), amount: '', reason: '', accountId: '', taxCodeId: '' });
 
 export default function CreditNotes({ kind }: { kind: Kind }) {
   const t = TEXT[kind];
@@ -76,6 +78,8 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [voiding, setVoiding] = useState<Note | null>(null);
+  const taxCodes = useTaxCodes();
+  const noteTax = taxCodes.find((c) => c.id === form.taxCodeId);
 
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
@@ -97,6 +101,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
               date: i.date,
               balance: Number(i.totalAmount) - Number(i.amountPaid ?? 0) - Number(i.amountCredited ?? 0),
               firstAccount: i.lines?.find((l) => l.accountId)?.accountId ?? null,
+              firstTax: i.lines?.find((l) => l.taxCodeId)?.taxCodeId ?? null,
             }))
             .filter((d: Doc) => (d.balance ?? 0) > 0),
         ),
@@ -113,6 +118,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
               date: b.date,
               balance: null,
               firstAccount: b.lines?.find((l) => l.accountId)?.accountId ?? null,
+              firstTax: b.lines?.find((l) => l.taxCodeId)?.taxCodeId ?? null,
             })),
         ),
       );
@@ -143,6 +149,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
       documentId: id,
       amount: d?.balance != null ? d.balance.toFixed(2) : f.amount,
       accountId: account,
+      taxCodeId: d?.firstTax ?? '',
     }));
   };
 
@@ -157,6 +164,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
         amount: Number(form.amount),
         reason: form.reason,
         accountId: form.accountId,
+        taxCodeId: form.taxCodeId || undefined,
       });
       setShowForm(false);
       setForm(emptyForm());
@@ -234,6 +242,20 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
               </select>
             </label>
+            {taxCodes.length > 0 && (
+              <label className="text-xs font-medium text-gray-600" style={{ gridColumn: '1 / -1' }}>
+                Tax (the amount includes it)
+                <select className="mt-1" value={form.taxCodeId} onChange={(e) => setForm({ ...form, taxCodeId: e.target.value })} aria-label="Tax">
+                  <option value="">No tax</option>
+                  {taxCodes.filter((c) => c.isActive || c.id === form.taxCodeId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {noteTax && Number(form.amount) > 0 && (
+                  <span className="block mt-1 font-normal text-gray-500">
+                    {fmt(taxOf(Number(form.amount), noteTax.rate, true))} of tax is reversed with this note.
+                  </span>
+                )}
+              </label>
+            )}
             <div className="flex gap-2" style={{ gridColumn: '1 / -1' }}>
               <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Note'}</button>
               <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>

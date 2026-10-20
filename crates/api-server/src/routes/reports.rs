@@ -128,3 +128,20 @@ pub async fn cash_flow(
     }
     Ok(Json(reports::cash_flow::cash_flow(&mut c, &from, &to, &ids).await?))
 }
+
+/// D26: `GET /api/reports/tax?dateFrom&dateTo` — output and input tax per tax code; dates as
+/// for profit and loss (default: the financial year to date).
+pub async fn tax_return(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Reports>,
+    Query(p): Pairs,
+) -> AppResult<Json<Value>> {
+    let q = validate::query_map(p);
+    let from = match raw_date(&q, "dateFrom")? {
+        Some(f) => f,
+        None => fiscal_year_start(&s.db).await?,
+    };
+    let to = raw_date(&q, "dateTo")?.unwrap_or_else(|| today().to_string());
+    let mut c = s.db.read().acquire().await?;
+    Ok(Json(reports::tax_return::tax_return(&mut c, &from, &to).await?))
+}

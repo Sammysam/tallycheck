@@ -4,6 +4,7 @@ import { amountInWords } from '../utils/amountInWords';
 import { errMsg } from '../api/client';
 import { amount } from '../lib/money';
 import { company, region } from '../lib/region';
+import { summarize, useTaxCodes } from '../lib/taxes';
 
 /**
  * Invoice editor rendered as the invoice document itself — same layout, fonts
@@ -24,6 +25,8 @@ export interface SheetLine {
   quantity: number;
   unitPrice: number;
   accountId: string;
+  /** D26: '' for no tax. */
+  taxCodeId: string;
 }
 
 export interface SheetPayload {
@@ -38,7 +41,8 @@ export interface SheetPayload {
   paymentOptions?: string[];
   signatoryName?: string;
   signatoryTitle?: string;
-  lines: { description: string; quantity?: number; unitPrice?: number; accountId?: string }[];
+  lines: { description: string; quantity?: number; unitPrice?: number; accountId?: string; taxCodeId?: string }[];
+  pricesIncludeTax: boolean;
 }
 
 interface Props {
@@ -62,7 +66,7 @@ const TERMS = [
 const TERM_DAYS: Record<string, number> = { DUE_ON_RECEIPT: 0, NET_15: 15, NET_30: 30, NET_60: 60 };
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const newLine = (accountId = ''): SheetLine => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId });
+const newLine = (accountId = '', taxCodeId = ''): SheetLine => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId, taxCodeId });
 
 /** The account new lines start on: 4000 Revenue if it exists, else the first one. */
 const defaultAccountId = (accounts: any[]) =>
@@ -110,9 +114,12 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
           quantity: Number(l.quantity),
           unitPrice: Number(l.unitPrice),
           accountId: l.accountId,
+          taxCodeId: l.taxCodeId ?? '',
         }))
-      : [newLine(fallbackAccount)],
+      : [newLine(fallbackAccount, region().defaultSalesTax)],
   );
+  const [pricesIncludeTax, setPricesIncludeTax] = useState<boolean>(Boolean(initial?.pricesIncludeTax));
+  const taxCodes = useTaxCodes();
   const [payOptions, setPayOptions] = useState(() =>
     (initial?.paymentOptions
       ? String(initial.paymentOptions).split(/\r?\n/).filter(Boolean)
@@ -140,7 +147,14 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
   // Blank quantity means one of these; blank price means the line has no money on it.
   const lineAmount = (l: SheetLine) => round2((Number(l.quantity) || 1) * (Number(l.unitPrice) || 0));
 
-  const total = useMemo(() => round2(lines.reduce((s, l) => s + lineAmount(l), 0)), [lines]);
+  // D26: subtotal, tax per code and total — the same arithmetic the server uses.
+  const summary = useMemo(
+    () => summarize(lines.map((l) => ({ amount: lineAmount(l), taxCodeId: l.taxCodeId })), pricesIncludeTax),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lines, pricesIncludeTax, taxCodes],
+  );
+  const total = summary.total;
+  const anyTax = lines.some((l) => l.taxCodeId);
 
   const setLine = (i: number, field: keyof SheetLine, val: any) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, [field]: val } : l)));
@@ -185,16 +199,20 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
     date,
     dueDate,
     totalAmount: total,
+    taxAmount: summary.tax,
+    pricesIncludeTax,
     billToName,
     billToAddress,
     paymentOptions: payOptions.map((o) => o.text.trim()).filter(Boolean).join('\n'),
     signatoryName: sigName,
     signatoryTitle: sigTitle,
-    lines: lines.map((l) => ({
+    lines: lines.map((l, i) => ({
       description: l.description,
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       amount: lineAmount(l),
+      taxCodeId: l.taxCodeId || null,
+      taxAmount: summary.lineTax[i],
     })),
   });
 
@@ -215,12 +233,14 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
         signatoryName: sigName.trim() || undefined,
         signatoryTitle: sigTitle.trim() || undefined,
         // A blank account must go over as undefined — '' fails UUID validation.
-        lines: lines.map(({ _key, accountId, quantity, unitPrice, ...l }) => ({
+        lines: lines.map(({ _key, accountId, quantity, unitPrice, taxCodeId, ...l }) => ({
           ...l,
           accountId: accountId || undefined,
           quantity: quantity || undefined,
           unitPrice: unitPrice || undefined,
+          taxCodeId: taxCodeId || undefined,
         })),
+        pricesIncludeTax,
       });
     } catch (err: any) {
       setError(errMsg(err, 'Failed to save invoice'));
@@ -275,8 +295,27 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
                 <option value="">Select revenue account…</option>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
               </select>
+              {taxCodes.length > 0 && (
+                <select
+                  style={{ marginTop: 4 }}
+                  aria-label={`Tax for line ${i + 1}`}
+                  value={line.taxCodeId}
+                  onChange={(e) => setLine(i, 'taxCodeId', e.target.value)}
+                >
+                  <option value="">No tax</option>
+                  {taxCodes.filter((c) => c.isActive || c.id === line.taxCodeId).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              )}
             </label>
           ))}
+          {taxCodes.length > 0 && (
+            <label className="inv-side-field" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={pricesIncludeTax} onChange={(e) => setPricesIncludeTax(e.target.checked)} />
+              Prices include tax
+            </label>
+          )}
         </aside>
 
         <div className="inv-sheet-wrap">
@@ -287,7 +326,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
           <div className="contact">{co.contactLine}{co.emailWebLine && <><br />{co.emailWebLine}</>}{co.taxNumber && <><br />Tax No: {co.taxNumber}</>}</div>
           <div className="rule" />
 
-          <h1>Invoice</h1>
+          <h1>{anyTax ? 'Tax Invoice' : 'Invoice'}</h1>
 
           {/* ── Remit To / invoice meta ────────────────────────── */}
           <div className="meta">
@@ -391,12 +430,28 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
             <tfoot>
               <tr>
                 <td colSpan={3} style={{ border: 'none' }}>
-                  <button type="button" className="btn-link" onClick={() => setLines([...lines, newLine(fallbackAccount)])}>+ Add line</button>
+                  <button type="button" className="btn-link" onClick={() => setLines([...lines, newLine(fallbackAccount, region().defaultSalesTax)])}>+ Add line</button>
                 </td>
-                <td className="total-label">Total</td>
-                <td className="total-val">{num(total)}</td>
+                <td className="total-label">{anyTax ? 'Subtotal' : 'Total'}</td>
+                <td className="total-val">{num(anyTax ? summary.subtotal : total)}</td>
                 <td className="gutter" />
               </tr>
+              {anyTax && summary.byCode.map((t) => (
+                <tr key={t.id}>
+                  <td colSpan={3} style={{ border: 'none' }} />
+                  <td className="total-label">{t.name}</td>
+                  <td className="total-val">{num(t.tax)}</td>
+                  <td className="gutter" />
+                </tr>
+              ))}
+              {anyTax && (
+                <tr>
+                  <td colSpan={3} style={{ border: 'none' }} />
+                  <td className="total-label">Total</td>
+                  <td className="total-val" data-testid="invoice-total">{num(total)}</td>
+                  <td className="gutter" />
+                </tr>
+              )}
             </tfoot>
           </table>
 

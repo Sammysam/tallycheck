@@ -27,6 +27,9 @@ pub struct BillLine {
     pub unit_price: Money,
     pub amount: Money,
     pub account_id: String,
+    /// D26: the line's tax code and its (input) tax, rounded half-up.
+    pub tax_code_id: Option<String>,
+    pub tax_amount: Money,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +46,9 @@ pub struct Bill {
     pub amount_paid: Money,
     /// Taken off by posted debit notes (D21). Internal, like the amount paid.
     pub amount_credited: Money,
+    /// D26: total tax on the lines, and whether the line amounts already include it.
+    pub tax_amount: Money,
+    pub prices_include_tax: bool,
     pub journal_entry_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -65,6 +71,8 @@ impl Bill {
                     "unitPrice": if created { money_num(l.unit_price) } else { money_str(l.unit_price) },
                     "amount": if created { money_num(l.amount) } else { money_str(l.amount) },
                     "accountId": l.account_id,
+                    "taxCodeId": opt(&l.tax_code_id),
+                    "taxAmount": money_str(l.tax_amount),
                 })
             })
             .collect();
@@ -80,6 +88,8 @@ impl Bill {
         m.insert("status".into(), json!(self.status));
         m.insert("notes".into(), opt(&self.notes));
         m.insert("totalAmount".into(), money_str(self.total_amount));
+        m.insert("taxAmount".into(), money_str(self.tax_amount));
+        m.insert("pricesIncludeTax".into(), json!(self.prices_include_tax));
         m.insert("journalEntryId".into(), opt(&self.journal_entry_id));
         m.insert("lines".into(), Value::Array(lines));
         m.insert("createdAt".into(), json!(self.created_at));
@@ -88,7 +98,7 @@ impl Bill {
     }
 }
 
-const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","amountCredited","journalEntryId","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","amountCredited","taxAmount","pricesIncludeTax","journalEntryId","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Bill> {
     Ok(Bill {
@@ -102,6 +112,8 @@ fn from_row(r: &SqliteRow) -> AppResult<Bill> {
         total_amount: Money::from_cents(r.try_get("totalAmount")?),
         amount_paid: Money::from_cents(r.try_get("amountPaid")?),
         amount_credited: Money::from_cents(r.try_get("amountCredited")?),
+        tax_amount: Money::from_cents(r.try_get("taxAmount")?),
+        prices_include_tax: r.try_get::<i64, _>("pricesIncludeTax")? == 1,
         journal_entry_id: r.try_get("journalEntryId")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
@@ -112,7 +124,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Bill> {
 
 async fn attach(conn: &mut SqliteConnection, bill: &mut Bill) -> AppResult<()> {
     let rows = sqlx::query(
-        r#"SELECT "id","billId","description","quantity","unitPrice","amount","accountId"
+        r#"SELECT "id","billId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount"
            FROM "bill_lines" WHERE "billId" = ?1 ORDER BY rowid"#,
     )
     .bind(&bill.id)
@@ -129,6 +141,8 @@ async fn attach(conn: &mut SqliteConnection, bill: &mut Bill) -> AppResult<()> {
                 unit_price: Money::from_cents(r.try_get("unitPrice")?),
                 amount: Money::from_cents(r.try_get("amount")?),
                 account_id: r.try_get("accountId")?,
+                tax_code_id: r.try_get("taxCodeId")?,
+                tax_amount: Money::from_cents(r.try_get("taxAmount")?),
             })
         })
         .collect::<AppResult<Vec<_>>>()?;
@@ -170,6 +184,8 @@ pub struct BillLineInput {
     pub quantity: Money,
     pub unit_price: Money,
     pub account_id: String,
+    /// D26: optional tax code for the line.
+    pub tax_code_id: Option<String>,
 }
 
 pub struct CreateBill {
@@ -178,6 +194,8 @@ pub struct CreateBill {
     pub due_date: Option<String>,
     pub notes: Option<String>,
     pub lines: Vec<BillLineInput>,
+    /// D26: the line amounts already include tax.
+    pub prices_include_tax: bool,
 }
 
 pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
@@ -189,16 +207,26 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     let number = counters::next_formatted(&mut tx, "BILL", 6).await?;
     let id = new_id();
     let now = now_iso();
-    let mut total = Money::ZERO;
+    let (mut total, mut tax_total) = (Money::ZERO, Money::ZERO);
     let mut amounts = Vec::with_capacity(dto.lines.len());
     for l in &dto.lines {
         let amount = Money::line_amount(l.quantity, l.unit_price).ok_or_else(overflow)?;
-        total = total.checked_add(amount).ok_or_else(overflow)?;
-        amounts.push(amount);
+        let (gross, tax) = match &l.tax_code_id {
+            Some(code) => {
+                let rate = crate::tax::usable(&mut tx, code).await?.rate;
+                let (_, tax, gross) = crate::tax::split(amount, rate, dto.prices_include_tax)?;
+                (gross, tax)
+            }
+            None => (amount, Money::ZERO),
+        };
+        total = total.checked_add(gross).ok_or_else(overflow)?;
+        tax_total = tax_total.checked_add(tax).ok_or_else(overflow)?;
+        amounts.push((amount, tax));
     }
     sqlx::query(
-        r#"INSERT INTO "bills" ("id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,'DRAFT',?6,?7,?8,?8)"#,
+        r#"INSERT INTO "bills" ("id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","createdAt","updatedAt",
+             "taxAmount","pricesIncludeTax")
+           VALUES (?1,?2,?3,?4,?5,'DRAFT',?6,?7,?8,?8,?9,?10)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -208,12 +236,14 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     .bind(&dto.notes)
     .bind(total.cents())
     .bind(&now)
+    .bind(tax_total.cents())
+    .bind(dto.prices_include_tax)
     .execute(&mut *tx)
     .await?;
-    for (l, amount) in dto.lines.iter().zip(amounts) {
+    for (l, (amount, tax)) in dto.lines.iter().zip(amounts) {
         sqlx::query(
-            r#"INSERT INTO "bill_lines" ("id","billId","description","quantity","unitPrice","amount","accountId")
-               VALUES (?1,?2,?3,?4,?5,?6,?7)"#,
+            r#"INSERT INTO "bill_lines" ("id","billId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount")
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
         )
         .bind(new_id())
         .bind(&id)
@@ -222,6 +252,8 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
         .bind(l.unit_price.cents())
         .bind(amount.cents())
         .bind(&l.account_id)
+        .bind(&l.tax_code_id)
+        .bind(tax.cents())
         .execute(&mut *tx)
         .await?;
     }
@@ -280,16 +312,32 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
         return Err(AppError::bad_request(format!("Bill is already {}", bill.status)));
     }
     let ap = ledger::accounts::find_by_code(&mut tx, "2000").await?;
-    let mut lines: Vec<NewLine> = bill
-        .lines
-        .iter()
-        .map(|l| NewLine {
+    // Each expense line without its tax; the tax goes to the code's purchase account (D26).
+    let mut lines: Vec<NewLine> = Vec::new();
+    let mut tax_by_account: Vec<(String, Money)> = Vec::new();
+    for l in &bill.lines {
+        let net =
+            if bill.prices_include_tax { l.amount.checked_sub(l.tax_amount).ok_or_else(overflow)? } else { l.amount };
+        lines.push(NewLine {
             account_id: l.account_id.clone(),
-            debit: l.amount,
+            debit: net,
             credit: Money::ZERO,
             description: Some(l.description.clone()),
-        })
-        .collect();
+        });
+        if let (Some(code), true) = (&l.tax_code_id, l.tax_amount != Money::ZERO) {
+            let account = crate::tax::find_one(&mut tx, code).await?.purchase_account_id;
+            match tax_by_account.iter_mut().find(|(a, _)| *a == account) {
+                Some((_, t)) => *t = t.checked_add(l.tax_amount).ok_or_else(overflow)?,
+                None => tax_by_account.push((account, l.tax_amount)),
+            }
+        }
+    }
+    lines.extend(tax_by_account.into_iter().map(|(account_id, tax)| NewLine {
+        account_id,
+        debit: tax,
+        credit: Money::ZERO,
+        description: Some("Tax".into()),
+    }));
     lines.push(NewLine { account_id: ap.id, debit: Money::ZERO, credit: bill.total_amount, description: None });
     let entry = entries::post(
         &mut tx,

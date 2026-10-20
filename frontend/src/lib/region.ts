@@ -27,6 +27,9 @@ export interface Region {
   locale: string;
   /** 1 = January … 12 = December. */
   fiscalYearStart: number;
+  /** D26: tax code ids new sales / purchase lines start with ('' for none). */
+  defaultSalesTax: string;
+  defaultPurchaseTax: string;
 }
 
 const NEUTRAL: Region = {
@@ -47,6 +50,8 @@ const NEUTRAL: Region = {
   currencyMinorWord: 'Cents',
   locale: 'en-US',
   fiscalYearStart: 1,
+  defaultSalesTax: '',
+  defaultPurchaseTax: '',
 };
 
 let current: Region = NEUTRAL;
@@ -76,6 +81,8 @@ export function regionFromSettings(s: Record<string, string>): Region {
     currencyMinorWord: v('region.currencyMinorWord', NEUTRAL.currencyMinorWord),
     locale: v('region.locale', NEUTRAL.locale),
     fiscalYearStart: month >= 1 && month <= 12 ? month : 1,
+    defaultSalesTax: v('tax.defaultSales', ''),
+    defaultPurchaseTax: v('tax.defaultPurchases', ''),
   };
 }
 

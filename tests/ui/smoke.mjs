@@ -822,6 +822,50 @@ try {
     if (ap !== 27.5) throw new Error('AP ageing shows ' + ap);
   });
 
+  await check('Taxes: a tax code, a tax invoice from the form, and the tax return (D26)', async () => {
+    await go('/taxes');
+    await clickText('+ New Tax Code');
+    await waitFor(`!!document.querySelector('form[aria-label="Tax code"]')`, 'tax code form');
+    await type('input[placeholder="e.g. VAT 18%"]', 'VAT 18%');
+    await type('input[placeholder="e.g. 18"]', '18');
+    await clickText('Add Tax Payable and Tax Receivable');
+    await waitFor(`!!document.querySelector('select[aria-label="Sales tax account"]').value && !!document.querySelector('select[aria-label="Purchase tax account"]').value`, 'tax accounts chosen');
+    await clickText('Save Tax Code');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('VAT 18%') && tr.innerText.includes('18%'))`, 'tax code row');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Default sales tax"]');
+      sel.value = [...sel.options].find((o) => o.textContent === 'VAT 18%').value;
+      sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await sleep(600);
+    await shot('30-taxes');
+
+    // A new invoice line starts with the default tax; the sheet shows subtotal, VAT and total.
+    await go('/invoices');
+    await clickText('+ New Invoice');
+    await waitFor(`!!document.querySelector('select[aria-label="Tax for line 1"]')?.value`, 'line starts with VAT');
+    await type('input[placeholder="Name as it should print"]', 'Walk-in Client');
+    await type('input[placeholder="Item description"]', 'Consulting');
+    await evaluate(`(() => { const el = document.querySelectorAll('.inv-sheet input[type=number]')[1]; el.focus(); el.select(); return true; })()`);
+    await send('Input.insertText', { text: '1000' });
+    await waitFor(`document.querySelector('.inv-sheet h1').textContent === 'Tax Invoice' && document.querySelector('[data-testid=invoice-total]')?.innerText.includes('1,180.00')`, 'tax invoice totals');
+    await shot('31-tax-invoice');
+    await clickText('Save Invoice');
+    await waitFor(`document.body.innerText.includes('Walk-in Client')`, 'taxed invoice listed');
+    const taxed = (await api('GET', '/api/invoices')).body.data.find((i) => i.billToName === 'Walk-in Client');
+    if (taxed.totalAmount !== '1180.00' || taxed.taxAmount !== '180.00') throw new Error(`invoice ${taxed.totalAmount} / tax ${taxed.taxAmount}`);
+    const posted = await api('POST', `/api/invoices/${taxed.id}/post`);
+    if (posted.status !== 201) throw new Error('posting answered ' + posted.status);
+
+    await go('/reports/tax');
+    await evaluate(`(() => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const [label, v] of [['From', '2026-01-01'], ['To', '${new Date().toISOString().slice(0, 10)}']]) {
+        const el = document.querySelector('input[aria-label="' + label + '"]'); set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); }
+      return true; })()`);
+    await clickText('Run');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('VAT 18%') && tr.innerText.includes('180.00'))`, 'VAT row in the return');
+    await waitFor(`document.querySelector('[data-testid=net-tax]').innerText.includes('180.00')`, 'tax to pay');
+    await shot('32-tax-return');
+  });
+
   await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {
     await go('/settings');
     await waitFor(`document.body.innerText.includes('not locked')`, 'lock card');

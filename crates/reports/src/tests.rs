@@ -99,6 +99,7 @@ async fn books() -> AppResult<Books> {
             quantity: None,
             unit_price: Some(m(amount)),
             account_id: Some(b.acct["4000"].clone()),
+            tax_code_id: None,
         }],
         ..Default::default()
     };
@@ -132,11 +133,13 @@ async fn books() -> AppResult<Books> {
             date: "2026-04-06".into(),
             due_date: Some("2026-05-06".into()),
             notes: None,
+            prices_include_tax: false,
             lines: vec![BillLineInput {
                 description: "stock".into(),
                 quantity: m("4"),
                 unit_price: m("250"),
                 account_id: b.acct["5000"].clone(),
+                tax_code_id: None,
             }],
         },
     )
@@ -151,6 +154,7 @@ async fn books() -> AppResult<Books> {
         expense_account_id: b.acct["6000"].clone(),
         payment_account_id: b.acct["1000"].clone(),
         receipt_url: None,
+        tax_code_id: None,
     };
     let e = expenses::create(&b.db, expense("500")).await?;
     expenses::post(&b.db, &e.id).await?;

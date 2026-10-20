@@ -369,6 +369,26 @@ recommendations without answering each one individually; revisit any of them on 
   * "Today" is the main PC's own local date (`chrono::Local`), replacing the fixed +05:30 of D5.
   * Report defaults (P&L, cash flow, dashboard, statements) start at the financial year start.
   * "Cenango Accounting" remains the product's own name (window title, installer, data folder).
+- **D26 Taxes for any country** (requested by the user 2026-10-20). No country's tax law is
+  built in; each company defines its own **tax codes** (`tax_codes`: name, rate in ten-thousandths
+  of a percent — 18% = 180000 — sales account (liability) for output tax, purchase account
+  (asset or liability) for input tax, active flag). `GET /api/tax-codes` (any signed-in user),
+  `POST`/`PATCH /:id`/`DELETE /:id` (permission `settings`; a code used on any document cannot be
+  deleted, only switched off; a switched-off code is refused on new lines).
+  * Invoice and bill lines carry `taxCodeId` and `taxAmount`; documents carry `taxAmount` and
+    `pricesIncludeTax`. Tax is integer arithmetic, half-up **per line** (`operations::tax`):
+    exclusive tax = amount × rate; inclusive tax = amount × rate / (1 + rate). The document
+    total includes the tax; revenue/expense lines post the net, tax posts per code to the tax
+    accounts. Expenses and credit/debit notes take an optional `taxCodeId`; their amount is
+    gross (tax included) and the tax inside it posts/reverses to the tax account.
+  * `GET /api/reports/tax?dateFrom&dateTo` (permission `reports`): per code, sales net and output
+    tax (posted/paid invoices less posted credit notes) and purchases net and input tax
+    (posted/paid bills, posted expenses, less posted debit notes) by document date; drafts and
+    voids never count; lines without a code on their own row; `netTax` = output − input.
+  * Settings `tax.defaultSales` / `tax.defaultPurchases` preselect the code on new lines.
+    Screens: Administration → Taxes, Reports → Tax Return; invoices with tax print as
+    "Tax Invoice" with Subtotal, one row per tax code, and Total (form and PDF alike).
+  * Not built: compound/stacked taxes on one line, withholding tax, country return formats.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

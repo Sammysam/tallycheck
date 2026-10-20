@@ -6,11 +6,13 @@ import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { money } from '../lib/money';
+import { region } from '../lib/region';
+import { summarize, useTaxCodes } from '../lib/taxes';
 
 interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; totalAmount: number; status: string }
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const emptyLine = () => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId: '' });
+const emptyLine = () => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId: '', taxCodeId: region().defaultPurchaseTax });
 
 export default function Bills() {
   const [rows, setRows] = useState<Bill[]>([]);
@@ -25,7 +27,13 @@ export default function Bills() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', lines: [emptyLine()] });
+  const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, lines: [emptyLine()] });
+  const taxCodes = useTaxCodes();
+  // D26: what the bill will total, worked out as the server will.
+  const summary = summarize(
+    form.lines.map((l) => ({ amount: Math.round((Number(l.quantity) || 0) * (Number(l.unitPrice) || 0) * 100) / 100, taxCodeId: l.taxCodeId })),
+    form.pricesIncludeTax,
+  );
   const [error, setError] = useState('');
 
   const load = (p = page) =>
@@ -51,9 +59,9 @@ export default function Bills() {
     setError('');
     try {
       const { lines, ...rest } = form;
-      await api.post('/bills', { ...rest, lines: lines.map(({ _key, ...l }) => l) });
+      await api.post('/bills', { ...rest, lines: lines.map(({ _key, taxCodeId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined })) });
       setShowForm(false);
-      setForm({ vendorId: '', date: '', dueDate: '', lines: [emptyLine()] });
+      setForm({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, lines: [emptyLine()] });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to save bill');
@@ -86,14 +94,15 @@ export default function Bills() {
               <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
             </div>
             <div>
-              <div className="grid gap-2 mb-1" style={{ gridTemplateColumns: '3fr 80px 100px 2fr' }}>
+              <div className="grid gap-2 mb-1" style={{ gridTemplateColumns: taxCodes.length ? '3fr 80px 100px 2fr 1.4fr' : '3fr 80px 100px 2fr' }}>
                 <span className="text-xs text-gray-500 font-medium">Description</span>
                 <span className="text-xs text-gray-500 font-medium">Qty</span>
                 <span className="text-xs text-gray-500 font-medium">Unit Price</span>
                 <span className="text-xs text-gray-500 font-medium">Expense Account</span>
+                {taxCodes.length > 0 && <span className="text-xs text-gray-500 font-medium">Tax</span>}
               </div>
               {form.lines.map((line, i) => (
-                <div key={line._key} className="grid gap-2 mb-2" style={{ gridTemplateColumns: '3fr 80px 100px 2fr' }}>
+                <div key={line._key} className="grid gap-2 mb-2" style={{ gridTemplateColumns: taxCodes.length ? '3fr 80px 100px 2fr 1.4fr' : '3fr 80px 100px 2fr' }}>
                   <input required placeholder="Item description" value={line.description} onChange={(e) => setLine(i, 'description', e.target.value)} />
                   <input required type="number" min="0.001" step="any" value={line.quantity} onChange={(e) => setLine(i, 'quantity', Number(e.target.value))} />
                   <input required type="number" min="0" step="0.01" value={line.unitPrice || ''} onChange={(e) => setLine(i, 'unitPrice', Number(e.target.value))} />
@@ -101,9 +110,27 @@ export default function Bills() {
                     <option value="">Account</option>
                     {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
                   </select>
+                  {taxCodes.length > 0 && (
+                    <select value={line.taxCodeId} onChange={(e) => setLine(i, 'taxCodeId', e.target.value)} aria-label={`Tax for line ${i + 1}`}>
+                      <option value="">No tax</option>
+                      {taxCodes.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
                 </div>
               ))}
               <button type="button" className="btn-link" onClick={() => setForm({ ...form, lines: [...form.lines, emptyLine()] })}>+ Add line</button>
+            </div>
+            <div className="flex items-center justify-between gap-4 text-sm">
+              {taxCodes.length > 0 ? (
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={form.pricesIncludeTax} onChange={(e) => setForm({ ...form, pricesIncludeTax: e.target.checked })} />
+                  Prices include tax
+                </label>
+              ) : <span />}
+              <span className="tabular-nums text-gray-700">
+                {summary.tax !== 0 && <>Subtotal {fmt(summary.subtotal)} · Tax {fmt(summary.tax)} · </>}
+                <strong>Total {fmt(summary.total)}</strong>
+              </span>
             </div>
             <div className="flex gap-2 pt-1">
               <button type="submit" className="btn btn-primary">Save Bill</button>

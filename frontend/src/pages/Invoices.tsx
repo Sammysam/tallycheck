@@ -10,6 +10,7 @@ import { openInvoicePdf, openInvoiceTab, previewInvoice, printInvoice, type Invo
 import InvoiceSheetForm, { type SheetPayload } from '../components/InvoiceSheetForm';
 import { useAuth } from '../contexts/AuthContext';
 import { money } from '../lib/money';
+import { useTaxCodes } from '../lib/taxes';
 
 interface Invoice {
   id: string;
@@ -29,6 +30,8 @@ interface Invoice {
 const emptyFilters = { q: '', status: '', dateFrom: '', dateTo: '' };
 
 export default function Invoices() {
+  // Tax code names for printed invoices (D26).
+  useTaxCodes();
   const { hasPermission, user } = useAuth();
   const [rows, setRows] = useState<Invoice[]>([]);
   const [page, setPage] = useState(1);

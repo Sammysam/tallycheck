@@ -1,7 +1,7 @@
 //! Expenses (reference `expenses.service.ts`): a one-line spend — debit the expense account,
 //! credit the account it was paid from.
 
-use crate::{money_num, money_str, opt, require_account};
+use crate::{money_num, money_str, opt, overflow, require_account};
 use app_core::ids::new_id;
 use app_core::money::Money;
 use app_core::time::now_iso;
@@ -24,6 +24,9 @@ pub struct Expense {
     pub receipt_url: Option<String>,
     pub status: String,
     pub journal_entry_id: Option<String>,
+    /// D26: the amount is what was paid, tax included; this is the tax inside it.
+    pub tax_code_id: Option<String>,
+    pub tax_amount: Money,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -42,13 +45,15 @@ impl Expense {
             "receiptUrl": opt(&self.receipt_url),
             "status": self.status,
             "journalEntryId": opt(&self.journal_entry_id),
+            "taxCodeId": opt(&self.tax_code_id),
+            "taxAmount": money_str(self.tax_amount),
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         })
     }
 }
 
-const COLUMNS: &str = r#""id","expenseNumber","date","description","amount","expenseAccountId","paymentAccountId","receiptUrl","status","journalEntryId","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","expenseNumber","date","description","amount","expenseAccountId","paymentAccountId","receiptUrl","status","journalEntryId","taxCodeId","taxAmount","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Expense> {
     Ok(Expense {
@@ -62,6 +67,8 @@ fn from_row(r: &SqliteRow) -> AppResult<Expense> {
         receipt_url: r.try_get("receiptUrl")?,
         status: r.try_get("status")?,
         journal_entry_id: r.try_get("journalEntryId")?,
+        tax_code_id: r.try_get("taxCodeId")?,
+        tax_amount: Money::from_cents(r.try_get("taxAmount")?),
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
     })
@@ -96,18 +103,25 @@ pub struct CreateExpense {
     pub expense_account_id: String,
     pub payment_account_id: String,
     pub receipt_url: Option<String>,
+    /// D26: optional tax code; the amount includes the tax.
+    pub tax_code_id: Option<String>,
 }
 
 pub async fn create(db: &Db, dto: CreateExpense) -> AppResult<Expense> {
     let mut tx = db.begin().await?;
     require_account(&mut tx, &dto.expense_account_id).await?;
     require_account(&mut tx, &dto.payment_account_id).await?;
+    let tax = match &dto.tax_code_id {
+        Some(code) => crate::tax::tax_of(dto.amount, crate::tax::usable(&mut tx, code).await?.rate, true)?,
+        None => Money::ZERO,
+    };
     let number = counters::next_formatted(&mut tx, "EXP", 6).await?;
     let id = new_id();
     let now = now_iso();
     sqlx::query(
         r#"INSERT INTO "expenses" ("id","expenseNumber","date","description","amount","expenseAccountId","paymentAccountId",
-             "receiptUrl","status","createdAt","updatedAt") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'DRAFT',?9,?9)"#,
+             "receiptUrl","status","createdAt","updatedAt","taxCodeId","taxAmount")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'DRAFT',?9,?9,?10,?11)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -118,6 +132,8 @@ pub async fn create(db: &Db, dto: CreateExpense) -> AppResult<Expense> {
     .bind(&dto.payment_account_id)
     .bind(&dto.receipt_url)
     .bind(&now)
+    .bind(&dto.tax_code_id)
+    .bind(tax.cents())
     .execute(&mut *tx)
     .await?;
     let e = find_one(&mut tx, &id).await?;
@@ -142,6 +158,26 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Expense> {
     if e.status != "DRAFT" {
         return Err(AppError::bad_request(format!("Expense is already {}", e.status)));
     }
+    // The expense account gets the amount without its tax; the tax goes to the code's
+    // purchase account (D26).
+    let net = e.amount.checked_sub(e.tax_amount).ok_or_else(overflow)?;
+    let mut lines =
+        vec![NewLine { account_id: e.expense_account_id.clone(), debit: net, credit: Money::ZERO, description: None }];
+    if let (Some(code), true) = (&e.tax_code_id, e.tax_amount != Money::ZERO) {
+        let account = crate::tax::find_one(&mut tx, code).await?.purchase_account_id;
+        lines.push(NewLine {
+            account_id: account,
+            debit: e.tax_amount,
+            credit: Money::ZERO,
+            description: Some("Tax".into()),
+        });
+    }
+    lines.push(NewLine {
+        account_id: e.payment_account_id.clone(),
+        debit: Money::ZERO,
+        credit: e.amount,
+        description: None,
+    });
     let entry = entries::post(
         &mut tx,
         NewEntry {
@@ -150,20 +186,7 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Expense> {
             reference: Some(e.expense_number.clone()),
             source_type: Some("EXPENSE".into()),
             source_id: Some(e.id.clone()),
-            lines: vec![
-                NewLine {
-                    account_id: e.expense_account_id.clone(),
-                    debit: e.amount,
-                    credit: Money::ZERO,
-                    description: None,
-                },
-                NewLine {
-                    account_id: e.payment_account_id.clone(),
-                    debit: Money::ZERO,
-                    credit: e.amount,
-                    description: None,
-                },
-            ],
+            lines,
         },
     )
     .await?;

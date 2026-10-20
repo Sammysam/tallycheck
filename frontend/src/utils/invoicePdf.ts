@@ -4,6 +4,7 @@ import html2canvas from 'html2canvas';
 import { amountInWords } from './amountInWords';
 import { amount } from '../lib/money';
 import { company, region } from '../lib/region';
+import { taxCodeById } from '../lib/taxes';
 
 // The letterhead, remittance details and footer come from Settings → Company (D25): the app
 // carries no company's details of its own.
@@ -19,6 +20,9 @@ interface PdfLine {
   quantity: number | string;
   unitPrice: number | string;
   amount: number | string;
+  /** D26. */
+  taxCodeId?: string | null;
+  taxAmount?: number | string;
 }
 
 interface PdfInvoice {
@@ -28,6 +32,9 @@ interface PdfInvoice {
   dueDate?: string | null;
   notes?: string | null;
   totalAmount: number | string;
+  /** D26: the invoice's tax, and whether the line amounts include it. */
+  taxAmount?: number | string;
+  pricesIncludeTax?: boolean;
   customer?: { name?: string; address?: string | null } | null;
   lines?: PdfLine[];
   /** Per-invoice overrides captured when the invoice was raised. */
@@ -74,6 +81,19 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
     ? splitLines(invoice.paymentOptions)
     : co.paymentOptions;
   const lines = invoice.lines ?? [];
+  // D26: tax per code for the totals block; "Tax Invoice" when the invoice carries tax.
+  const taxRows: { name: string; tax: number }[] = [];
+  for (const l of lines) {
+    const t = Number(l.taxAmount) || 0;
+    if (!l.taxCodeId || !t) continue;
+    const name = taxCodeById(l.taxCodeId)?.name ?? 'Tax';
+    const row = taxRows.find((r) => r.name === name);
+    if (row) row.tax = Math.round((row.tax + t) * 100) / 100;
+    else taxRows.push({ name, tax: t });
+  }
+  const tax = Number(invoice.taxAmount) || 0;
+  const hasTax = tax !== 0 || lines.some((l) => l.taxCodeId);
+  const subtotal = Math.round(((Number(invoice.totalAmount) || 0) - tax) * 100) / 100;
   const rowsHtml = lines
     .map(
       (l, i) => `
@@ -122,7 +142,7 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
     <div class="contact">${esc(co.contactLine)}${co.emailWebLine ? `<br/>${esc(co.emailWebLine)}` : ''}${co.taxNumber ? `<br/>Tax No: ${esc(co.taxNumber)}` : ''}</div>
     <div class="rule"></div>
 
-    <h1>Invoice</h1>
+    <h1>${hasTax ? 'Tax Invoice' : 'Invoice'}</h1>
 
     <div class="meta">
       <div>
@@ -158,6 +178,18 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
         ${rowsHtml || '<tr><td colspan="5" style="text-align:center;color:#888;">No line items</td></tr>'}
       </tbody>
       <tfoot>
+        ${hasTax ? `
+        <tr>
+          <td colspan="3" style="border:none;"></td>
+          <td class="total-label">Subtotal</td>
+          <td class="total-val">${num(subtotal)}</td>
+        </tr>
+        ${taxRows.map((r) => `
+        <tr>
+          <td colspan="3" style="border:none;"></td>
+          <td class="total-label">${esc(r.name)}</td>
+          <td class="total-val">${num(r.tax)}</td>
+        </tr>`).join('')}` : ''}
         <tr>
           <td colspan="3" style="border:none;"></td>
           <td class="total-label">Total</td>
