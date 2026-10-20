@@ -89,6 +89,12 @@ impl TaxCode {
     }
 }
 
+/// Rounds `n / d` half-up to the cent, or to a whole unit for a currency without decimals (D29).
+fn round_money(n: i128, d: i128) -> i128 {
+    let step = i128::from(app_core::money::rounding_step());
+    div_round_half_up(n, d * step) * step
+}
+
 fn div_round_half_up(n: i128, d: i128) -> i128 {
     let (q, r) = (n / d, n % d);
     if 2 * r.abs() >= d.abs() {
@@ -107,9 +113,9 @@ pub fn tax_of(amount: Money, rate: i64, inclusive: bool) -> AppResult<Money> {
     let cents = i128::from(amount.cents());
     let rate = i128::from(rate);
     let tax = if inclusive {
-        div_round_half_up(cents * rate, HUNDRED_PERCENT + rate)
+        round_money(cents * rate, HUNDRED_PERCENT + rate)
     } else {
-        div_round_half_up(cents * rate, HUNDRED_PERCENT)
+        round_money(cents * rate, HUNDRED_PERCENT)
     };
     to_money(tax)
 }
@@ -122,7 +128,7 @@ pub struct TaxPart {
 }
 
 /// `(id, rate, compound)` of each part, in charging order.
-type Rates = Vec<(String, i64, bool)>;
+pub type Rates = Vec<(String, i64, bool)>;
 
 /// Splits the tax on a line `amount` into its parts (pure arithmetic, see the module notes).
 pub fn split_parts(amount: Money, rates: &Rates, inclusive: bool) -> AppResult<Vec<TaxPart>> {
@@ -133,7 +139,7 @@ pub fn split_parts(amount: Money, rates: &Rates, inclusive: bool) -> AppResult<V
             .iter()
             .map(|(id, rate, compound)| {
                 let base = net + if *compound { before } else { 0 };
-                let t = div_round_half_up(base * i128::from(*rate), HUNDRED_PERCENT);
+                let t = round_money(base * i128::from(*rate), HUNDRED_PERCENT);
                 before += t;
                 (id.clone(), t)
             })
@@ -153,7 +159,7 @@ pub fn split_parts(amount: Money, rates: &Rates, inclusive: bool) -> AppResult<V
             let base = S + if *compound { combined } else { 0 };
             combined += base * r / S;
         }
-        let net = div_round_half_up(cents * S, S + combined);
+        let net = round_money(cents * S, S + combined);
         let total = cents - net;
         let mut parts = exclusive_on(net);
         let sum: i128 = parts.iter().map(|(_, t)| *t).sum();

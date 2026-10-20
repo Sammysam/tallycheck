@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
+import { currencyDigits } from './money';
 
 /**
  * D26/D27: tax codes and the same arithmetic the server uses, so a form shows exactly the
@@ -52,13 +53,18 @@ const roundHalfUp = (n: bigint, d: bigint) => {
   return 2n * (r < 0n ? -r : r) >= d ? q + (n < 0n ? -1n : 1n) : q;
 };
 const HUNDRED = 1_000_000n;
+/** Rounds n / d half-up to the cent, or to a whole unit for a currency without decimals (D29). */
+const roundMoney = (n: bigint, d: bigint) => {
+  const step = currencyDigits() === 0 ? 100n : 1n;
+  return roundHalfUp(n, d * step) * step;
+};
 const rateUnits = (percent: number) => BigInt(Math.round(percent * 10_000));
 
 /** The tax in `amount` at one `ratePercent`, rounded half-up to the cent. */
 export function taxOf(amount: number, ratePercent: number, inclusive: boolean): number {
   const rate = rateUnits(ratePercent);
   const cents = toCents(amount);
-  return fromCents(inclusive ? roundHalfUp(cents * rate, HUNDRED + rate) : roundHalfUp(cents * rate, HUNDRED));
+  return fromCents(inclusive ? roundMoney(cents * rate, HUNDRED + rate) : roundMoney(cents * rate, HUNDRED));
 }
 
 /** `[code id, rate units, compound]` of each part a line code charges. */
@@ -76,19 +82,19 @@ function splitParts(amount: number, rates: [string, bigint, boolean][], inclusiv
   const exclusiveOn = (net: bigint) => {
     let before = 0n;
     return rates.map(([id, rate, compound]) => {
-      const t = roundHalfUp((net + (compound ? before : 0n)) * rate, HUNDRED);
+      const t = roundMoney((net + (compound ? before : 0n)) * rate, HUNDRED);
       before += t;
       return [id, t] as [string, bigint];
     });
   };
   if (!inclusive) return exclusiveOn(cents);
-  if (rates.length === 1) return [[rates[0][0], roundHalfUp(cents * rates[0][1], HUNDRED + rates[0][1])]];
+  if (rates.length === 1) return [[rates[0][0], roundMoney(cents * rates[0][1], HUNDRED + rates[0][1])]];
   const S = 1_000_000_000_000n;
   let combined = 0n;
   for (const [, rate, compound] of rates) {
     combined += ((S + (compound ? combined : 0n)) * (rate * 1_000_000n)) / S;
   }
-  const net = roundHalfUp(cents * S, S + combined);
+  const net = roundMoney(cents * S, S + combined);
   const parts = exclusiveOn(net);
   const sum = parts.reduce((s, [, t]) => s + t, 0n);
   if (parts.length) parts[parts.length - 1][1] += cents - net - sum;

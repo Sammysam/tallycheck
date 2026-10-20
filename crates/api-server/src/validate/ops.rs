@@ -65,7 +65,7 @@ pub fn bank(body: Map<String, Value>, optional: bool) -> Result<operations::bank
 pub(crate) fn invoice_line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>) {
     let mut v = Validator::nested(item.as_object().cloned().unwrap_or_default(), prefix);
     v.field("description", false, &[Rule::IsString, Rule::IsNotEmpty])
-        .field("quantity", true, &[Rule::IsMoneyNumber, Rule::MinNum(0.001, "0.001")])
+        .field("quantity", true, &[Rule::IsQuantity, Rule::MinNum(0.001, "0.001")])
         .field("unitPrice", true, &[Rule::IsMoneyNumber, Rule::MinZero])
         .field("accountId", true, &[Rule::IsUuid])
         .field("taxCodeId", true, &[Rule::IsUuid]);
@@ -200,7 +200,7 @@ pub fn invoice_query(query: Map<String, Value>) -> Result<operations::invoices::
 pub(crate) fn bill_line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>) {
     let mut v = Validator::nested(item.as_object().cloned().unwrap_or_default(), prefix);
     v.field("description", false, &[Rule::IsString, Rule::IsNotEmpty])
-        .field("quantity", false, &[Rule::IsMoneyNumber, Rule::MinNum(0.001, "0.001")])
+        .field("quantity", false, &[Rule::IsQuantity, Rule::MinNum(0.001, "0.001")])
         .field("unitPrice", false, &[Rule::IsMoneyNumber, Rule::MinZero])
         .field("accountId", false, &[Rule::IsUuid])
         .field("taxCodeId", true, &[Rule::IsUuid]);

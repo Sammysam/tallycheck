@@ -1,8 +1,8 @@
 /**
  * Starting values for the company setup screen (D25). Picking a country fills in its usual
  * currency, number format, currency words and financial year start; every value can still be
- * changed. Only currencies with two decimal places are listed, because the books keep amounts
- * in hundredths.
+ * changed. Currencies with two decimals or none (yen, won — D29) are supported; those with
+ * three (dinars) are not yet.
  */
 export interface CountryPreset {
   code: string;
@@ -24,6 +24,7 @@ export const COUNTRIES: CountryPreset[] = [
   { code: 'IN', name: 'India', currency: 'INR', symbol: '₹', word: 'Rupees', minorWord: 'Paise', locale: 'en-IN', fiscalYearStart: 4 },
   { code: 'IE', name: 'Ireland', currency: 'EUR', symbol: '€', word: 'Euro', minorWord: 'Cent', locale: 'en-IE', fiscalYearStart: 1 },
   { code: 'IT', name: 'Italy', currency: 'EUR', symbol: '€', word: 'Euro', minorWord: 'Cent', locale: 'it-IT', fiscalYearStart: 1 },
+  { code: 'JP', name: 'Japan', currency: 'JPY', symbol: '¥', word: 'Yen', minorWord: 'Sen', locale: 'ja-JP', fiscalYearStart: 4 },
   { code: 'KE', name: 'Kenya', currency: 'KES', symbol: 'KSh', word: 'Shillings', minorWord: 'Cents', locale: 'en-KE', fiscalYearStart: 7 },
   { code: 'MY', name: 'Malaysia', currency: 'MYR', symbol: 'RM', word: 'Ringgit', minorWord: 'Sen', locale: 'en-MY', fiscalYearStart: 1 },
   { code: 'MV', name: 'Maldives', currency: 'MVR', symbol: 'Rf', word: 'Rufiyaa', minorWord: 'Laari', locale: 'en-MV', fiscalYearStart: 1 },
@@ -37,6 +38,7 @@ export const COUNTRIES: CountryPreset[] = [
   { code: 'SA', name: 'Saudi Arabia', currency: 'SAR', symbol: 'SR', word: 'Riyals', minorWord: 'Halalas', locale: 'en-SA', fiscalYearStart: 1 },
   { code: 'SG', name: 'Singapore', currency: 'SGD', symbol: '$', word: 'Dollars', minorWord: 'Cents', locale: 'en-SG', fiscalYearStart: 1 },
   { code: 'ZA', name: 'South Africa', currency: 'ZAR', symbol: 'R', word: 'Rand', minorWord: 'Cents', locale: 'en-ZA', fiscalYearStart: 3 },
+  { code: 'KR', name: 'South Korea', currency: 'KRW', symbol: '₩', word: 'Won', minorWord: 'Jeon', locale: 'ko-KR', fiscalYearStart: 1 },
   { code: 'ES', name: 'Spain', currency: 'EUR', symbol: '€', word: 'Euro', minorWord: 'Cent', locale: 'es-ES', fiscalYearStart: 1 },
   { code: 'LK', name: 'Sri Lanka', currency: 'LKR', symbol: 'Rs.', word: 'Rupees', minorWord: 'Cents', locale: 'en-LK', fiscalYearStart: 4 },
   { code: 'AE', name: 'United Arab Emirates', currency: 'AED', symbol: 'AED', word: 'Dirhams', minorWord: 'Fils', locale: 'en-AE', fiscalYearStart: 1 },

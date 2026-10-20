@@ -23,9 +23,13 @@ pub async fn update(
 ) -> AppResult<Json<SettingsMap>> {
     let entries = validate::update_settings(body.object())?;
     let mut tx = state.db.begin().await?;
-    for (key, value) in entries {
-        settings::upsert(&mut tx, &key, value.trim()).await?;
+    for (key, value) in &entries {
+        settings::upsert(&mut tx, key, value.trim()).await?;
     }
     tx.commit().await?;
+    // D29: a currency without decimals rounds every amount to whole units from now on.
+    if let Some((_, code)) = entries.iter().find(|(k, _)| k == "region.currency") {
+        app_core::money::set_currency(code);
+    }
     Ok(Json(settings::find_all(&state.db).await?))
 }
