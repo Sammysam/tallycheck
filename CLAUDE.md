@@ -432,6 +432,12 @@ recommendations without answering each one individually; revisit any of them on 
   sign-in until a company name is saved. Administration → Company Setup reopens it. The country
   list now holds every ISO 3166 country with its ISO 4217 currency; those without a preset take
   their name, currency word and symbol from the system's Intl data and a January year start.
+- **D32 Journal entries on the Ledger screen** (2026-10-21). The reference had no screen for a manual
+  journal entry (only the API). The Ledger page now has "+ New Journal Entry": date, description,
+  reference and debit / credit lines, posted only once balanced, plus "Reverse this entry" for manual
+  entries (document entries are still undone from their document, D18). A made-up demo company is
+  typed in through the screens by `tests/ui/demo-data.mjs` into its own data folder
+  (`docs/demo/README.md`, `scripts/run-demo.cmd`).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
