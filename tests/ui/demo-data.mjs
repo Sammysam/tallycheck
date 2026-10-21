@@ -168,6 +168,8 @@ const COMPANY = {
 
 const ACCOUNTS = [
   ['1010', 'Commercial Bank – Current Account', 'ASSET', 'current_asset'],
+  ['1020', 'Commercial Bank – USD Account', 'ASSET', 'current_asset', 'USD'],
+  ['2400', 'Telephone Payable', 'LIABILITY', 'current_liability'],
   ['1510', 'Office Equipment & Furniture', 'ASSET', 'fixed_asset'],
   ['1520', 'Delivery Van', 'ASSET', 'fixed_asset'],
   ['3100', 'Share Capital', 'EQUITY', 'equity'],
@@ -222,7 +224,7 @@ const INVOICES = [
   { key: 'I2', po: 'CCS-PO-26041', date: '2026-04-14', cust: 'Colombo City Supermarkets', terms: 'NET_30', lines: [L('tea', 120), L('green', 80), L('pepper', 30)], pay: ['2026-05-12', 'full'] },
   { key: 'I3', date: '2026-04-22', cust: 'Blue Lagoon Resort', terms: 'NET_15', lines: [L('cardamom', 12), L('cloves', 10), L('tea', 25), L('delivery', 1)], pay: ['2026-05-08', 'full'] },
   { key: 'I4', po: 'PGI-2026-118', date: '2026-05-05', cust: 'Pacific Gourmet Imports', terms: 'NET_30', usd: 298,
-    lines: [USDL('Ceylon Cinnamon Alba sticks – export carton (10 kg)', 20, 145), USDL('Black Pepper whole – export sack (25 kg)', 6, 280)], pay: ['2026-06-10', 305] },
+    lines: [USDL('Ceylon Cinnamon Alba sticks – export carton (10 kg)', 20, 145), USDL('Black Pepper whole – export sack (25 kg)', 6, 280)], pay: ['2026-06-10', 305], into: '1020' },
   { key: 'I5', date: '2026-05-18', cust: 'Green Leaf Café', terms: 'DUE_ON_RECEIPT', lines: [L('tea', 15), L('green', 20)], pay: ['2026-05-18', 'full'] },
   { key: 'I6', po: 'HH/PUR/0527', date: '2026-05-27', cust: 'Hillside Hotels', terms: 'NET_30', lines: [L('tea', 50), L('pepper', 12), L('delivery', 1)], pay: ['2026-06-25', 'full'] },
   { key: 'I7', po: 'CCS-PO-26077', date: '2026-06-09', cust: 'Colombo City Supermarkets', terms: 'NET_30', lines: [L('tea', 150), L('cinnamon', 40), L('cloves', 25)], pay: ['2026-07-08', 'full'] },
@@ -230,7 +232,7 @@ const INVOICES = [
   { key: 'I9', date: '2026-07-03', cust: 'Harbour View Restaurant', terms: 'NET_30', lines: [L('pepper', 20), L('cardamom', 10), L('cloves', 12)], pay: ['2026-08-01', 'full'] },
   { key: 'I10', date: '2026-07-16', cust: 'Blue Lagoon Resort', terms: 'NET_30', lines: [L('tea', 40), L('cinnamon', 15), L('delivery', 1)], pay: ['2026-08-14', 'full'] },
   { key: 'I11', po: 'PGI-2026-162', date: '2026-07-29', cust: 'Pacific Gourmet Imports', terms: 'NET_60', usd: 302,
-    lines: [USDL('Ceylon Cinnamon Alba sticks – export carton (10 kg)', 25, 145), USDL('Green Cardamom – export carton (5 kg)', 8, 98)], pay: ['2026-10-02', 299.5] },
+    lines: [USDL('Ceylon Cinnamon Alba sticks – export carton (10 kg)', 25, 145), USDL('Green Cardamom – export carton (5 kg)', 8, 98)], pay: ['2026-10-02', 299.5], into: '1020' },
   { key: 'I12', date: '2026-08-11', cust: 'Sunrise Catering Services', terms: 'NET_30', lines: [L('pepper', 25), L('cloves', 20), L('tea', 30)], pay: ['2026-09-09', 'full'] },
   { key: 'I13', po: 'CCS-PO-26112', date: '2026-08-25', cust: 'Colombo City Supermarkets', terms: 'NET_30', lines: [L('tea', 180), L('green', 100)], pay: ['2026-09-30', 'half'] },
   { key: 'I14', po: 'HH/PUR/0908', date: '2026-09-08', cust: 'Hillside Hotels', terms: 'NET_30', lines: [L('tea', 60), L('cinnamon', 20), L('cardamom', 10), L('delivery', 1)], pay: ['2026-10-09', 'full'] },
@@ -259,13 +261,14 @@ const BILLS = [
 // Expenses paid on the spot: [date, description, amount, account, paid from]
 const MONTHS = ['April', 'May', 'June', 'July', 'August', 'September', 'October'];
 const EXPENSES = [];
+// Telephone and internet: accrued at each month end, paid from Telephone Payable the next month.
+const TELEPHONE = [['2026-04-30', 18337.13], ['2026-05-31', 17950.4], ['2026-06-30', 19210.75], ['2026-07-31', 18820], ['2026-08-31', 20105.6], ['2026-09-30', 19480.25]];
 const power = [18400, 19650, 21200, 22800, 24900, 23100, 21750];
 const fuel = [32500, 34800, 36250, 38900, 41200, 39650, 37400];
 MONTHS.forEach((m, i) => {
   const mm = String(i + 4).padStart(2, '0');
   EXPENSES.push([`2026-${mm}-01`, `Office & warehouse rent – ${m} 2026`, 175000, '6200', '1010']);
   EXPENSES.push([`2026-${mm}-12`, `CEB electricity & water – ${m}`, power[i], '6300', '1010']);
-  EXPENSES.push([`2026-${mm}-15`, `SLT fibre broadband & phones – ${m}`, 12500, '6500', '1010']);
   EXPENSES.push([`2026-${mm}-20`, `Delivery van fuel – ${m}`, fuel[i], '6400', '1010']);
 });
 EXPENSES.push(['2026-05-07', 'Printer toner, paper & files', 8750, '6600', '1000']);
@@ -377,13 +380,14 @@ try {
 
   await phase('Chart of accounts: bank, fixed assets, capital and expense accounts', async () => {
     await go('/accounts');
-    for (const [code, name, type, subtype] of ACCOUNTS) {
+    for (const [code, name, type, subtype, currency] of ACCOUNTS) {
       await clickText('+ New Account');
       await waitFor(`!!document.querySelector('input[placeholder="Code (e.g. 1000)"]')`, 'account form');
       await set('input[placeholder="Code (e.g. 1000)"]', code);
       await set('input[placeholder="Account Name"]', name);
-      await choose('form select', type);
+      await choose('select[aria-label="Account type"]', type);
       await set('input[placeholder^="Subtype"]', subtype);
+      if (currency) await choose('select[aria-label="Account currency"]', currency);
       await clickText('Save Account');
       await waitFor(has(name), `account ${code}`);
     }
@@ -475,8 +479,55 @@ try {
   }
   for (const e of EXPENSES) events.push({ date: e[0], kind: 'expense', e });
   events.push({ date: '2026-08-06', kind: 'debit' });
-  const order = { invoice: 0, bill: 1, expense: 2, credit: 3, debit: 3, receipt: 4, billpay: 5 };
+  TELEPHONE.forEach(([date, amount], i) => {
+    const month = MONTHS[i];
+    events.push({ date, kind: 'telaccrue', amount, month });
+    const [y, m] = date.split('-').map(Number);
+    events.push({ date: `${y}-${String(m + 1).padStart(2, '0')}-12`, kind: 'telpay', amount, month });
+  });
+  // Part of the export money is changed into rupees for local payments.
+  events.push({ date: '2026-08-20', kind: 'usdtransfer', usd: 9000, rate: 301, ref: 'FX-2026-08' });
+  events.push({ date: '2026-10-10', kind: 'usdtransfer', usd: 6000, rate: 299, ref: 'FX-2026-10' });
+  const order = { invoice: 0, bill: 1, expense: 2, telaccrue: 2, credit: 3, debit: 3, receipt: 4, billpay: 5, telpay: 5, usdtransfer: 6 };
   events.sort((a, b) => a.date.localeCompare(b.date) || order[a.kind] - order[b.kind]);
+
+  /** Posts a journal entry through the Ledger form. lines: [code, debit, credit, note, rate?]. */
+  async function journal(date, description, reference, lines) {
+    await go('/ledger');
+    await clickText('+ New Journal Entry');
+    await waitFor(`!!document.querySelector('form[aria-label="Journal entry"]')`, 'journal form');
+    await set('input[aria-label="Entry date"]', date);
+    await set('input[placeholder^="Description"]', description);
+    await set('input[placeholder^="Reference"]', reference);
+    for (let i = 0; i < lines.length; i++) {
+      if (i >= 2) { await clickText('+ Add line'); await sleep(150); }
+      const [code, dr, cr, note, rate] = lines[i];
+      await choose(`select[aria-label="Account for line ${i + 1}"]`, code + ' ');
+      if (note) await set(`input[aria-label="Note for line ${i + 1}"]`, note);
+      if (dr) await set(`input[aria-label="Debit for line ${i + 1}"]`, dr);
+      if (cr) await set(`input[aria-label="Credit for line ${i + 1}"]`, cr);
+      if (rate) {
+        await waitFor(`!!document.querySelector('input[aria-label="Rate for line ${i + 1}"]')`, 'rate field');
+        await set(`input[aria-label="Rate for line ${i + 1}"]`, rate);
+      }
+    }
+    await waitFor(`document.querySelector('[data-testid=je-difference]').innerText.includes('Balanced')`, `${reference} balanced`);
+    await clickText('Post Entry');
+    await waitFor(has(reference), `${reference} listed`);
+  }
+
+  async function payPayable(date, code, amount, from, note) {
+    await go('/payments');
+    await clickText('+ Record Payment');
+    await choose('form select', 'ACCOUNT', 0);
+    await waitFor(`!!document.querySelector('select[aria-label="Payable account"]')`, 'payable picker');
+    await choose('select[aria-label="Payable account"]', code + ' ');
+    await set('input[placeholder="Amount"]', amount);
+    await choose('form select', from + ' ', 3);
+    await set('form input[type=date]', date);
+    await clickText('Record Payment');
+    await waitFor(`![...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Record Payment' && b.closest('form'))`, note);
+  }
 
   async function enterInvoice(inv) {
     await go('/invoices');
@@ -529,7 +580,7 @@ try {
     await clickText('+ Record Payment');
     await waitFor(`[...(document.querySelectorAll('form select')[1]?.options ?? [])].some((o) => o.textContent.includes(${J(d.number)}))`, 'invoice option');
     await choose('form select', d.number, 1);
-    await choose('form select', '1010', 3);
+    await choose('form select', inv.into ?? '1010', 3);
     await set('form input[type=date]', date);
     if (how === 'wht') {
       await choose('select[aria-label="Withholding tax"]', 'WHT 5%');
@@ -649,6 +700,16 @@ try {
       else if (ev.kind === 'billpay') await payBill(ev.b);
       else if (ev.kind === 'expense') await enterExpense(ev.e);
       else if (ev.kind === 'debit') await debitNote();
+      else if (ev.kind === 'telaccrue') {
+        await journal(ev.date, `SLT telephone & fibre broadband – ${ev.month} 2026`, `TEL-${ev.date.slice(0, 7)}`,
+          [['6500', ev.amount, 0, 'Bill received, payable next month'], ['2400', 0, ev.amount, 'Sri Lanka Telecom']]);
+      } else if (ev.kind === 'telpay') {
+        await payPayable(ev.date, '2400', ev.amount, '1010', `telephone ${ev.month} paid`);
+      } else if (ev.kind === 'usdtransfer') {
+        const lkr = Math.round(ev.usd * ev.rate * 100) / 100;
+        await journal(ev.date, `USD ${ev.usd.toLocaleString('en-US')} converted to rupees at ${ev.rate}`, ev.ref,
+          [['1010', lkr, 0, 'Received in the LKR current account'], ['1020', 0, ev.usd, `USD ${ev.usd.toLocaleString('en-US')} sold to the bank`, ev.rate]]);
+      }
     }
   });
 
@@ -728,6 +789,18 @@ try {
     }
   });
 
+  await phase('USD account revalued at each quarter end (Chart of Accounts → Revalue)', async () => {
+    for (const [date, rate] of [['2026-06-30', 303.25], ['2026-09-30', 298.6]]) {
+      await go('/accounts');
+      await rowAction('USD Account', 'Revalue');
+      await waitFor(`!!document.querySelector('input[aria-label="Revaluation rate"]')`, 'revalue dialog');
+      await set('input[aria-label="Revaluation date"]', date);
+      await set('input[aria-label="Revaluation rate"]', rate);
+      await evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Revalue').click()`);
+      await waitFor(`/Posted|nothing to post/.test(document.querySelector('[role=status]')?.innerText ?? '')`, `revalued ${date}`);
+    }
+  });
+
   await phase('VAT paid to the Inland Revenue for each quarter (journal entries)', async () => {
     for (const [qEnd, paid, label] of [['2026-06-30', '2026-07-20', 'Q1 (Apr – Jun 2026)'], ['2026-09-30', '2026-10-20', 'Q2 (Jul – Sep 2026)']]) {
       const entries = (await api('GET', '/api/ledger/entries')).body;
@@ -797,7 +870,8 @@ try {
     if (dr !== cr) throw new Error(`trial balance off: ${dr} vs ${cr}`);
     for (const [path, name] of [['/', '10-dashboard'], ['/invoices', '11-invoices'], ['/bills', '12-bills'], ['/expenses', '13-expenses'],
       ['/payments', '14-payments'], ['/reports/profit-loss', '15-profit-loss'], ['/reports/balance-sheet', '16-balance-sheet'],
-      ['/reports/ar-aging', '17-ar-aging'], ['/employees', '18-employees'], ['/payroll', '19-payroll'], ['/reports/tax', '20-tax-return']]) {
+      ['/reports/ar-aging', '17-ar-aging'], ['/employees', '18-employees'], ['/payroll', '19-payroll'], ['/reports/tax', '20-tax-return'],
+      ['/ledger/account/' + ids['1020'], '21-usd-account'], ['/ledger/account/' + ids['2400'], '22-telephone-payable']]) {
       await go(path);
       await sleep(1200);
       await shot(name);
