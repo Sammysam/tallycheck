@@ -438,6 +438,27 @@ recommendations without answering each one individually; revisit any of them on 
   entries (document entries are still undone from their document, D18). A made-up demo company is
   typed in through the screens by `tests/ui/demo-data.mjs` into its own data folder
   (`docs/demo/README.md`, `scripts/run-demo.cmd`).
+- **D33 Payable accounts and account edits** (senior's list, 2026-10-21). A bill may be owed on any
+  liability (`bills.payableAccountId`, default 2000): posting credits it, its payments debit it and
+  its debit notes reduce it, so e.g. Telephone Payable shows on its own Balance Sheet line. Bill
+  lines may use expense, asset or liability accounts. An AP payment without a bill pays a liability
+  account directly (`payments.payableAccountId`, source `PAYMENT_LIABILITY`): debit the liability,
+  credit the money; no withholding. The Chart of Accounts has Edit; an account with ledger lines
+  keeps its type and currency.
+- **D34 Foreign-currency bank accounts** (optional item, 2026-10-21). An asset or liability account
+  may have a `currency` (USD…). Its ledger lines carry `foreignAmount` (signed, debit +), and
+  `entries::post` refuses a line on such an account without one, so no screen can move it in
+  rupees only; `post_with_foreign` is used by manual journal entries (USD amount × rate on the
+  form), payments (documents in the account's own currency; payable-account payments at the day's
+  rate) and reversals (mirrored). Expenses and payroll cannot use a foreign account (refused with
+  a message — use a journal entry). Account activity shows the USD amounts and balance; bank
+  reconciliation of such an account is in USD; `POST /accounts/:id/revalue {date, exchangeRate}`
+  posts the unrealised difference to 7900 (Chart of Accounts → Revalue).
+- **D35 Transaction details** (2026-10-21). `/ledger/entries/:id` shows one transaction: the entry,
+  its lines (account links, USD amounts) and the document behind it (invoice / bill lines, payment,
+  expense, note; payroll links to its run). Ledger rows, account-activity entry numbers (so every
+  report drills down to it) and the document numbers in the Invoices, Bills, Expenses, Payments and
+  Credit / Debit Notes lists open it. Manual entries are reversed from there.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

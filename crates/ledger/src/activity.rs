@@ -25,6 +25,9 @@ pub struct ActivityLine {
     pub debit: Money,
     pub credit: Money,
     pub balance: Money,
+    /// D34: on a foreign-currency account, the line in that currency and the running balance.
+    pub foreign_amount: Option<Money>,
+    pub foreign_balance: Option<Money>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +40,9 @@ pub struct Activity {
     pub total_debit: Money,
     pub total_credit: Money,
     pub closing: Money,
+    /// D34: opening and closing balances in the account's currency (None for home accounts).
+    pub foreign_opening: Option<Money>,
+    pub foreign_closing: Option<Money>,
 }
 
 fn overflow() -> AppError {
@@ -60,6 +66,8 @@ impl Activity {
                     "debit": l.debit.to_json_number(),
                     "credit": l.credit.to_json_number(),
                     "balance": l.balance.to_json_number(),
+                    "foreignAmount": l.foreign_amount.map(Money::to_json_number),
+                    "foreignBalance": l.foreign_balance.map(Money::to_json_number),
                 })
             })
             .collect();
@@ -72,6 +80,9 @@ impl Activity {
             "totalDebit": self.total_debit.to_json_number(),
             "totalCredit": self.total_credit.to_json_number(),
             "closingBalance": self.closing.to_json_number(),
+            "currency": self.account.currency,
+            "foreignOpening": self.foreign_opening.map(Money::to_json_number),
+            "foreignClosing": self.foreign_closing.map(Money::to_json_number),
         })
     }
 }
@@ -84,6 +95,23 @@ pub async fn account_activity(
 ) -> AppResult<Activity> {
     let account = accounts::find_one(conn, account_id).await?;
     let kind = account.account_type;
+    let foreign = account.currency.is_some();
+    // D34: a foreign balance runs in the account's normal direction too (credit-normal negates).
+    let sign = |m: Money| if kind.is_debit_normal() { Some(m) } else { Money::ZERO.checked_sub(m) };
+    let foreign_opening = if foreign {
+        let f: i64 = sqlx::query_scalar(
+            r#"SELECT COALESCE(SUM(l."foreignAmount"), 0)
+               FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."journalEntryId"
+               WHERE l."accountId" = ?1 AND (?2 IS NOT NULL AND e."date" < ?2)"#,
+        )
+        .bind(account_id)
+        .bind(date_from)
+        .fetch_one(&mut *conn)
+        .await?;
+        sign(Money::from_cents(f))
+    } else {
+        None
+    };
     let opening = match date_from {
         Some(from) => {
             let (d, c): (i64, i64) = sqlx::query_as(
@@ -101,7 +129,7 @@ pub async fn account_activity(
     };
     let rows = sqlx::query(
         r#"SELECT e."id", e."entryNumber", e."date", e."description", e."reference", e."sourceType",
-                  l."description" AS "lineDescription", l."debit", l."credit"
+                  l."description" AS "lineDescription", l."debit", l."credit", l."foreignAmount"
            FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."journalEntryId"
            WHERE l."accountId" = ?1 AND (?2 IS NULL OR e."date" >= ?2) AND (?3 IS NULL OR e."date" <= ?3)
            ORDER BY e."date", e."entryNumber", l.rowid"#,
@@ -113,6 +141,7 @@ pub async fn account_activity(
     .await?;
 
     let (mut running, mut total_debit, mut total_credit) = (opening, Money::ZERO, Money::ZERO);
+    let mut foreign_running = foreign_opening;
     let mut lines = Vec::with_capacity(rows.len());
     for r in &rows {
         let debit = Money::from_cents(r.try_get("debit")?);
@@ -120,6 +149,14 @@ pub async fn account_activity(
         running = running.checked_add(normal_balance(kind, debit, credit)?).ok_or_else(overflow)?;
         total_debit = total_debit.checked_add(debit).ok_or_else(overflow)?;
         total_credit = total_credit.checked_add(credit).ok_or_else(overflow)?;
+        let foreign_amount = if foreign {
+            Some(Money::from_cents(r.try_get::<Option<i64>, _>("foreignAmount")?.unwrap_or(0)))
+        } else {
+            None
+        };
+        if let (Some(run), Some(f)) = (foreign_running, foreign_amount) {
+            foreign_running = Some(run.checked_add(sign(f).ok_or_else(overflow)?).ok_or_else(overflow)?);
+        }
         lines.push(ActivityLine {
             entry_id: r.try_get("id")?,
             entry_number: r.try_get("entryNumber")?,
@@ -131,6 +168,8 @@ pub async fn account_activity(
             debit,
             credit,
             balance: running,
+            foreign_amount,
+            foreign_balance: foreign_running,
         });
     }
     Ok(Activity {
@@ -142,5 +181,7 @@ pub async fn account_activity(
         total_debit,
         total_credit,
         closing: running,
+        foreign_opening,
+        foreign_closing: foreign_running,
     })
 }

@@ -483,7 +483,8 @@ fn account_rules(v: &mut Validator, optional: bool) {
         .field("type", optional, &[Rule::IsEnum(ACCOUNT_TYPES)])
         .field("subtype", true, &[Rule::IsString])
         .field("description", true, &[Rule::IsString])
-        .field("parentId", true, &[Rule::IsUuid]);
+        .field("parentId", true, &[Rule::IsUuid])
+        .field("currency", true, &[Rule::IsString, Rule::MaxLength(3)]);
 }
 
 /// Validated account fields. For the nullable ones, `Some(None)` means "sent as null".
@@ -494,6 +495,8 @@ pub struct AccountDto {
     pub subtype: Option<Option<String>>,
     pub description: Option<Option<String>>,
     pub parent_id: Option<Option<String>>,
+    /// D34: `Some(None)` / "" = home currency.
+    pub currency: Option<Option<String>>,
 }
 
 pub(crate) fn nullable(m: &Map<String, Value>, key: &str) -> Option<Option<String>> {
@@ -508,6 +511,7 @@ fn account_dto(m: &Map<String, Value>) -> AccountDto {
         subtype: nullable(m, "subtype"),
         description: nullable(m, "description"),
         parent_id: nullable(m, "parentId"),
+        currency: nullable(m, "currency"),
     }
 }
 
@@ -528,6 +532,8 @@ pub struct JournalLineDto {
     pub debit: app_core::money::Money,
     pub credit: app_core::money::Money,
     pub description: Option<String>,
+    /// D34: on an account kept in a foreign currency, the amount in that currency (positive).
+    pub foreign_amount: Option<app_core::money::Money>,
 }
 
 pub struct JournalEntryDto {
@@ -595,7 +601,8 @@ fn line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>)
     v.field("accountId", false, &[Rule::IsUuid])
         .field("debit", false, &[Rule::IsMoneyNumber, Rule::MinZero])
         .field("credit", false, &[Rule::IsMoneyNumber, Rule::MinZero])
-        .field("description", true, &[Rule::IsString]);
+        .field("description", true, &[Rule::IsString])
+        .field("foreignAmount", true, &[Rule::IsMoneyNumber, Rule::MinZero]);
     v.into_parts()
 }
 
@@ -623,6 +630,7 @@ pub fn create_journal_entry(body: Map<String, Value>) -> Result<JournalEntryDto,
                     debit: l.get("debit").and_then(app_core::money::Money::from_json).unwrap_or_default(),
                     credit: l.get("credit").and_then(app_core::money::Money::from_json).unwrap_or_default(),
                     description: l.get("description").and_then(Value::as_str).map(str::to_string),
+                    foreign_amount: l.get("foreignAmount").and_then(app_core::money::Money::from_json),
                 })
                 .collect()
         })

@@ -989,6 +989,108 @@ try {
     await shot('35-fx-payment');
   });
 
+  await check('Payable accounts, account edits, transaction details and a USD bank account (D33-D35)', async () => {
+    const setv = (sel, v, n = 0) => evaluate(`(() => { const el = document.querySelectorAll(${JSON.stringify(sel)})[${n}];
+      const p = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(p, 'value').set.call(el, ${JSON.stringify(String(v))});
+      el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); return true; })()`);
+    const pickIn = (sel, text) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)});
+      const o = [...el.options].find((x) => x.textContent.includes(${JSON.stringify(text)})); if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, o.value);
+      el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    // Chart of accounts: a payable, a USD bank account, and an edit.
+    await go('/accounts');
+    for (const [code, name, type, currency] of [['2400', 'Telephone Payable', 'LIABILITY', ''], ['1020', 'USD Bank', 'ASSET', 'USD']]) {
+      await clickText('+ New Account');
+      await waitFor(`!!document.querySelector('form[aria-label="Account"]')`, 'account form');
+      await setv('input[placeholder="Code (e.g. 1000)"]', code);
+      await setv('input[placeholder="Account Name"]', name);
+      await setv('select[aria-label="Account type"]', type);
+      if (currency) await setv('select[aria-label="Account currency"]', currency);
+      await clickText('Save Account');
+      await waitFor(`document.body.innerText.includes(${JSON.stringify(name)})`, name);
+    }
+    await rowAction('Telephone Payable', 'Edit');
+    await waitFor(`document.body.innerText.includes('Edit 2400')`, 'edit form');
+    await setv('input[placeholder="Account Name"]', 'Telephone & Internet Payable');
+    await clickText('Save Changes');
+    await waitFor(`document.body.innerText.includes('Telephone & Internet Payable')`, 'renamed');
+    await shot('36-accounts-edit');
+
+    // The senior's example as a journal entry, then opened in full.
+    await go('/ledger');
+    await clickText('+ New Journal Entry');
+    await setv('input[aria-label="Entry date"]', '2026-10-05');
+    await setv('input[placeholder^="Description"]', 'Telephone bill September');
+    await pickIn('select[aria-label="Account for line 1"]', '6000');
+    await setv('input[aria-label="Debit for line 1"]', '18337.13');
+    await pickIn('select[aria-label="Account for line 2"]', '2400');
+    await setv('input[aria-label="Credit for line 2"]', '18337.13');
+    await waitFor(`document.querySelector('[data-testid=je-difference]').innerText.includes('Balanced')`, 'balanced');
+    await clickText('Post Entry');
+    await waitFor(`document.body.innerText.includes('Telephone bill September')`, 'entry listed');
+    await evaluate(`[...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes('Telephone bill September')).click()`);
+    await waitFor(`location.pathname.startsWith('/ledger/entries/') && document.body.innerText.includes('Ledger lines') && document.body.innerText.includes('Telephone & Internet Payable')`, 'transaction detail');
+    await shot('37-transaction-detail');
+
+    // A bill owed on the telephone payable.
+    await go('/bills');
+    await clickText('+ New Bill');
+    await waitFor(`[...(document.querySelectorAll('form select')[0]?.options ?? [])].some((o) => o.textContent.includes('Paper Co'))`, 'vendor option');
+    await pick(0, 'Paper Co');
+    await type('input[placeholder="Item description"]', 'Internet October');
+    await evaluate(`(() => { const nums = document.querySelectorAll('form input[type=number]'); nums[0].focus(); nums[0].select(); return true; })()`);
+    await send('Input.insertText', { text: '1' });
+    await evaluate(`(() => { const nums = document.querySelectorAll('form input[type=number]'); nums[1].focus(); return true; })()`);
+    await send('Input.insertText', { text: '5000' });
+    await pickIn('select[aria-label="Account for line 1"]', '6000');
+    await pickIn('select[aria-label="Payable account"]', '2400');
+    await fillDates('2026-10-06', true);
+    await clickText('Save Bill');
+    await waitFor(`document.body.innerText.includes('BILL-000002')`, 'bill saved');
+    const bill = (await api('GET', '/api/bills')).body.data.find((b) => b.payableAccountId);
+    if (!bill) throw new Error('bill saved without its payable account');
+    await go('/bills');
+    await rowAction(bill.billNumber, 'Post');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes(${JSON.stringify(bill.billNumber)}) && tr.innerText.includes('POSTED'))`, 'bill posted');
+    const owed = (await api('GET', '/api/ledger/trial-balance')).body.find((r) => r.account.code === '2400');
+    if (!owed || owed.balance !== 23337.13) throw new Error('telephone payable ' + JSON.stringify(owed && owed.balance));
+
+    // Paying the payable account directly.
+    await go('/payments');
+    await clickText('+ Record Payment');
+    await setv('form select', 'ACCOUNT', 0);
+    await waitFor(`!!document.querySelector('select[aria-label="Payable account"]')`, 'payable picker');
+    await pickIn('select[aria-label="Payable account"]', '2400');
+    await setv('input[placeholder="Amount"]', '18337.13');
+    await pick(3, '1000');
+    await fillDates('2026-10-07');
+    await shot('38-pay-payable-account');
+    await clickText('Record Payment');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('18,337.13') && tr.innerText.includes('2400'))`, 'payable payment listed');
+    const left = (await api('GET', '/api/ledger/trial-balance')).body.find((r) => r.account.code === '2400');
+    if (left.balance !== 5000) throw new Error('payable after payment ' + left.balance);
+
+    // The USD account: a deposit in USD by journal entry, then its activity in USD.
+    await go('/ledger');
+    await clickText('+ New Journal Entry');
+    await setv('input[aria-label="Entry date"]', '2026-10-08');
+    await setv('input[placeholder^="Description"]', 'Transfer to the USD account');
+    await pickIn('select[aria-label="Account for line 1"]', '1020');
+    await waitFor(`!!document.querySelector('input[aria-label="Rate for line 1"]')`, 'rate field');
+    await setv('input[aria-label="Debit for line 1"]', '100');
+    await setv('input[aria-label="Rate for line 1"]', '300');
+    await pickIn('select[aria-label="Account for line 2"]', '1000');
+    await setv('input[aria-label="Credit for line 2"]', '30000');
+    await waitFor(`document.querySelector('[data-testid=je-difference]').innerText.includes('Balanced')`, 'USD entry balanced');
+    await clickText('Post Entry');
+    await waitFor(`document.body.innerText.includes('Transfer to the USD account')`, 'USD entry listed');
+    const usd = (await api('GET', '/api/accounts')).body.find((a) => a.code === '1020');
+    await go('/ledger/account/' + usd.id);
+    await waitFor(`document.querySelector('[data-testid=foreign-closing]')?.innerText.includes('100.00')`, 'USD balance');
+    await shot('39-usd-account');
+  });
+
   await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {
     await go('/settings');
     await waitFor(`document.body.innerText.includes('not locked')`, 'lock card');

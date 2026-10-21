@@ -7,6 +7,7 @@ import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
 import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
 import { money, moneyIn } from '../lib/money';
+import TxnLink from '../components/TxnLink';
 
 /**
  * D21. AR: customer credit notes against posted invoices (revenue down, receivable down).
@@ -273,7 +274,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
         data={rows}
         emptyMessage={t.empty}
         columns={[
-          { header: '#', accessor: 'noteNumber' },
+          { header: '#', accessor: (r) => <TxnLink entryId={(r as { journalEntryId?: string }).journalEntryId}>{r.noteNumber}</TxnLink> },
           { header: 'Date', accessor: 'date' },
           { header: t.docLabel, accessor: (r) => r.documentNumber ?? '—' },
           { header: t.partyLabel, accessor: (r) => r.partyName ?? '—' },

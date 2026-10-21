@@ -50,6 +50,10 @@ const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
     ("payments", "baseAmount", true),
     ("payments", "baseSettled", true),
     ("payments", "exchangeDifference", true),
+    ("bills", "payableAccountId", false), // D33
+    ("payments", "payableAccountId", false),
+    ("accounts", "currency", false), // D34
+    ("journal_lines", "foreignAmount", false),
 ];
 
 /// Tables this project adds on purpose (approved deviations); the reference has no such table.

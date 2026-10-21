@@ -43,6 +43,10 @@ pub struct JournalLine {
     pub debit: Money,
     #[serde(serialize_with = "as_db_string")]
     pub credit: Money,
+    /// D34: on an account kept in a foreign currency, the amount in that currency (debit
+    /// positive, credit negative). Absent for home-currency accounts.
+    #[serde(serialize_with = "opt_db_string", skip_serializing_if = "Option::is_none")]
+    pub foreign_amount: Option<Money>,
     /// Present when read back (the reference eager-loads it), absent in post/reverse answers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<Account>,
@@ -83,6 +87,13 @@ pub struct NewEntry {
     pub lines: Vec<NewLine>,
 }
 
+fn opt_db_string<S: serde::Serializer>(v: &Option<Money>, s: S) -> Result<S::Ok, S::Error> {
+    match v {
+        Some(m) => as_db_string(m, s),
+        None => s.serialize_none(),
+    }
+}
+
 fn total(lines: &[NewLine], f: impl Fn(&NewLine) -> Money) -> AppResult<Money> {
     lines.iter().try_fold(Money::ZERO, |acc, l| {
         acc.checked_add(f(l)).ok_or_else(|| AppError::bad_request("Journal entry amounts are too large"))
@@ -91,6 +102,19 @@ fn total(lines: &[NewLine], f: impl Fn(&NewLine) -> Money) -> AppResult<Money> {
 
 /// Posts a balanced entry inside the caller's transaction.
 pub async fn post(tx: &mut Tx, entry: NewEntry) -> AppResult<JournalEntry> {
+    let foreign = vec![None; entry.lines.len()];
+    post_with_foreign(tx, entry, foreign).await
+}
+
+/// D34: as `post`, with each line's amount in its account's foreign currency (`foreign[i]`,
+/// debit positive, credit negative). A line on a foreign-currency account must have one, so no
+/// screen can move a USD bank account in rupees only; a home-currency line's value is ignored.
+pub async fn post_with_foreign(
+    tx: &mut Tx,
+    entry: NewEntry,
+    mut foreign: Vec<Option<Money>>,
+) -> AppResult<JournalEntry> {
+    foreign.resize(entry.lines.len(), None);
     // Same order of checks as the reference: balance first, then line count.
     let debits = total(&entry.lines, |l| l.debit)?;
     let credits = total(&entry.lines, |l| l.credit)?;
@@ -107,11 +131,30 @@ pub async fn post(tx: &mut Tx, entry: NewEntry) -> AppResult<JournalEntry> {
     if entry.lines.iter().any(|l| l.debit < Money::ZERO || l.credit < Money::ZERO) {
         return Err(AppError::bad_request("Journal line amounts cannot be negative"));
     }
-    for l in &entry.lines {
+    for (l, f) in entry.lines.iter().zip(foreign.iter_mut()) {
         // The reference let the database reject an unknown account (a 500); this says why.
-        accounts::find_one(tx, &l.account_id).await?;
+        let account = accounts::find_one(tx, &l.account_id).await?;
+        match (&account.currency, *f) {
+            (None, _) => *f = None,
+            (Some(cur), None) => {
+                return Err(AppError::bad_request(format!(
+                    "{} {} is kept in {cur}. Enter the {cur} amount and its exchange rate for that line.",
+                    account.code, account.name
+                )))
+            }
+            (Some(cur), Some(amount)) => {
+                let wrong_side =
+                    (l.debit > Money::ZERO && amount < Money::ZERO) || (l.credit > Money::ZERO && amount > Money::ZERO);
+                if wrong_side {
+                    return Err(AppError::bad_request(format!(
+                        "The {cur} amount for {} {} must be on the same side as its debit or credit.",
+                        account.code, account.name
+                    )));
+                }
+            }
+        }
     }
-    insert(tx, entry, None).await
+    insert(tx, entry, None, &foreign).await
 }
 
 /// Settings key holding the books lock date (D19).
@@ -146,7 +189,12 @@ async fn check_not_locked(tx: &mut Tx, date: &str) -> AppResult<()> {
     Ok(())
 }
 
-async fn insert(tx: &mut Tx, entry: NewEntry, reversal_of: Option<&str>) -> AppResult<JournalEntry> {
+async fn insert(
+    tx: &mut Tx,
+    entry: NewEntry,
+    reversal_of: Option<&str>,
+    foreign: &[Option<Money>],
+) -> AppResult<JournalEntry> {
     check_not_locked(tx, &entry.date).await?;
     let id = new_id();
     let number = counters::next_formatted(tx, "JE", 6).await?;
@@ -167,10 +215,10 @@ async fn insert(tx: &mut Tx, entry: NewEntry, reversal_of: Option<&str>) -> AppR
     .bind(&now)
     .execute(&mut **tx)
     .await?;
-    for l in &entry.lines {
+    for (i, l) in entry.lines.iter().enumerate() {
         sqlx::query(
-            r#"INSERT INTO "journal_lines" ("id","journalEntryId","accountId","description","debit","credit")
-               VALUES (?1,?2,?3,?4,?5,?6)"#,
+            r#"INSERT INTO "journal_lines" ("id","journalEntryId","accountId","description","debit","credit","foreignAmount")
+               VALUES (?1,?2,?3,?4,?5,?6,?7)"#,
         )
         .bind(new_id())
         .bind(&id)
@@ -178,6 +226,7 @@ async fn insert(tx: &mut Tx, entry: NewEntry, reversal_of: Option<&str>) -> AppR
         .bind(&l.description)
         .bind(l.debit.cents())
         .bind(l.credit.cents())
+        .bind(foreign.get(i).copied().flatten().map(Money::cents))
         .execute(&mut **tx)
         .await?;
     }
@@ -208,7 +257,10 @@ pub async fn reverse(tx: &mut Tx, id: &str, date: &str) -> AppResult<JournalEntr
             })
             .collect(),
     };
-    let reversal = insert(tx, mirror, Some(&original.id)).await?;
+    // D34: the foreign amounts are mirrored too, so a USD account's balance comes back exactly.
+    let foreign: Vec<Option<Money>> =
+        original.lines.iter().map(|l| l.foreign_amount.and_then(|f| Money::ZERO.checked_sub(f))).collect();
+    let reversal = insert(tx, mirror, Some(&original.id), &foreign).await?;
     sqlx::query(r#"UPDATE "journal_entries" SET "status" = 'REVERSED', "updatedAt" = ?1 WHERE "id" = ?2"#)
         .bind(now_iso())
         .bind(&original.id)
@@ -249,7 +301,7 @@ async fn attach_lines(conn: &mut SqliteConnection, entries: &mut [JournalEntry],
     let index: HashMap<String, usize> = entries.iter().enumerate().map(|(i, e)| (e.id.clone(), i)).collect();
     let placeholders = vec!["?"; entries.len()].join(",");
     let sql = format!(
-        r#"SELECT l."id", l."journalEntryId", l."accountId", l."description", l."debit", l."credit"
+        r#"SELECT l."id", l."journalEntryId", l."accountId", l."description", l."debit", l."credit", l."foreignAmount"
            FROM "journal_lines" l WHERE l."journalEntryId" IN ({placeholders}) ORDER BY l.rowid"#
     );
     let mut q = sqlx::query(&sql);
@@ -278,6 +330,7 @@ async fn attach_lines(conn: &mut SqliteConnection, entries: &mut [JournalEntry],
             description: r.try_get("description")?,
             debit: Money::from_cents(r.try_get("debit")?),
             credit: Money::from_cents(r.try_get("credit")?),
+            foreign_amount: r.try_get::<Option<i64>, _>("foreignAmount")?.map(Money::from_cents),
             account,
         };
         if let Some(i) = index.get(&entry_id) {

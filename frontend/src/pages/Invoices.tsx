@@ -11,6 +11,7 @@ import InvoiceSheetForm, { type SheetPayload } from '../components/InvoiceSheetF
 import { useAuth } from '../contexts/AuthContext';
 import { moneyIn } from '../lib/money';
 import { useTaxCodes } from '../lib/taxes';
+import TxnLink from '../components/TxnLink';
 
 interface Invoice {
   id: string;
@@ -385,7 +386,7 @@ export default function Invoices() {
           </div>
 
           <Table data={rows} columns={[
-            { header: '#',        accessor: 'invoiceNumber' },
+            { header: '#',        accessor: (r) => <TxnLink entryId={(r as { journalEntryId?: string }).journalEntryId}>{r.invoiceNumber}</TxnLink> },
             { header: 'PO No',    accessor: (r) => {
               if (r.status === 'VOID') return r.poNumber || '—';
               if (editingPo === r.id) {

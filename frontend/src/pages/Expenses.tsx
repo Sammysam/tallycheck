@@ -8,6 +8,7 @@ import Pagination from '../components/Pagination';
 import { money } from '../lib/money';
 import { region } from '../lib/region';
 import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
+import TxnLink from '../components/TxnLink';
 
 interface Expense { id: string; expenseNumber: string; date: string; description: string; amount: number; status: string }
 
@@ -107,7 +108,7 @@ export default function Expenses() {
       )}
 
       <Table data={rows} columns={[
-        { header: '#',           accessor: 'expenseNumber' },
+        { header: '#',           accessor: (r) => <TxnLink entryId={(r as { journalEntryId?: string }).journalEntryId}>{r.expenseNumber}</TxnLink> },
         { header: 'Date',        accessor: 'date' },
         { header: 'Description', accessor: 'description' },
         { header: 'Amount',      accessor: (r) => fmt(r.amount) },

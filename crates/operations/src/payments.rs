@@ -14,6 +14,12 @@
 //!   home currency at the payment's rate. The receivable or payable is cleared at the amount it
 //!   was booked at (all of what is left when the document is settled in full), and the
 //!   difference is a realised exchange gain or loss on the exchange account.
+//! * Payable accounts (D33): an AP payment either settles a bill — debiting the bill's own
+//!   payable account — or, with no bill, pays a liability account directly (a telephone
+//!   payable, a loan): debit that account, credit the payment account.
+//! * Foreign-currency bank accounts (D34): money paid into or out of an account kept in USD
+//!   carries the USD amount on its ledger line. Such an account takes payments of documents in
+//!   its own currency, or payable-account payments at the day's rate.
 
 use crate::invoices;
 use crate::parties::{self, PartyKind};
@@ -43,6 +49,8 @@ pub struct Payment {
     pub payment_account_id: String,
     pub notes: Option<String>,
     pub journal_entry_id: Option<String>,
+    /// D33: the liability a payment without a bill settles.
+    pub payable_account_id: Option<String>,
     /// D27: tax held back by the payer, and its withholding code.
     pub withholding_tax_code_id: Option<String>,
     pub withholding_amount: Money,
@@ -83,6 +91,7 @@ impl Payment {
             "exchangeDifference": money_str(self.exchange_difference),
             "currency": opt(&self.currency),
             "journalEntryId": opt(&self.journal_entry_id),
+            "payableAccountId": opt(&self.payable_account_id),
             "status": self.status,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
@@ -90,7 +99,7 @@ impl Payment {
     }
 }
 
-const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","status","withholdingTaxCodeId","withholdingAmount","exchangeRate","baseAmount","baseSettled","exchangeDifference","createdAt","updatedAt",
+const COLUMNS: &str = r#""id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount","paymentMethod","paymentAccountId","notes","journalEntryId","payableAccountId","status","withholdingTaxCodeId","withholdingAmount","exchangeRate","baseAmount","baseSettled","exchangeDifference","createdAt","updatedAt",
     COALESCE((SELECT "currency" FROM "invoices" WHERE "id" = "payments"."invoiceId"),
              (SELECT "currency" FROM "bills" WHERE "id" = "payments"."billId")) AS "currency""#;
 
@@ -116,6 +125,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Payment> {
         exchange_difference: Money::from_cents(r.try_get("exchangeDifference")?),
         currency: r.try_get("currency")?,
         journal_entry_id: r.try_get("journalEntryId")?,
+        payable_account_id: r.try_get("payableAccountId")?,
         status: r.try_get("status")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
@@ -160,6 +170,8 @@ pub struct CreatePayment {
     pub withholding_amount: Money,
     /// D30: for a foreign-currency document, the rate on the payment date (None = its own rate).
     pub exchange_rate: Option<i64>,
+    /// D33: with no bill, the liability account this AP payment settles.
+    pub payable_account_id: Option<String>,
 }
 
 pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
@@ -167,10 +179,24 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     if is_ar && dto.invoice_id.is_none() {
         return Err(AppError::bad_request("invoiceId is required for AR payments"));
     }
-    if !is_ar && dto.bill_id.is_none() {
-        return Err(AppError::bad_request("billId is required for AP payments"));
+    if !is_ar && dto.bill_id.is_none() && dto.payable_account_id.is_none() {
+        return Err(AppError::bad_request("Choose the bill, or the payable account, this payment settles"));
+    }
+    if dto.bill_id.is_some() && dto.payable_account_id.is_some() {
+        return Err(AppError::bad_request("A payment settles either a bill or a payable account, not both"));
+    }
+    if is_ar && dto.payable_account_id.is_some() {
+        return Err(AppError::bad_request("A payable account is paid with an AP payment"));
     }
     let mut tx = db.begin().await?;
+    let id = new_id();
+    // D34: the account the money moves through, and the currency it is kept in.
+    let bank = ledger::accounts::find_one(&mut tx, &dto.payment_account_id).await?;
+    if let Some(account_id) = dto.payable_account_id.clone() {
+        let p = pay_liability(&mut tx, &dto, &id, &bank, &account_id).await?;
+        tx.commit().await?;
+        return Ok(p);
+    }
 
     // D27: what settles the document is the money paid plus any tax withheld.
     let withholding = match (&dto.withholding_tax_code_id, dto.withholding_amount > Money::ZERO) {
@@ -249,13 +275,29 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     let difference =
         base_settled.checked_sub(base_amount).and_then(|d| d.checked_sub(base_withheld)).ok_or_else(overflow)?;
 
+    // D34: an account kept in a foreign currency takes documents in that currency only.
+    let doc_currency =
+        invoice.as_ref().and_then(|i| i.currency.clone()).or(bill.as_ref().and_then(|b| b.currency.clone()));
+    if let Some(bc) = &bank.currency {
+        if doc_currency.as_deref() != Some(bc.as_str()) {
+            return Err(AppError::bad_request(format!(
+                "{} {} is kept in {bc}. Record {bc} invoices and bills through it, or pay this one from a {} account.",
+                bank.code,
+                bank.name,
+                doc_currency.clone().unwrap_or_else(|| "home-currency".into())
+            )));
+        }
+    }
+
     let number = counters::next_formatted(&mut tx, "PAY", 6).await?;
-    let (control_code, source_type, source_id, label) = if is_ar {
-        ("1100", "PAYMENT_AR", dto.invoice_id.clone(), "AR")
+    let (source_type, source_id, label) =
+        if is_ar { ("PAYMENT_AR", dto.invoice_id.clone(), "AR") } else { ("PAYMENT_AP", dto.bill_id.clone(), "AP") };
+    // D33: a bill is cleared from its own payable account.
+    let control = if is_ar {
+        ledger::accounts::find_by_code(&mut tx, "1100").await?
     } else {
-        ("2000", "PAYMENT_AP", dto.bill_id.clone(), "AP")
+        bills::payable_account(&mut tx, bill.as_ref().and_then(|b| b.payable_account_id.as_deref())).await?
     };
-    let control = ledger::accounts::find_by_code(&mut tx, control_code).await?;
     let mut lines = if is_ar {
         vec![
             NewLine {
@@ -312,7 +354,13 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
             }
         });
     }
-    let entry = entries::post(
+    // D34: the bank line's amount in the bank's currency (debit in, credit out).
+    let mut bank_foreign = vec![None; lines.len()];
+    if bank.currency.is_some() {
+        let signed = if is_ar { dto.amount } else { Money::ZERO.checked_sub(dto.amount).ok_or_else(overflow)? };
+        bank_foreign[if is_ar { 0 } else { 1 }] = Some(signed);
+    }
+    let entry = entries::post_with_foreign(
         &mut tx,
         NewEntry {
             date: dto.date.clone(),
@@ -322,6 +370,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
             source_id,
             lines,
         },
+        bank_foreign,
     )
     .await?;
 
@@ -345,7 +394,6 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         crate::fx::remember_rate(&mut tx, &currency, rate).await?;
     }
 
-    let id = new_id();
     let now = now_iso();
     sqlx::query(
         r#"INSERT INTO "payments" ("id","paymentNumber","type","invoiceId","billId","customerId","vendorId","date","amount",
@@ -378,6 +426,92 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     let p = find_one(&mut tx, &id).await?;
     tx.commit().await?;
     Ok(p)
+}
+
+/// D33: an AP payment with no bill — debit the payable (liability) account, credit the money.
+/// From an account kept in a foreign currency (D34) the amount is in that currency and converts
+/// at the payment's rate.
+async fn pay_liability(
+    tx: &mut database::Tx,
+    dto: &CreatePayment,
+    id: &str,
+    bank: &ledger::Account,
+    account_id: &str,
+) -> AppResult<Payment> {
+    let account = ledger::accounts::find_one(tx, account_id).await?;
+    if account.account_type != ledger::AccountType::Liability {
+        return Err(AppError::bad_request(format!(
+            "{} {} is not a liability — choose a payable account",
+            account.code, account.name
+        )));
+    }
+    if account.id == bank.id {
+        return Err(AppError::bad_request("Pay the liability from a bank or cash account"));
+    }
+    if dto.withholding_tax_code_id.is_some() || dto.withholding_amount > Money::ZERO {
+        return Err(AppError::bad_request("Withholding applies to bills — pay a payable account without it"));
+    }
+    if let Some(v) = &dto.vendor_id {
+        parties::find_one(tx, PartyKind::Vendor, v).await?;
+    }
+    let (rate, base) = match &bank.currency {
+        Some(c) => {
+            let Some(rate) = dto.exchange_rate.filter(|r| *r > 0) else {
+                return Err(AppError::bad_request(format!(
+                    "{} {} is kept in {c}: enter the exchange rate for the payment",
+                    bank.code, bank.name
+                )));
+            };
+            (rate, crate::fx::to_base(dto.amount, rate)?)
+        }
+        None => (crate::fx::RATE_ONE, dto.amount),
+    };
+    let number = counters::next_formatted(tx, "PAY", 6).await?;
+    let lines = vec![
+        NewLine { account_id: account.id.clone(), debit: base, credit: Money::ZERO, description: None },
+        NewLine { account_id: bank.id.clone(), debit: Money::ZERO, credit: base, description: None },
+    ];
+    let foreign_out = Money::ZERO.checked_sub(dto.amount).ok_or_else(overflow)?;
+    let foreign = vec![None, bank.currency.as_ref().map(|_| foreign_out)];
+    let entry = entries::post_with_foreign(
+        tx,
+        NewEntry {
+            date: dto.date.clone(),
+            description: format!("Payment {number} – {} {}", account.code, account.name),
+            reference: Some(number.clone()),
+            source_type: Some("PAYMENT_LIABILITY".into()),
+            source_id: Some(id.to_string()),
+            lines,
+        },
+        foreign,
+    )
+    .await?;
+    if bank.currency.is_some() {
+        crate::fx::remember_rate(tx, &bank.currency, rate).await?;
+    }
+    let now = now_iso();
+    sqlx::query(
+        r#"INSERT INTO "payments" ("id","paymentNumber","type","vendorId","date","amount","paymentMethod","paymentAccountId",
+             "notes","journalEntryId","createdAt","updatedAt","withholdingAmount","exchangeRate","baseAmount","baseSettled",
+             "exchangeDifference","payableAccountId")
+           VALUES (?1,?2,'AP',?3,?4,?5,?6,?7,?8,?9,?10,?10,0,?11,?12,?12,0,?13)"#,
+    )
+    .bind(id)
+    .bind(&number)
+    .bind(&dto.vendor_id)
+    .bind(&dto.date)
+    .bind(dto.amount.cents())
+    .bind(&dto.payment_method)
+    .bind(&dto.payment_account_id)
+    .bind(&dto.notes)
+    .bind(&entry.id)
+    .bind(&now)
+    .bind(rate)
+    .bind(base.cents())
+    .bind(&dto.payable_account_id)
+    .execute(&mut **tx)
+    .await?;
+    find_one(tx, id).await
 }
 
 /// D18: voids a payment. Its journal entry is reversed (dated `today`), the invoice or bill

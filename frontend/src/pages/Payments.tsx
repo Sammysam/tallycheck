@@ -9,11 +9,16 @@ import { taxOf, useTaxCodes } from '../lib/taxes';
 import { money, moneyIn } from '../lib/money';
 import { region } from '../lib/region';
 import Dialog from '../components/desktop/Dialog';
+import TxnLink from '../components/TxnLink';
 
 interface Payment {
   id: string; paymentNumber: string; type: string; date: string; amount: number; paymentMethod: string; status: string;
   withholdingAmount?: string; currency?: string | null; exchangeRate?: number; baseAmount?: string; exchangeDifference?: string;
+  payableAccountId?: string | null;
 }
+
+/** D33: liabilities split as the balance sheet reads them. */
+const NON_CURRENT = ['non_current_liability', 'long_term_liability', 'long_term_loan', 'non_current'];
 
 export default function Payments() {
   const [rows, setRows] = useState<Payment[]>([]);
@@ -29,7 +34,7 @@ export default function Payments() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
+  const [form, setForm] = useState({ type: 'AR', invoiceId: '', billId: '', payableAccountId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
   const [error, setError] = useState('');
   const [voiding, setVoiding] = useState<Payment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,7 +44,12 @@ export default function Payments() {
   /** Suggests what is withheld (rate × the document's amount before tax) and the money paid. */
   // D30: the chosen document's currency; a foreign one is paid at the day's rate.
   const chosenDoc = form.type === 'AR' ? invoices.find((i) => i.id === form.invoiceId) : bills.find((b) => b.id === form.billId);
-  const docCurrency: string = chosenDoc?.currency ?? '';
+  const isAccount = form.type === 'ACCOUNT';
+  const bankAccounts = accounts.filter((a) => a.type === 'ASSET');
+  const liabilities = accounts.filter((a) => a.type === 'LIABILITY' && !a.currency);
+  // D34: a payable account paid from a USD account is entered in USD at the day's rate.
+  const bankCurrency: string = accounts.find((a) => a.id === form.paymentAccountId)?.currency ?? '';
+  const docCurrency: string = isAccount ? bankCurrency : chosenDoc?.currency ?? '';
   const chooseDoc = (field: 'invoiceId' | 'billId', id: string) => {
     const doc = (field === 'invoiceId' ? invoices : bills).find((d) => d.id === id);
     const cur = doc?.currency ?? '';
@@ -97,7 +107,7 @@ export default function Payments() {
   };
 
   useEffect(() => {
-    api.get('/accounts').then((r) => setAccounts(r.data.filter((a: any) => a.type === 'ASSET')));
+    api.get('/accounts').then((r) => setAccounts(r.data));
     loadDocuments();
   }, []);
 
@@ -105,8 +115,11 @@ export default function Payments() {
     e.preventDefault();
     setError('');
     try {
+      const { payableAccountId, ...rest } = form;
       const payload = {
-        ...form,
+        ...rest,
+        type: isAccount ? 'AP' : form.type,
+        payableAccountId: isAccount ? payableAccountId : undefined,
         amount: Number(form.amount),
         withholdingTaxCodeId: form.withholdingTaxCodeId || undefined,
         withholdingAmount: form.withholdingTaxCodeId ? Number(form.withholdingAmount) : undefined,
@@ -116,7 +129,7 @@ export default function Payments() {
       };
       await api.post('/payments', payload);
       setShowForm(false);
-      setForm({ type: 'AR', invoiceId: '', billId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
+      setForm({ type: 'AR', invoiceId: '', billId: '', payableAccountId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to record payment');
@@ -139,8 +152,19 @@ export default function Payments() {
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, invoiceId: '', billId: '' })}>
                 <option value="AR">AR — Customer Payment</option>
                 <option value="AP">AP — Vendor Payment</option>
+                <option value="ACCOUNT">Payable account — pay a liability</option>
               </select>
-              {form.type === 'AR'
+              {isAccount
+                ? <select required value={form.payableAccountId} onChange={(e) => setForm({ ...form, payableAccountId: e.target.value })} aria-label="Payable account">
+                    <option value="">Select payable account</option>
+                    <optgroup label="Current liabilities">
+                      {liabilities.filter((a) => !NON_CURRENT.includes(a.subtype ?? '')).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                    </optgroup>
+                    <optgroup label="Non-current liabilities">
+                      {liabilities.filter((a) => NON_CURRENT.includes(a.subtype ?? '')).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                    </optgroup>
+                  </select>
+                : form.type === 'AR'
                 ? <select required value={form.invoiceId} onChange={(e) => chooseDoc('invoiceId', e.target.value)}>
                     <option value="">Select Posted Invoice</option>
                     {invoices.map((i) => (
@@ -165,7 +189,7 @@ export default function Payments() {
               </select>
               <select required value={form.paymentAccountId} onChange={(e) => setForm({ ...form, paymentAccountId: e.target.value })}>
                 <option value="">Bank / Cash Account</option>
-                {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}{a.currency ? ` (${a.currency})` : ''}</option>)}
               </select>
             </div>
             {docCurrency && (
@@ -177,13 +201,15 @@ export default function Payments() {
                 </label>
                 <p className="text-xs text-gray-600 pb-2">
                   The amount is in {docCurrency}. {Number(form.amount) > 0 && Number(form.exchangeRate) > 0 && (
-                    <>You receive about {money(Math.round(Number(form.amount) * Number(form.exchangeRate) * 100) / 100)}; any difference
-                    from the invoice's rate ({chosenDoc?.exchangeRate}) is an exchange gain or loss.</>
+                    isAccount
+                      ? <>That is {money(Math.round(Number(form.amount) * Number(form.exchangeRate) * 100) / 100)} off the payable account.</>
+                      : <>You receive about {money(Math.round(Number(form.amount) * Number(form.exchangeRate) * 100) / 100)}; any difference
+                        from the invoice's rate ({chosenDoc?.exchangeRate}) is an exchange gain or loss.</>
                   )}
                 </p>
               </div>
             )}
-            {withholdingCodes.length > 0 && (
+            {withholdingCodes.length > 0 && !isAccount && (
               <div className="form-grid items-end" style={{ gridTemplateColumns: '1fr 1fr 2fr' }}>
                 <label className="text-xs font-medium text-gray-600">
                   {form.type === 'AR' ? 'Tax the customer withheld' : 'Tax we withhold'}
@@ -216,13 +242,17 @@ export default function Payments() {
       )}
 
       <Table data={rows} columns={[
-        { header: '#',      accessor: 'paymentNumber' },
-        { header: 'Type',   accessor: 'type' },
+        { header: '#',      accessor: (r) => <TxnLink entryId={(r as { journalEntryId?: string }).journalEntryId}>{r.paymentNumber}</TxnLink> },
+        { header: 'Type',   accessor: (r) => {
+          if (!r.payableAccountId) return r.type;
+          const a = accounts.find((x) => x.id === r.payableAccountId);
+          return <span title="Paid a payable account">AP · {a ? `${a.code} ${a.name}` : 'payable account'}</span>;
+        } },
         { header: 'Date',   accessor: 'date' },
         { header: 'Amount', accessor: (r) => moneyIn(Number(r.amount), r.currency) },
         { header: 'Method', accessor: 'paymentMethod' },
         { header: 'Withheld', accessor: (r) => (Number(r.withholdingAmount ?? 0) ? moneyIn(Number(r.withholdingAmount), r.currency) : '') },
-        { header: 'In the books', accessor: (r) => (r.currency ? `${money(Number(r.baseAmount))} @ ${r.exchangeRate}` : '') },
+        { header: 'In the books', accessor: (r) => (r.currency || Number(r.exchangeRate ?? 1) !== 1 ? `${money(Number(r.baseAmount))} @ ${r.exchangeRate}` : '') },
         { header: 'Exchange', accessor: (r) => (Number(r.exchangeDifference ?? 0) ? money(-Number(r.exchangeDifference) * (r.type === 'AR' ? 1 : -1)) : '') },
         { header: 'Status', accessor: (r) => <StatusBadge status={r.status ?? 'POSTED'} /> },
         { header: 'Actions', accessor: (r) => r.status !== 'VOID' && (

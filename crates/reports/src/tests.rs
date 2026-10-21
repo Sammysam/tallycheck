@@ -49,6 +49,7 @@ async fn books() -> AppResult<Books> {
                 subtype: sub.map(str::to_string),
                 description: None,
                 parent_id: None,
+                currency: None,
             },
         )
         .await?;
@@ -119,6 +120,7 @@ async fn books() -> AppResult<Books> {
         withholding_tax_code_id: None,
         withholding_amount: Money::ZERO,
         exchange_rate: None,
+        payable_account_id: None,
     };
     payments::create(&b.db, pay("AR", Some(&inv.id), None, "1000")).await?;
     let voided = invoices::create(&b.db, sale("999", "2026-04-30"), Some("admin")).await?;
@@ -139,6 +141,7 @@ async fn books() -> AppResult<Books> {
             prices_include_tax: false,
             currency: None,
             exchange_rate: None,
+            payable_account_id: None,
             lines: vec![BillLineInput {
                 description: "stock".into(),
                 quantity: m("4"),
@@ -249,6 +252,7 @@ async fn cash_flow_explains_every_movement_of_cash() -> AppResult<()> {
                 subtype: Some(sub.into()),
                 description: None,
                 parent_id: None,
+                currency: None,
             },
         )
         .await?;
