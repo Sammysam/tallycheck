@@ -72,10 +72,10 @@
       <div class="feature"><b>Taxes</b>VAT / GST / sales tax, tax groups, withholding tax and a tax return report.</div>
       <div class="feature"><b>Reports</b>Profit &amp; Loss, Balance Sheet, Cash Flow, Trial Balance, ageing, statements.</div>
       <div class="feature"><b>Employees &amp; payroll</b>Employee records, documents, salaries, monthly payroll and payslips.</div>
-      <div class="feature"><b>Users &amp; security</b>Roles and permissions, two-factor sign-in, a full activity log.</div>
+      <div class="feature"><b>Users &amp; security</b>An Admin Centre, roles in plain words, two-factor sign-in, a searchable activity log.</div>
       <div class="feature"><b>Safe data</b>Encrypted backups, checked restores, daily automatic backup, locked periods.</div>
     </div>
-    <p class="cover-meta">Version 0.1.0 · October 2026 · The screenshots use a made-up sample company, “Acme Trading (Pvt) Ltd”.</p>
+    <p class="cover-meta">Version 0.1.0 · Updated 21 October 2026 · The screenshots use a made-up sample company, “Acme Trading (Pvt) Ltd”.</p>
   </div>
 </section>
 
@@ -90,12 +90,12 @@
   <div><b>6. Getting paid: payments</b><span>Customer and vendor payments, withholding tax, voiding</span></div>
   <div><b>7. Buying: bills and expenses</b><span>Vendor bills and expenses paid on the spot</span></div>
   <div><b>8. Credit and debit notes</b><span>Discounts, returns and corrections</span></div>
-  <div><b>9. Foreign currency</b><span>Invoices and bills in USD, EUR…, exchange gains and losses</span></div>
-  <div><b>10. Accounting</b><span>Ledger, journal entries, bank reconciliation, locking the books</span></div>
+  <div><b>9. Foreign currency</b><span>Invoices and bills in USD, EUR…, foreign-currency bank accounts, month-end revaluation</span></div>
+  <div><b>10. Accounting</b><span>Journal entries, transaction details, bank reconciliation, locking the books</span></div>
   <div><b>11. Reports</b><span>P&amp;L, Balance Sheet, Cash Flow, Trial Balance, ageing, statements, tax return</span></div>
   <div><b>12. Employees</b><span>Employee records, photos, documents, salary and bank details</span></div>
   <div><b>13. Payroll</b><span>Monthly payroll run, posting, payslips, statutory forms</span></div>
-  <div><b>14. Administration</b><span>Users, roles, activity log, settings</span></div>
+  <div><b>14. Administration</b><span>Admin Centre, users, roles, activity log, settings</span></div>
   <div><b>15. Backup and restore</b><span>Encrypted backups, daily backups, restoring</span></div>
   <div><b>16. Quick reference</b><span>A typical month, several PCs, what is not covered yet</span></div>
 </div>
@@ -133,7 +133,7 @@
 <ul>
   <li><b class="ui">Next</b> saves the answer and moves on. <b class="ui">Skip</b> leaves it empty. <b class="ui">Back</b> returns to the previous page.</li>
   <li><b class="ui">Set up later</b> (top right) goes straight into the app. It asks again at the next sign-in, until the company name is entered.</li>
-  <li>To open the wizard again later, go to <b class="ui">Admin → Company Setup</b>. <b class="ui">Admin → Settings</b> has every field on one page.</li>
+  <li>To open the wizard again later, go to <b class="ui">Settings → Setup wizard</b>. The <b>Company</b> and <b>Region &amp; currency</b> tabs of Settings have the same fields.</li>
 </ul>
 <div class="two">
   <figure><img src="images/setup-name.jpg"><figcaption>One question per page: Back, Skip, Next.</figcaption></figure>
@@ -192,7 +192,12 @@
 <h2><span class="num">4</span>Setting up your books</h2>
 <h3>Chart of accounts</h3>
 <p><b class="ui">Master Data → Accounts.</b> A new installation starts with a ready-made chart of accounts: cash, receivables, payables, revenue, expenses, equity and the payroll accounts. Add your own accounts with <b class="ui">+ New Account</b>, for example a separate bank account or an expense category. An account can be deleted only while nothing has been posted to it.</p>
-<figure><img src="images/accounts.jpg"><figcaption>The chart of accounts. Type in the filter box to find an account.</figcaption></figure>
+<ul>
+  <li><b>Edit</b> changes an account's code, name or subtype at any time. Its type and currency are fixed once something has been posted to it, so past reports never change.</li>
+  <li><b>Currency</b>: an account, such as a USD bank account, can be kept in a foreign currency (chapter 9).</li>
+  <li>Add a separate <b>payable</b> account, for example <i>Telephone &amp; Internet Payable</i>, to see what you owe for it on its own line of the Balance Sheet (chapter 7).</li>
+</ul>
+<figure><img src="images/accounts.jpg"><figcaption>The chart of accounts with a USD bank account and a renamed payable. Type in the filter box to find an account.</figcaption></figure>
 
 <h3>Customers and vendors</h3>
 <p><b class="ui">Master Data → Customers</b> and <b class="ui">Vendors</b> hold the people you sell to and buy from: name, contact details and address. Choosing a customer on an invoice fills in the Bill To details. Each customer also has a <b>Statement</b> link (see chapter 11).</p>
@@ -234,12 +239,13 @@
 <p class="lead"><b class="ui">Transactions → Payments</b>. Record money received from customers (<b>AR</b>) and money paid to vendors (<b>AP</b>).</p>
 <ol>
   <li>Click <b class="ui">+ Record Payment</b>.</li>
-  <li>Choose <b>AR — Customer Payment</b> or <b>AP — Vendor Payment</b>, then the invoice or bill. The list shows what is still owed on each one.</li>
+  <li>Choose <b>AR — Customer Payment</b> or <b>AP — Vendor Payment</b>, then the invoice or bill. The list shows what is still owed on each one. To pay off a payable account directly, without a bill (for example the monthly telephone payable), choose <b>Payable account — pay a liability</b> and pick the account.</li>
   <li>Enter the date and amount, the method (bank transfer, cash, cheque…) and the account the money went into or came out of.</li>
   <li>Click <b class="ui">Record Payment</b>. The invoice becomes <b>Paid</b>, or <b>Partly paid</b> if not all of it was paid.</li>
 </ol>
 <h3>Withholding tax</h3>
 <p>If the customer kept back some tax, choose the withholding tax code and enter the amount withheld. The app shows how the invoice is settled, for example “LKR 1,130.00 paid + LKR 50.00 withheld for the tax office”.</p>
+<figure><img src="images/pay-payable-account.jpg"><figcaption>Paying LKR 18,337.13 off the Telephone &amp; Internet Payable account.</figcaption></figure>
 <figure><img src="images/withholding.jpg"><figcaption>Recording a payment with tax withheld by the customer.</figcaption></figure>
 <div class="tip"><b>Void</b> cancels a payment that was entered by mistake. The invoice is owed again, and the ledger keeps both the payment and its reversal.</div>
 
@@ -250,8 +256,10 @@
 <ol>
   <li>Click <b class="ui">+ New Bill</b>, then choose the vendor and enter the date, due date and currency.</li>
   <li>Add each line with its description, amount, <b>expense account</b> and tax code.</li>
-  <li>Save the bill, then <b>post</b> it. Your payables go up until you pay it on the Payments screen.</li>
+  <li><b>Owed on (payable account)</b>: leave it as <i>Accounts Payable</i>, or choose a separate payable such as <i>Telephone &amp; Internet Payable</i>.</li>
+  <li>Save the bill, then <b>post</b> it. That payable goes up until you pay it on the Payments screen.</li>
 </ol>
+<figure><img src="images/bill-payable.jpg"><figcaption>A new bill owed on the Telephone &amp; Internet Payable account.</figcaption></figure>
 <figure><img src="images/bills.jpg"><figcaption>The bill list. A posted bill can be voided.</figcaption></figure>
 <h3>Expenses (paid straight away)</h3>
 <p><b class="ui">Transactions → Expenses</b>, or the <b class="ui">Expense</b> button. Use this for costs paid on the spot, such as fuel, stationery or a utility bill: there is no vendor bill to keep track of. Click <b class="ui">+ New Expense</b>, choose the expense account, the account you paid from and the tax code, then save and post.</p>
@@ -284,11 +292,32 @@
 <p>If the rate has changed since the invoice, the difference is posted automatically to <b>7900 Foreign Exchange Gain/Loss</b>. The Payments list shows each foreign payment in your own currency (<b>In the books</b>), together with the gain or loss (<b>Exchange</b>).</p>
 <figure><img src="images/fx-payment.jpg"><figcaption>$100.00 received at 310 (booked at 300): LKR 31,000.00 in the books and an exchange gain of LKR 1,000.00.</figcaption></figure>
 
+<h3>Foreign-currency bank accounts</h3>
+<p>When you hold money in a foreign currency, for example a USD bank account, create the account with <b class="ui">+ New Account</b> and set its <b>Currency</b> to USD.</p>
+<ul>
+  <li>Every entry on it is recorded twice: in USD, and in your own currency at the rate of the day. A journal entry line on a USD account asks for the amount in USD and the rate.</li>
+  <li>Payments into or out of it can only be for invoices or bills in the same currency.</li>
+  <li>Its activity page and its bank reconciliation show the <b>USD balance</b>, so it matches the bank statement.</li>
+</ul>
+<figure><img src="images/usd-account.jpg"><figcaption>A USD bank account: $100.00, held in the books as LKR 30,000.00.</figcaption></figure>
+<h3>Month-end revaluation</h3>
+<p>Rates move, so at month-end click <b class="ui">Revalue</b> next to the account on the Chart of Accounts and enter the month-end rate. The app posts the difference to <b>7900 Foreign Exchange Gain/Loss</b>, so the Balance Sheet shows the account at today's value. The USD balance does not change.</p>
+<figure><img src="images/revalue.jpg"><figcaption>Revaluing the USD account at 305.</figcaption></figure>
+
 <!-- ───────────────────────── 10 ───────────────────────── -->
 <h2><span class="num">10</span>Accounting</h2>
 <h3>Ledger and journal entries</h3>
-<p><b class="ui">Accounting → Ledger</b> lists every journal entry, whether it came from an invoice, bill, payment or payroll run, or was entered by hand. Click an entry to see its debit and credit lines. Enter manual journal entries here too: for opening balances, bank charges, interest or corrections. A journal entry must balance before it can be posted.</p>
-<figure><img src="images/ledger.jpg"><figcaption>The ledger.</figcaption></figure>
+<p><b class="ui">Accounting → Ledger</b> lists every journal entry, whether it came from an invoice, bill, payment or payroll run, or was entered by hand.</p>
+<p>Click <b class="ui">+ New Journal Entry</b> for opening balances, bank charges, interest, depreciation or corrections:</p>
+<ol>
+  <li>Enter the date, a description and an optional reference.</li>
+  <li>Add one line per account, with the amount as a <b>debit</b> or a <b>credit</b>. <b class="ui">+ Add line</b> adds more lines.</li>
+  <li>When the totals match, the form shows <b>✓ Balanced</b>. Click <b class="ui">Post Entry</b>.</li>
+</ol>
+<figure><img src="images/journal-entry.jpg"><figcaption>A journal entry moving LKR 30,000 into the USD account: $100 at 300.</figcaption></figure>
+<h3>Transaction details</h3>
+<p>Click any entry on the Ledger, or any document number on the Invoices, Bills, Payments, Expenses and Credit Notes lists, to open its <b>transaction details</b>: where it came from, its status and every ledger line. Click an account to see its activity. <b class="ui">Reverse this entry</b> corrects a manual entry by posting the opposite entry; posted entries are never deleted.</p>
+<figure><img src="images/transaction-detail.jpg"><figcaption>The details of a manual journal entry: the telephone bill for September.</figcaption></figure>
 
 <h3>Bank reconciliation</h3>
 <p><b class="ui">Accounting → Bank Reconciliation</b> checks your books against the bank statement.</p>
@@ -301,8 +330,8 @@
 <div class="tip">Bank charges or interest on the statement but not in the books? Post them as a journal entry on the Ledger screen, then press <kbd>F5</kbd>.</div>
 
 <h3>Lock the books</h3>
-<p>Once a month or year is closed, lock it under <b class="ui">Admin → Settings → Lock the books</b>. After that, nothing can be posted on or before the lock date: no invoices, bills, payments, expenses, payroll or journal entries. This protects figures that have already been reported. Mistakes found later are corrected with entries dated today.</p>
-<figure><img src="images/lock-books.jpg"><figcaption>Settings: the invoice signatory and Lock the books.</figcaption></figure>
+<p>Once a month or year is closed, lock it under <b class="ui">Settings → Closing</b>. After that, nothing can be posted on or before the lock date: no invoices, bills, payments, expenses, payroll or journal entries. This protects figures that have already been reported. Mistakes found later are corrected with entries dated today.</p>
+<figure><img src="images/lock-books.jpg"><figcaption>Settings → Closing: the books locked up to 30 April 2026.</figcaption></figure>
 
 <!-- ───────────────────────── 11 ───────────────────────── -->
 <h2><span class="num">11</span>Reports</h2>
@@ -362,29 +391,50 @@
 
 <!-- ───────────────────────── 14 ───────────────────────── -->
 <h2><span class="num">14</span>Administration</h2>
+<p class="lead">Everything an administrator looks after: users, roles, the activity log, settings and backups.</p>
+<h3>Admin Centre</h3>
+<p><b class="ui">Administration → Admin Centre</b> shows the state of the system on one page. Cards show the users, how many use two-factor sign-in, the last backup, the date the books are locked up to, how complete the company details are, and the tax codes. A warning in orange means something needs attention. Click a card to manage it, or use a <b>quick action</b>. The latest activity is listed beside them.</p>
+<figure><img src="images/admin-centre.jpg"><figcaption>The Admin Centre: one user without 2FA and some company details missing.</figcaption></figure>
 <h3>Users</h3>
-<p><b class="ui">Admin → Users.</b> Give each person their own account; never share a password. <b class="ui">+ New User</b> creates an account with a role. Use <b>Deactivate</b> when someone leaves; their history stays in the log. <b>Reset Password</b> and <b>Reset 2FA</b> help someone who is locked out.</p>
-<figure><img src="images/users.jpg"><figcaption>Users and their roles.</figcaption></figure>
+<p><b class="ui">Administration → Users.</b> Give each person their own account; never share a password. The list shows each user's role, status, whether two-factor sign-in is on, and their last sign-in. Your own row is marked <b>YOU</b>. Search by name or role.</p>
+<ul>
+  <li><b class="ui">+ New User</b>: type the password twice; a bar shows how strong it is. Choosing a role shows what that role can open.</li>
+  <li>The <b>⋮</b> menu on each row offers <b>Change role</b>, <b>Reset password</b>, <b>Turn off 2FA</b> (for someone who lost their phone), and <b>Deactivate</b> or <b>Activate</b>. Each one explains what will happen before you confirm.</li>
+  <li>Deactivate people who leave: they can no longer sign in, and their history stays in the log.</li>
+  <li>You cannot deactivate yourself or take away your own Admin role, and the last administrator cannot be removed, so nobody gets locked out of the system.</li>
+</ul>
+<figure><img src="images/change-role.jpg"><figcaption>Changing a user's role: the dialog lists what the new role can use.</figcaption></figure>
+<figure><img src="images/users.jpg"><figcaption>Users, with 2FA and last sign-in. A notice in the corner confirms each change.</figcaption></figure>
 <h3>Roles</h3>
-<p><b class="ui">Admin → Roles.</b> A role is a list of the screens its users may open. The app comes with Admin (everything), Accountant and Viewer (dashboard, ledger and reports only). You can create your own, for example a payroll clerk who can see employees and payroll only.</p>
-<figure><img src="images/roles.jpg"><figcaption>Roles and the pages each one can use.</figcaption></figure>
+<p><b class="ui">Administration → Roles.</b> A role decides which screens its users can open. Each role is shown as a card, with its permissions in plain words grouped as Sales, Purchases, Accounting, People &amp; payroll and Administration, and the number of users who have it. The app comes with <b>Admin</b> (everything, built in and locked), <b>Accountant</b> and <b>Viewer</b> (dashboard, ledger and reports only).</p>
+<p><b class="ui">+ New Role</b> creates your own, for example a payroll clerk who can see employees and payroll only. <b>Duplicate</b> starts a new role from an existing one. In the editor each permission has a short explanation, and each group can be ticked all at once.</p>
+<figure><img src="images/roles.jpg"><figcaption>Roles in plain words, with the number of users in each.</figcaption></figure>
 <h3>Activity log</h3>
-<p><b class="ui">Admin → Activity Log</b> records who did what and when: sign-ins, records created, posted and voided, setting changes and more. Filter it by user. The log cannot be edited.</p>
-<figure><img src="images/activity-log.jpg"><figcaption>The activity log.</figcaption></figure>
+<p><b class="ui">Administration → Activity Log</b> records every sign-in and every change, with who made it and when. Narrow it by <b>user</b>, by <b>kind</b> (sign-ins, users &amp; roles, settings &amp; taxes, documents &amp; records), by <b>date</b>, or by searching for a word. <b class="ui">Export to Excel</b> saves all matching rows. The log cannot be edited.</p>
+<figure><img src="images/activity-log.jpg"><figcaption>The activity log filtered to sign-ins.</figcaption></figure>
 <h3>Settings</h3>
-<p><b class="ui">Admin → Settings</b> has the company details, logo, country, currency and financial year; the invoice signatory; and <b>Lock the books</b>.</p>
-<figure><img src="images/settings.jpg"><figcaption>Settings: company details.</figcaption></figure>
+<p><b class="ui">Administration → Settings</b> has a tab for each area, and each tab saves on its own.</p>
+<table class="grid">
+  <tr><th style="width:28%">Tab</th><th>What it holds</th></tr>
+  <tr><td>Company</td><td>Company name, address, phone, email, website, tax number and logo</td></tr>
+  <tr><td>Region &amp; currency</td><td>Country, currency and how amounts are written in words, number and date format, financial year</td></tr>
+  <tr><td>Invoices &amp; documents</td><td>Payment instructions and footer printed on invoices and statements; the invoice signatory</td></tr>
+  <tr><td>Closing</td><td>Lock the books (chapter 10)</td></tr>
+  <tr><td>Backup &amp; restore</td><td>Backup password, back up now, daily backup and restore (chapter 15)</td></tr>
+</table>
+<p>Links to <b>Taxes</b> and the <b>Setup wizard</b> sit under the tabs.</p>
+<figure><img src="images/settings.jpg"><figcaption>Settings → Invoices &amp; documents. The notice in the corner confirms the save.</figcaption></figure>
 
 <!-- ───────────────────────── 15 ───────────────────────── -->
 <h2><span class="num">15</span>Backup and restore</h2>
-<p class="lead"><b class="ui">File → Backup and restore…</b> Keep copies of your data somewhere other than this PC, such as a USB drive, another PC or a cloud folder.</p>
+<p class="lead"><b class="ui">File → Backup and restore…</b>, or <b class="ui">Settings → Backup &amp; restore</b>. Keep copies of your data somewhere other than this PC, such as a USB drive, another PC or a cloud folder.</p>
 <ul>
   <li><b>Backup password:</b> set it once. Every backup is <b>encrypted</b> with it, so a lost USB drive does not expose your accounts. Keep the password safe: a backup cannot be opened without it.</li>
   <li><b>Making a backup</b> writes one file (<code>cenango-accounting-….qbak</code>). It holds the whole database plus every employee photo, document and payslip. The app checks each backup after writing it.</li>
   <li><b>Daily backup:</b> while the app is running it makes one backup a day into the folder you choose, and keeps the newest copies (14 by default).</li>
   <li><b>Restore:</b> choose a backup file and click <b class="ui">Check backup</b>, which confirms it is complete and readable. Then type <b>RESTORE</b> and click <b class="ui">Restore at next start</b>. The current data is kept in a <i>pre-restore</i> folder, just in case.</li>
 </ul>
-<figure><img src="images/backup.jpg"><figcaption>Daily backup settings, and a backup checked before restoring.</figcaption></figure>
+<figure><img src="images/backup.jpg"><figcaption>Settings → Backup &amp; restore: a backup written and verified, the daily backup settings, and a backup checked before restoring.</figcaption></figure>
 
 <!-- ───────────────────────── 16 ───────────────────────── -->
 <h2><span class="num">16</span>Quick reference</h2>
@@ -399,7 +449,8 @@
   <tr><td>Month-end</td><td>Run payroll; post, pay and remit; file the slips</td><td>People → Payroll</td></tr>
   <tr><td>Month-end</td><td>Reconcile each bank account to its statement</td><td>Accounting → Bank Reconciliation</td></tr>
   <tr><td>Month-end</td><td>Review P&amp;L, Balance Sheet and Cash Flow; run the tax return</td><td>Reports</td></tr>
-  <tr><td>After closing</td><td>Lock the month</td><td>Admin → Settings</td></tr>
+  <tr><td>Month-end</td><td>Revalue foreign-currency bank accounts</td><td>Master Data → Accounts</td></tr>
+  <tr><td>After closing</td><td>Lock the month</td><td>Settings → Closing</td></tr>
   <tr><td>Always</td><td>Keep the daily backup on; copy backups off this PC</td><td>File → Backup and restore…</td></tr>
 </table>
 
@@ -409,7 +460,7 @@
 <h3>Not covered yet</h3>
 <ul>
   <li>Payroll for countries other than Sri Lanka. This is being built next.</li>
-  <li>Bank accounts held in a foreign currency, and revaluing unpaid foreign invoices at month-end.</li>
+  <li>Revaluing unpaid foreign-currency invoices and bills at month-end (foreign-currency bank accounts can already be revalued).</li>
   <li>Currencies with three decimal places (for example the Kuwaiti or Bahraini dinar) as the company's own currency.</li>
   <li>One company per installation: a second company needs its own data folder.</li>
 </ul>

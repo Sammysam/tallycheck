@@ -1054,6 +1054,7 @@ try {
     await pickIn('select[aria-label="Account for line 1"]', '6000');
     await pickIn('select[aria-label="Payable account"]', '2400');
     await fillDates('2026-10-06', true);
+    await shot('37c-bill-payable');
     await clickText('Save Bill');
     await waitFor(`document.body.innerText.includes('BILL-000002')`, 'bill saved');
     const bill = (await api('GET', '/api/bills')).body.data.find((b) => b.payableAccountId);
@@ -1091,12 +1092,20 @@ try {
     await pickIn('select[aria-label="Account for line 2"]', '1000');
     await setv('input[aria-label="Credit for line 2"]', '30000');
     await waitFor(`document.querySelector('[data-testid=je-difference]').innerText.includes('Balanced')`, 'USD entry balanced');
+    await shot('37b-journal-entry');
     await clickText('Post Entry');
     await waitFor(`document.body.innerText.includes('Transfer to the USD account')`, 'USD entry listed');
     const usd = (await api('GET', '/api/accounts')).body.find((a) => a.code === '1020');
     await go('/ledger/account/' + usd.id);
     await waitFor(`document.querySelector('[data-testid=foreign-closing]')?.innerText.includes('100.00')`, 'USD balance');
     await shot('39-usd-account');
+    // The month-end revaluation dialog (closed again without posting).
+    await go('/accounts');
+    await rowAction('USD Bank', 'Revalue');
+    await waitFor(`!!document.querySelector('input[aria-label="Revaluation rate"]')`, 'revalue dialog');
+    await setv('input[aria-label="Revaluation rate"]', '305');
+    await shot('39b-revalue');
+    await clickText('Close');
   });
 
   await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {
@@ -1137,6 +1146,7 @@ try {
       const o = [...sel.options].find((x) => x.textContent === 'Accountant');
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, o.value);
       sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await shot('41b-change-role');
     await clickText('Save change');
     await waitFor(`!!document.querySelector('[data-testid=toast]') && [...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('clerk.one') && tr.innerText.includes('Accountant'))`, 'role changed');
     await shot('41-users');
