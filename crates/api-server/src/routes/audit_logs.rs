@@ -23,10 +23,19 @@ pub async fn list(
     let query = validate::query_map(pairs);
     let (page, limit) = validate::pagination(&query)?;
     // `@Query('userId') userId || undefined`: an empty value means no filter.
-    let user_id = match query.get("userId") {
+    let text = |key: &str| match query.get(key) {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         Some(Value::Array(items)) => items.first().and_then(Value::as_str).map(str::to_string),
         _ => None,
     };
-    Ok(Json(audit::list(&state.db, page, limit, user_id.as_deref()).await?))
+    // D36: dates must be YYYY-MM-DD; anything else is ignored rather than mis-filtering.
+    let date = |key: &str| text(key).filter(|d| d.len() == 10 && d.as_bytes()[4] == b'-' && d.as_bytes()[7] == b'-');
+    let filter = audit::Filter {
+        user_id: text("userId"),
+        date_from: date("dateFrom"),
+        date_to: date("dateTo"),
+        search: text("search"),
+        kind: text("kind"),
+    };
+    Ok(Json(audit::list(&state.db, page, limit, &filter).await?))
 }

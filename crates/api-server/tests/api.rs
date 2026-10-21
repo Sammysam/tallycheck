@@ -2437,3 +2437,81 @@ async fn payable_accounts_account_edits_and_a_usd_bank_account() -> TestResult {
     assert_eq!(act2.body["foreignClosing"], json!(150));
     Ok(())
 }
+
+#[tokio::test]
+async fn admins_cannot_lock_themselves_out_and_the_log_filters() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let _clerk = app.signed_in("clerk", "Viewer").await?;
+    let users = app.call(Method::GET, "/api/users", Some(&admin), None).await?;
+    let id_of = |name: &str| -> String {
+        users
+            .body
+            .as_array()
+            .and_then(|a| a.iter().find(|u| u["username"] == name))
+            .and_then(|u| u["id"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (me, clerk) = (id_of("admin"), id_of("clerk"));
+    let roles = app.call(Method::GET, "/api/roles", Some(&admin), None).await?;
+    let role = |name: &str| -> String {
+        roles
+            .body
+            .as_array()
+            .and_then(|a| a.iter().find(|r| r["name"] == name))
+            .and_then(|r| r["id"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    // Nobody deactivates themselves or drops their own Admin role.
+    let off =
+        app.call(Method::PATCH, &format!("/api/users/{me}"), Some(&admin), Some(json!({"isActive": false}))).await?;
+    assert_eq!(off.status, StatusCode::BAD_REQUEST, "{}", off.body);
+    let demote = app
+        .call(Method::PATCH, &format!("/api/users/{me}"), Some(&admin), Some(json!({"roleId": role("Viewer")})))
+        .await?;
+    assert_eq!(demote.status, StatusCode::BAD_REQUEST, "{}", demote.body);
+    // Another user can be changed freely.
+    let clerk_off =
+        app.call(Method::PATCH, &format!("/api/users/{clerk}"), Some(&admin), Some(json!({"isActive": false}))).await?;
+    assert_eq!(clerk_off.status, StatusCode::OK, "{}", clerk_off.body);
+    // With a second administrator, the first one can be demoted by that second one.
+    app.call(
+        Method::PATCH,
+        &format!("/api/users/{clerk}"),
+        Some(&admin),
+        Some(json!({"isActive": true, "roleId": role("Admin")})),
+    )
+    .await?;
+    let ok = app
+        .call(Method::PATCH, &format!("/api/users/{me}"), Some(&admin), Some(json!({"roleId": role("Viewer")})))
+        .await?;
+    assert_eq!(ok.status, StatusCode::BAD_REQUEST, "still not by themselves");
+
+    // Last sign-in comes from the log.
+    let last = app.call(Method::GET, "/api/users/last-sign-in", Some(&admin), None).await?;
+    assert!(last.body.as_array().is_some_and(|a| a.iter().any(|x| x["userId"] == me.as_str())), "{}", last.body);
+
+    // The log narrows by kind and by text.
+    let signins = app.call(Method::GET, "/api/audit-logs?kind=signin&limit=100", Some(&admin), None).await?;
+    let rows = signins.body["data"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !rows.is_empty()
+            && rows
+                .iter()
+                .all(|r| r["action"].as_str().is_some_and(|a| a.contains("Logged in") || a.contains("login"))),
+        "{}",
+        signins.body
+    );
+    let users_kind = app.call(Method::GET, "/api/audit-logs?kind=users&limit=100", Some(&admin), None).await?;
+    assert!(users_kind.body["data"]
+        .as_array()
+        .is_some_and(|a| a.iter().all(|r| !r["action"].as_str().unwrap_or("").contains("Logged in"))));
+    let search = app.call(Method::GET, "/api/audit-logs?search=CLERK&limit=100", Some(&admin), None).await?;
+    assert!(search.body["total"].as_i64().unwrap_or(0) >= 1, "{}", search.body);
+    let future = app.call(Method::GET, "/api/audit-logs?dateFrom=2999-01-01", Some(&admin), None).await?;
+    assert_eq!(future.body["total"], json!(0));
+    Ok(())
+}

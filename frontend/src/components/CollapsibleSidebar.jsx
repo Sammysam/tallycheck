@@ -75,12 +75,12 @@ export const navigation = [
     label: 'Administration',
     icon: ShieldCheck,
     items: [
+      { label: 'Admin Centre', to: '/admin', permission: 'users' },
       { label: 'Users', to: '/users', permission: 'users' },
       { label: 'Roles', to: '/roles', permission: 'users' },
       { label: 'Activity Log', to: '/audit', permission: 'audit' },
       { label: 'Taxes', to: '/taxes', permission: 'settings' },
       { label: 'Settings', to: '/settings', permission: 'settings' },
-      { label: 'Company Setup', to: '/company-setup', permission: 'settings' },
     ],
   },
 ];

@@ -181,6 +181,7 @@ pub async fn cancel(State(s): State<AppState>, _a: LocalAdmin) -> AppResult<Stat
 }
 
 /// The backup and restore page (plain HTML; it uses the token the app already holds).
-pub async fn page() -> axum::response::Html<&'static str> {
-    axum::response::Html(include_str!("../../assets/backup.html"))
+/// D36: backup and restore now live in Settings → Backup & restore; the old address forwards.
+pub async fn page() -> axum::response::Redirect {
+    axum::response::Redirect::to("/settings?tab=backup")
 }

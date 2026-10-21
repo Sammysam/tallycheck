@@ -35,6 +35,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/auth/2fa/verify", post(auth::verify_2fa))
         .route("/auth/me", get(auth::me))
         .route("/users", get(users::list).post(users::create))
+        .route("/users/last-sign-in", get(users::last_sign_ins))
         .route("/users/{id}", patch(users::update))
         .route("/users/{id}/reset-password", post(users::reset_password))
         .route("/users/{id}/reset-2fa", post(users::reset_two_factor))

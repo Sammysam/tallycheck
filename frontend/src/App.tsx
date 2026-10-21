@@ -35,6 +35,7 @@ import Taxes from './pages/Taxes';
 import ArAging from './pages/reports/ArAging';
 import ApAging from './pages/reports/ApAging';
 import Users from './pages/Users';
+import AdminCentre from './pages/AdminCentre';
 import Roles from './pages/Roles';
 import AuditLog from './pages/AuditLog';
 import Settings from './pages/Settings';
@@ -99,6 +100,9 @@ export default function App() {
                   } />
                   <Route path="/reports/ar-aging"         element={<ArAging />} />
                   <Route path="/reports/ap-aging"         element={<ApAging />} />
+                  <Route path="/admin" element={
+                    <ProtectedRoute permission="users"><AdminCentre /></ProtectedRoute>
+                  } />
                   <Route path="/users" element={
                     <ProtectedRoute permission="users"><Users /></ProtectedRoute>
                   } />

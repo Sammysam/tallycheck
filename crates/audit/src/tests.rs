@@ -52,12 +52,12 @@ async fn list_is_newest_first_paginated_and_filterable() -> AppResult<()> {
         let (u, n) = if i % 2 == 0 { ("u1", "zed") } else { ("u2", "amy") };
         record(&db, entry(u, n, &format!("a{i}"))).await;
     }
-    let p1 = list(&db, 1, 20, None).await?;
+    let p1 = list(&db, 1, 20, &Filter::default()).await?;
     assert_eq!((p1.total, p1.page, p1.limit, p1.total_pages, p1.data.len()), (25, 1, 20, 2, 20));
     assert_eq!(p1.data[0].action, "a24");
-    let p2 = list(&db, 2, 20, None).await?;
+    let p2 = list(&db, 2, 20, &Filter::default()).await?;
     assert_eq!(p2.data.len(), 5);
-    let only_u2 = list(&db, 1, 100, Some("u2")).await?;
+    let only_u2 = list(&db, 1, 100, &Filter { user_id: Some("u2".into()), ..Default::default() }).await?;
     assert_eq!(only_u2.total, 12);
     assert!(only_u2.data.iter().all(|e| e.user_id.as_deref() == Some("u2")));
 

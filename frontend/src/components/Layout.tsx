@@ -28,6 +28,7 @@ import { hasCommand, isUnsaved, runCommand, setUnsaved, subscribeCommands } from
 import { exportScreen } from '../lib/exportCsv';
 import { companyIsSetUp, region, SETUP_LATER, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
 import api from '../api/client';
+import ToastHost from './ToastHost';
 
 declare const __APP_VERSION__: string;
 
@@ -249,7 +250,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     { label: 'Export to Excel (CSV)…', shortcut: 'Ctrl+E', onSelect: exportTables },
     'separator',
     ...(isAdmin
-      ? [{ label: 'Backup and restore…', onSelect: () => window.location.assign('/system/backup') }, 'separator' as const]
+      ? [{ label: 'Backup and restore…', onSelect: go('/settings?tab=backup') }, 'separator' as const]
       : []),
     ...(user?.twoFactorEnabled === false ? [{ label: 'Turn on two-factor sign-in…', onSelect: go('/2fa/setup') }] : []),
     { label: 'Sign out', onSelect: signOut },
@@ -410,6 +411,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           <p className="text-sm text-gray-700">This form has changes that are not saved. Close it anyway?</p>
         </Dialog>
       )}
+      <ToastHost />
     </div>
   );
 }
