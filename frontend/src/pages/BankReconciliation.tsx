@@ -5,7 +5,7 @@ import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
-import { money } from '../lib/money';
+import { moneyIn } from '../lib/money';
 import { fmtDate } from '../lib/region';
 
 /** D22: match a cash or bank account's ledger lines to a bank statement. */
@@ -32,7 +32,9 @@ interface Line {
 }
 interface Workspace extends Rec { lines: Line[]; clearedBalance: number; difference: number }
 
-const fmt = (v: number) => money(Number(v));
+/** D34: a foreign-currency account is reconciled in its own currency; set while rendering. */
+let shownCurrency: string | null = null;
+const fmt = (v: number) => moneyIn(Number(v), shownCurrency);
 const cents = (v: number) => Math.round(v * 100);
 const todayIso = () => {
   const d = new Date();
@@ -198,6 +200,7 @@ export default function BankReconciliation() {
   const readOnly = ws?.status === 'COMPLETED';
   const latestCompleted = history.find((h) => h.status === 'COMPLETED');
   const account = accounts.find((a) => a.id === accountId);
+  shownCurrency = (account as { currency?: string | null } | undefined)?.currency ?? null;
 
   return (
     <div>
@@ -212,7 +215,7 @@ export default function BankReconciliation() {
         <label className="text-xs font-medium text-gray-600">
           Account
           <select className="mt-1 w-72" value={accountId} disabled={!!ws && !readOnly} onChange={(e) => { setWs(null); setError(''); setAccountId(e.target.value); }}>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}{(a as { currency?: string | null }).currency ? ` (${(a as { currency?: string | null }).currency})` : ''}</option>)}
           </select>
         </label>
       </div>

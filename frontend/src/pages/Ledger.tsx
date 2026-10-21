@@ -1,28 +1,28 @@
-import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
-import Dialog from '../components/desktop/Dialog';
 import { money } from '../lib/money';
 import { useCommand, setUnsaved } from '../lib/commands';
-import { fmtDate, todayIso } from '../lib/region';
+import { fmtDate, region, todayIso } from '../lib/region';
 
-interface Line { id: string; debit: number | string; credit: number | string; description?: string | null; account?: { code: string; name: string } }
 interface Entry {
   id: string; entryNumber: string; date: string; description: string; reference?: string | null;
-  status: string; sourceType?: string | null; reversalOfId?: string | null; lines: Line[];
+  status: string; sourceType?: string | null; reversalOfId?: string | null;
 }
-interface Account { id: string; code: string; name: string }
-interface FormLine { _key: number; accountId: string; debit: string; credit: string; description: string }
+interface Account { id: string; code: string; name: string; currency?: string | null }
+/** On a foreign-currency account (D34) debit / credit are in that currency and `rate` converts. */
+interface FormLine { _key: number; accountId: string; debit: string; credit: string; description: string; rate: string }
 
 let nextKey = 1;
-const blankLine = (): FormLine => ({ _key: nextKey++, accountId: '', debit: '', credit: '', description: '' });
+const blankLine = (): FormLine => ({ _key: nextKey++, accountId: '', debit: '', credit: '', description: '', rate: '' });
 /** Amounts in cents, so the balance check never meets floating-point noise. */
 const cents = (v: string) => Math.round((Number(v) || 0) * 100);
 
 export default function Ledger() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<Entry[]>([]);
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [date, setDate] = useState(todayIso());
@@ -31,8 +31,6 @@ export default function Ledger() {
   const [lines, setLines] = useState<FormLine[]>([blankLine(), blankLine()]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [reversing, setReversing] = useState<Entry | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const load = () => api.get('/ledger/entries').then((r) => setRows(r.data));
   useEffect(() => {
@@ -65,15 +63,23 @@ export default function Ledger() {
     }));
   };
 
-  const debits = lines.reduce((s, l) => s + cents(l.debit), 0);
-  const credits = lines.reduce((s, l) => s + cents(l.credit), 0);
+  const currencyOf = (l: FormLine) => accounts.find((a) => a.id === l.accountId)?.currency ?? null;
+  /** The line's home-currency cents: as typed, or the foreign amount at its rate. */
+  const home = (l: FormLine, v: string) => (currencyOf(l) ? Math.round(cents(v) * (Number(l.rate) || 0)) : cents(v));
+  const debits = lines.reduce((s, l) => s + home(l, l.debit), 0);
+  const credits = lines.reduce((s, l) => s + home(l, l.credit), 0);
   const difference = debits - credits;
   const used = lines.filter((l) => l.accountId && (cents(l.debit) || cents(l.credit)));
+  const missingRate = used.some((l) => currencyOf(l) && !(Number(l.rate) > 0));
   const balanced = difference === 0 && debits > 0 && used.length >= 2;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    if (missingRate) {
+      setError('Enter the exchange rate on each foreign-currency line.');
+      return;
+    }
     if (!balanced) {
       setError('Debits and credits must be equal, with at least two lines, before the entry can be posted.');
       return;
@@ -86,9 +92,10 @@ export default function Ledger() {
         reference: reference.trim() || undefined,
         lines: used.map((l) => ({
           accountId: l.accountId,
-          debit: cents(l.debit) / 100,
-          credit: cents(l.credit) / 100,
+          debit: home(l, l.debit) / 100,
+          credit: home(l, l.credit) / 100,
           description: l.description.trim() || undefined,
+          foreignAmount: currencyOf(l) ? cents(l.debit || l.credit) / 100 : undefined,
         })),
       });
       close();
@@ -100,23 +107,7 @@ export default function Ledger() {
     }
   };
 
-  const confirmReverse = async () => {
-    if (!reversing) return;
-    setBusy(true);
-    try {
-      await api.post(`/ledger/entries/${reversing.id}/reverse`);
-      setReversing(null);
-      await load();
-    } catch (err) {
-      setError(errMsg(err, 'Could not reverse the entry'));
-      setReversing(null);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const fmt = (v: number) => money(Number(v));
-  const reversedIds = new Set(rows.map((r) => r.reversalOfId).filter(Boolean));
 
   return (
     <div>
@@ -147,17 +138,27 @@ export default function Ledger() {
                   <td className="pr-2 py-1">
                     <select value={l.accountId} onChange={(e) => setLine(i, { accountId: e.target.value })} aria-label={`Account for line ${i + 1}`}>
                       <option value="">Choose an account…</option>
-                      {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                      {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}{a.currency ? ` (${a.currency})` : ''}</option>)}
                     </select>
                   </td>
                   <td className="pr-2 py-1">
                     <input placeholder="optional" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} aria-label={`Note for line ${i + 1}`} />
+                    {currencyOf(l) && (
+                      <div className="flex items-center gap-1 mt-1 text-xs text-gray-600">
+                        Amounts in {currencyOf(l)} at
+                        <input type="number" min="0.00000001" step="any" className="!w-24" placeholder="rate" value={l.rate}
+                          onChange={(e) => setLine(i, { rate: e.target.value })} aria-label={`Rate for line ${i + 1}`} />
+                        = {money(home(l, l.debit || l.credit) / 100)}
+                      </div>
+                    )}
                   </td>
                   <td className="pr-2 py-1">
-                    <input type="number" min="0" step="0.01" className="text-right" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value })} aria-label={`Debit for line ${i + 1}`} />
+                    <input type="number" min="0" step="0.01" className="text-right" value={l.debit} onChange={(e) => setLine(i, { debit: e.target.value })} aria-label={`Debit for line ${i + 1}`}
+                      placeholder={currencyOf(l) ?? region().currency} />
                   </td>
                   <td className="pr-2 py-1">
-                    <input type="number" min="0" step="0.01" className="text-right" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value })} aria-label={`Credit for line ${i + 1}`} />
+                    <input type="number" min="0" step="0.01" className="text-right" value={l.credit} onChange={(e) => setLine(i, { credit: e.target.value })} aria-label={`Credit for line ${i + 1}`}
+                      placeholder={currencyOf(l) ?? region().currency} />
                   </td>
                   <td className="py-1 text-center">
                     {lines.length > 2 && (
@@ -204,70 +205,19 @@ export default function Ledger() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {rows.map((entry) => (
-              <Fragment key={entry.id}>
-                <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}>
-                  <td className="px-4 py-3 font-mono text-xs text-blue-600">{entry.entryNumber}</td>
-                  <td className="px-4 py-3 text-gray-700">{fmtDate(entry.date)}</td>
-                  <td className="px-4 py-3 text-gray-700">{entry.description}</td>
-                  <td className="px-4 py-3 text-gray-500">{entry.reference ?? ''}</td>
-                  <td className="px-4 py-3"><StatusBadge status={entry.status} /></td>
-                </tr>
-                {expanded === entry.id && (
-                  <tr>
-                    <td colSpan={5} className="px-8 py-3 bg-gray-50">
-                      <table className="min-w-full text-xs">
-                        <thead>
-                          <tr className="text-gray-500">
-                            <th className="text-left pb-1">Account</th>
-                            <th className="text-left pb-1">Note</th>
-                            <th className="text-right pb-1">Debit</th>
-                            <th className="text-right pb-1">Credit</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {entry.lines?.map((line) => (
-                            <tr key={line.id}>
-                              <td className="py-0.5">{line.account?.code} {line.account?.name}</td>
-                              <td className="py-0.5 text-gray-500">{line.description ?? ''}</td>
-                              <td className="text-right py-0.5">{Number(line.debit) > 0 ? fmt(Number(line.debit)) : ''}</td>
-                              <td className="text-right py-0.5">{Number(line.credit) > 0 ? fmt(Number(line.credit)) : ''}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {/* Entries a document posted are undone from that document (D18). */}
-                      {!entry.sourceType && !entry.reversalOfId && !reversedIds.has(entry.id) && entry.status === 'POSTED' && (
-                        <button type="button" className="btn btn-secondary mt-2 text-xs" onClick={(e) => { e.stopPropagation(); setReversing(entry); }}>
-                          Reverse this entry
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
+              <tr key={entry.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/ledger/entries/${entry.id}`)} title="Open the transaction">
+                <td className="px-4 py-3 font-mono text-xs text-blue-600">{entry.entryNumber}</td>
+                <td className="px-4 py-3 text-gray-700">{fmtDate(entry.date)}</td>
+                <td className="px-4 py-3 text-gray-700">{entry.description}</td>
+                <td className="px-4 py-3 text-gray-500">{entry.reference ?? ''}</td>
+                <td className="px-4 py-3"><StatusBadge status={entry.status} /></td>
+              </tr>
             ))}
           </tbody>
         </table>
         {rows.length === 0 && <p className="text-gray-400 text-sm py-8 text-center">No journal entries yet.</p>}
       </div>
 
-      {reversing && (
-        <Dialog
-          title="Reverse journal entry"
-          onClose={() => !busy && setReversing(null)}
-          buttons={
-            <>
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={confirmReverse}>{busy ? 'Reversing…' : 'Reverse entry'}</button>
-              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setReversing(null)}>Cancel</button>
-            </>
-          }
-        >
-          <p className="text-sm text-gray-800">
-            Reverse <strong>{reversing.entryNumber}</strong> ({reversing.description})?
-          </p>
-          <p className="mt-2 text-sm text-gray-600">A new entry with the opposite amounts is posted. The original stays in the ledger.</p>
-        </Dialog>
-      )}
     </div>
   );
 }

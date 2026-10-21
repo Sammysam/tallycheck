@@ -250,7 +250,8 @@ pub(crate) fn bill_rules(v: &mut Validator) {
         .field("notes", true, &[Rule::IsString])
         .field("pricesIncludeTax", true, &[Rule::IsBoolean])
         .field("currency", true, &[Rule::IsString, Rule::MaxLength(3)])
-        .field("exchangeRate", true, &[Rule::IsFiniteNumber]);
+        .field("exchangeRate", true, &[Rule::IsFiniteNumber])
+        .field("payableAccountId", true, &[Rule::IsUuid]);
     nested_array(v, "lines", false, 1, bill_line_rules);
 }
 
@@ -283,7 +284,18 @@ pub fn create_bill(body: Map<String, Value>) -> Result<operations::bills::Create
         prices_include_tax: m.get("pricesIncludeTax").and_then(Value::as_bool).unwrap_or(false),
         currency: currency(&m),
         exchange_rate: exchange_rate(&m)?,
+        payable_account_id: opt_string(&m, "payableAccountId"),
     })
+}
+
+/// D34: `{ date, exchangeRate }` for revaluing a foreign-currency account.
+pub fn revaluation(body: Map<String, Value>) -> Result<(String, i64), AppError> {
+    let mut v = Validator::new(body);
+    v.field("date", false, &[Rule::IsDateFormat]).field("exchangeRate", false, &[Rule::IsFiniteNumber]);
+    let m = v.finish()?;
+    let rate = exchange_rate(&m)?
+        .ok_or_else(|| AppError::validation(vec!["exchangeRate must be a positive number".into()]))?;
+    Ok((opt_string(&m, "date").unwrap_or_default(), rate))
 }
 
 // ─── Expenses ───────────────────────────────────────────────────────────────
@@ -328,7 +340,8 @@ pub(crate) fn payment_rules(v: &mut Validator) {
         .field("notes", true, &[Rule::IsString])
         .field("withholdingTaxCodeId", true, &[Rule::IsUuid])
         .field("withholdingAmount", true, &[Rule::IsMoneyNumber, Rule::MinZero])
-        .field("exchangeRate", true, &[Rule::IsFiniteNumber]);
+        .field("exchangeRate", true, &[Rule::IsFiniteNumber])
+        .field("payableAccountId", true, &[Rule::IsUuid]);
 }
 
 pub fn create_payment(body: Map<String, Value>) -> Result<operations::payments::CreatePayment, AppError> {
@@ -349,6 +362,7 @@ pub fn create_payment(body: Map<String, Value>) -> Result<operations::payments::
         withholding_tax_code_id: opt_string(&m, "withholdingTaxCodeId"),
         withholding_amount: money(&m, "withholdingAmount").unwrap_or_default(),
         exchange_rate: exchange_rate(&m)?,
+        payable_account_id: opt_string(&m, "payableAccountId"),
     })
 }
 

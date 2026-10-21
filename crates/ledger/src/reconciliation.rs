@@ -218,7 +218,7 @@ pub async fn workspace(conn: &mut SqliteConnection, id: &str) -> AppResult<Works
     let rec = find(conn, id).await?;
     let rows = sqlx::query(
         r#"SELECT l."id" AS "lineId", e."id" AS "entryId", e."entryNumber", e."date", e."description", e."reference",
-                  e."status" AS "entryStatus", e."reversalOfId", l."debit", l."credit", rl."reconciliationId"
+                  e."status" AS "entryStatus", e."reversalOfId", l."debit", l."credit", l."foreignAmount", rl."reconciliationId"
            FROM "journal_lines" l
            JOIN "journal_entries" e ON e."id" = l."journalEntryId"
            LEFT JOIN "reconciled_lines" rl ON rl."journalLineId" = l."id"
@@ -233,6 +233,9 @@ pub async fn workspace(conn: &mut SqliteConnection, id: &str) -> AppResult<Works
     .fetch_all(&mut *conn)
     .await?;
 
+    // D34: a foreign-currency bank account is reconciled in its own currency: the statement
+    // balance is in that currency and each line counts at its foreign amount.
+    let foreign = crate::accounts::find_one(&mut *conn, &rec.account_id).await?.currency.is_some();
     struct Raw {
         line: RecLine,
         reversed: bool,
@@ -243,6 +246,16 @@ pub async fn workspace(conn: &mut SqliteConnection, id: &str) -> AppResult<Works
         .map(|r| -> AppResult<Raw> {
             let cleared: Option<String> = r.try_get("reconciliationId")?;
             let status: String = r.try_get("entryStatus")?;
+            let (debit, credit) = if foreign {
+                let f = Money::from_cents(r.try_get::<Option<i64>, _>("foreignAmount")?.unwrap_or(0));
+                if f >= Money::ZERO {
+                    (f, Money::ZERO)
+                } else {
+                    (Money::ZERO, Money::ZERO.checked_sub(f).ok_or_else(too_large)?)
+                }
+            } else {
+                (Money::from_cents(r.try_get("debit")?), Money::from_cents(r.try_get("credit")?))
+            };
             Ok(Raw {
                 line: RecLine {
                     line_id: r.try_get("lineId")?,
@@ -251,8 +264,8 @@ pub async fn workspace(conn: &mut SqliteConnection, id: &str) -> AppResult<Works
                     date: r.try_get("date")?,
                     description: r.try_get("description")?,
                     reference: r.try_get("reference")?,
-                    debit: Money::from_cents(r.try_get("debit")?),
-                    credit: Money::from_cents(r.try_get("credit")?),
+                    debit,
+                    credit,
                     cleared: cleared.is_some(),
                 },
                 reversed: status == "REVERSED",

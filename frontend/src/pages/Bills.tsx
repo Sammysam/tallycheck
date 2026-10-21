@@ -9,6 +9,7 @@ import { money, moneyIn } from '../lib/money';
 import CurrencyPicker from '../components/CurrencyPicker';
 import { region } from '../lib/region';
 import { lineCodes, summarize, useTaxCodes } from '../lib/taxes';
+import TxnLink from '../components/TxnLink';
 
 interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; totalAmount: number; status: string; currency?: string | null }
 
@@ -28,7 +29,7 @@ export default function Bills() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', lines: [emptyLine()] });
+  const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
   const taxCodes = useTaxCodes();
   // D26: what the bill will total, worked out as the server will.
   const summary = summarize(
@@ -47,8 +48,13 @@ export default function Bills() {
   useEffect(() => { load(); }, [page]);
   useEffect(() => {
     api.get('/vendors').then((r) => setVendors(r.data));
-    api.get('/accounts').then((r) => setAccounts(r.data.filter((a: any) => a.type === 'EXPENSE')));
+    // D33: a bill line may be an expense, an asset bought on credit or a liability; the bill is
+    // owed on a payable (liability) account, Accounts Payable by default.
+    api.get('/accounts').then((r) => setAccounts(r.data.filter((a: any) => !a.currency)));
   }, []);
+
+  const LINE_GROUPS: [string, string][] = [['EXPENSE', 'Expenses'], ['ASSET', 'Assets'], ['LIABILITY', 'Liabilities']];
+  const payables = accounts.filter((a) => a.type === 'LIABILITY');
 
   const setLine = (i: number, field: string, val: any) => {
     const lines = form.lines.map((l, idx) => idx === i ? { ...l, [field]: val } : l);
@@ -65,10 +71,11 @@ export default function Bills() {
         ...doc,
         currency: currency || undefined,
         exchangeRate: currency ? Number(exchangeRate) : undefined,
+        payableAccountId: doc.payableAccountId || undefined,
         lines: lines.map(({ _key, taxCodeId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined })),
       });
       setShowForm(false);
-      setForm({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', lines: [emptyLine()] });
+      setForm({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to save bill');
@@ -116,9 +123,13 @@ export default function Bills() {
                   <input required placeholder="Item description" value={line.description} onChange={(e) => setLine(i, 'description', e.target.value)} />
                   <input required type="number" min="0.001" step="any" value={line.quantity} onChange={(e) => setLine(i, 'quantity', Number(e.target.value))} />
                   <input required type="number" min="0" step="0.01" value={line.unitPrice || ''} onChange={(e) => setLine(i, 'unitPrice', Number(e.target.value))} />
-                  <select required value={line.accountId} onChange={(e) => setLine(i, 'accountId', e.target.value)}>
+                  <select required value={line.accountId} onChange={(e) => setLine(i, 'accountId', e.target.value)} aria-label={`Account for line ${i + 1}`}>
                     <option value="">Account</option>
-                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                    {LINE_GROUPS.map(([type, label]) => (
+                      <optgroup key={type} label={label}>
+                        {accounts.filter((a) => a.type === type).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                   {taxCodes.length > 0 && (
                     <select value={line.taxCodeId} onChange={(e) => setLine(i, 'taxCodeId', e.target.value)} aria-label={`Tax for line ${i + 1}`}>
@@ -129,6 +140,14 @@ export default function Bills() {
                 </div>
               ))}
               <button type="button" className="btn-link" onClick={() => setForm({ ...form, lines: [...form.lines, emptyLine()] })}>+ Add line</button>
+              <label className="text-xs font-medium text-gray-600 block mt-3" style={{ maxWidth: 520 }}>
+                Owed on (payable account)
+                <select className="mt-1" value={form.payableAccountId} onChange={(e) => setForm({ ...form, payableAccountId: e.target.value })} aria-label="Payable account">
+                  <option value="">2000 – Accounts Payable (default)</option>
+                  {payables.filter((a) => a.code !== '2000').map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                </select>
+                <span className="text-gray-500 font-normal">Choose a separate payable, such as Telephone Payable, to see it on its own line in the Balance Sheet.</span>
+              </label>
             </div>
             <div className="flex items-center justify-between gap-4 text-sm">
               {taxCodes.length > 0 ? (
@@ -154,7 +173,7 @@ export default function Bills() {
       )}
 
       <Table data={rows} columns={[
-        { header: '#',       accessor: 'billNumber' },
+        { header: '#',       accessor: (r) => <TxnLink entryId={(r as { journalEntryId?: string }).journalEntryId}>{r.billNumber}</TxnLink> },
         { header: 'Vendor',  accessor: (r) => r.vendor?.name ?? '—' },
         { header: 'Date',    accessor: 'date' },
         { header: 'Amount',  accessor: (r) => moneyIn(Number(r.totalAmount), r.currency) },

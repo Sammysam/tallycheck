@@ -1,5 +1,6 @@
-//! Bills (reference `bills.service.ts`). Posting debits each line's expense account and credits
-//! 2000 Accounts Payable for the total; voiding reverses that entry.
+//! Bills (reference `bills.service.ts`). Posting debits each line's account and credits the
+//! bill's payable account — 2000 Accounts Payable unless another liability is chosen (D33) —
+//! for the total; voiding reverses that entry.
 //!
 //! Approved deviations D13–D15: bills accumulate partial AP payments in `amountPaid` (a column
 //! the reference lacked) and become PAID once nothing is outstanding; a DRAFT bill cannot be
@@ -58,6 +59,8 @@ pub struct Bill {
     pub base_amount_paid: Money,
     pub base_amount_credited: Money,
     pub journal_entry_id: Option<String>,
+    /// D33: the liability the bill is owed on (None = 2000 Accounts Payable).
+    pub payable_account_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub lines: Vec<BillLine>,
@@ -137,6 +140,7 @@ impl Bill {
         m.insert("exchangeRate".into(), crate::fx::rate_json(self.exchange_rate));
         m.insert("baseTotal".into(), money_str(self.base_total));
         m.insert("journalEntryId".into(), opt(&self.journal_entry_id));
+        m.insert("payableAccountId".into(), opt(&self.payable_account_id));
         m.insert("lines".into(), Value::Array(lines));
         m.insert("createdAt".into(), json!(self.created_at));
         m.insert("updatedAt".into(), json!(self.updated_at));
@@ -144,7 +148,7 @@ impl Bill {
     }
 }
 
-const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","amountCredited","taxAmount","pricesIncludeTax","currency","exchangeRate","baseTotal","baseAmountPaid","baseAmountCredited","journalEntryId","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","amountPaid","amountCredited","taxAmount","pricesIncludeTax","currency","exchangeRate","baseTotal","baseAmountPaid","baseAmountCredited","journalEntryId","payableAccountId","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<Bill> {
     Ok(Bill {
@@ -166,6 +170,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Bill> {
         base_amount_paid: Money::from_cents(r.try_get("baseAmountPaid")?),
         base_amount_credited: Money::from_cents(r.try_get("baseAmountCredited")?),
         journal_entry_id: r.try_get("journalEntryId")?,
+        payable_account_id: r.try_get("payableAccountId")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
         lines: Vec::new(),
@@ -256,6 +261,23 @@ pub struct CreateBill {
     /// D30: a foreign currency (None or the home currency = home) and its exchange rate.
     pub currency: Option<String>,
     pub exchange_rate: Option<i64>,
+    /// D33: the liability the bill is owed on (None = 2000 Accounts Payable).
+    pub payable_account_id: Option<String>,
+}
+
+/// D33: a bill's payable account must be a liability (2000 by default).
+pub async fn payable_account(conn: &mut SqliteConnection, id: Option<&str>) -> AppResult<ledger::Account> {
+    let account = match id {
+        Some(id) => ledger::accounts::find_one(conn, id).await?,
+        None => ledger::accounts::find_by_code(conn, "2000").await?,
+    };
+    if account.account_type != ledger::AccountType::Liability {
+        return Err(AppError::bad_request(format!(
+            "{} {} is not a liability — choose a payable account",
+            account.code, account.name
+        )));
+    }
+    Ok(account)
 }
 
 pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
@@ -263,6 +285,9 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     parties::find_one(&mut tx, PartyKind::Vendor, &dto.vendor_id).await?;
     for l in &dto.lines {
         require_account(&mut tx, &l.account_id).await?;
+    }
+    if let Some(p) = &dto.payable_account_id {
+        payable_account(&mut tx, Some(p)).await?;
     }
     let number = counters::next_formatted(&mut tx, "BILL", 6).await?;
     let id = new_id();
@@ -284,8 +309,8 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     }
     sqlx::query(
         r#"INSERT INTO "bills" ("id","billNumber","vendorId","date","dueDate","status","notes","totalAmount","createdAt","updatedAt",
-             "taxAmount","pricesIncludeTax","currency","exchangeRate")
-           VALUES (?1,?2,?3,?4,?5,'DRAFT',?6,?7,?8,?8,?9,?10,?11,?12)"#,
+             "taxAmount","pricesIncludeTax","currency","exchangeRate","payableAccountId")
+           VALUES (?1,?2,?3,?4,?5,'DRAFT',?6,?7,?8,?8,?9,?10,?11,?12,?13)"#,
     )
     .bind(&id)
     .bind(&number)
@@ -299,6 +324,7 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     .bind(dto.prices_include_tax)
     .bind(&currency)
     .bind(rate)
+    .bind(&dto.payable_account_id)
     .execute(&mut *tx)
     .await?;
     for (l, (amount, tax, parts)) in dto.lines.iter().zip(amounts) {
@@ -398,7 +424,7 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
     if bill.status != "DRAFT" {
         return Err(AppError::bad_request(format!("Bill is already {}", bill.status)));
     }
-    let ap = ledger::accounts::find_by_code(&mut tx, "2000").await?;
+    let ap = payable_account(&mut tx, bill.payable_account_id.as_deref()).await?;
     // In the home currency (D30). Each expense line without its tax; the tax goes to the code's
     // purchase account (D26), part by part (D27).
     let figures = booked(&mut tx, &bill).await?;

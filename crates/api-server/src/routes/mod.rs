@@ -47,6 +47,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/accounts", get(accounts::list).post(accounts::create))
         .route("/accounts/seed", post(accounts::seed))
         .route("/accounts/{id}", get(accounts::find_one).patch(accounts::update).delete(accounts::remove))
+        .route("/accounts/{id}/revalue", post(accounts::revalue))
         .route("/ledger/entries", get(ledger::list_entries).post(ledger::post_entry))
         .route("/ledger/entries/{id}", get(ledger::get_entry))
         .route("/ledger/entries/{id}/reverse", post(ledger::reverse))

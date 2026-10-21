@@ -20,7 +20,21 @@ pub async fn post_entry(
 ) -> AppResult<(StatusCode, Json<JournalEntry>)> {
     let dto = validate::create_journal_entry(body.object())?;
     let mut tx = state.db.begin().await?;
-    let entry = entries::post(
+    // D34: a line on a foreign-currency account carries its foreign amount, signed by side.
+    let foreign: Vec<Option<app_core::money::Money>> = dto
+        .lines
+        .iter()
+        .map(|l| {
+            l.foreign_amount.map(|f| {
+                if l.credit > app_core::money::Money::ZERO {
+                    app_core::money::Money::ZERO.checked_sub(f).unwrap_or(f)
+                } else {
+                    f
+                }
+            })
+        })
+        .collect();
+    let entry = entries::post_with_foreign(
         &mut tx,
         NewEntry {
             date: dto.date,
@@ -39,6 +53,7 @@ pub async fn post_entry(
                 })
                 .collect(),
         },
+        foreign,
     )
     .await?;
     tx.commit().await?;
@@ -71,7 +86,7 @@ fn document_name(source_type: &str) -> Option<&'static str> {
         "INVOICE" => "an invoice",
         "BILL" => "a bill",
         "EXPENSE" => "an expense",
-        "PAYMENT_AR" | "PAYMENT_AP" => "a payment",
+        "PAYMENT_AR" | "PAYMENT_AP" | "PAYMENT_LIABILITY" => "a payment",
         "CREDIT_NOTE" => "a credit note",
         "DEBIT_NOTE" => "a debit note",
         "PAYROLL" | "PAYROLL_PAYMENT" | "PAYROLL_REMITTANCE" => "a payroll run",

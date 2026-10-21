@@ -89,6 +89,88 @@ pub async fn exchange_account(tx: &mut Tx) -> AppResult<String> {
     Ok(accounts::find_by_code(tx, EXCHANGE_CODE).await?.id)
 }
 
+/// D34: the currency an account may be kept in. Blank or the home currency → None (home);
+/// otherwise three letters, and not a three-decimal currency.
+pub async fn account_currency(conn: &mut SqliteConnection, currency: Option<&str>) -> AppResult<Option<String>> {
+    let Some(c) = currency.map(|c| c.trim().to_ascii_uppercase()).filter(|c| !c.is_empty()) else { return Ok(None) };
+    if c.len() != 3 || !c.bytes().all(|b| b.is_ascii_uppercase()) {
+        return Err(AppError::bad_request("currency must be a three-letter code such as USD"));
+    }
+    if app_core::money::THREE_DECIMAL.contains(&c.as_str()) {
+        return Err(AppError::bad_request(format!("{c} has three decimal places, which the app cannot keep yet")));
+    }
+    Ok(if c == home_currency(conn).await? { None } else { Some(c) })
+}
+
+/// D34: brings a foreign-currency account's home value in line with its foreign balance at
+/// `rate` on `date` (a month-end revaluation). The difference is an unrealised exchange gain or
+/// loss on the exchange account. Returns None when nothing needs to change.
+pub async fn revalue(
+    db: &database::Db,
+    account_id: &str,
+    date: &str,
+    rate: i64,
+) -> AppResult<Option<ledger::JournalEntry>> {
+    let mut tx = db.begin().await?;
+    let account = accounts::find_one(&mut tx, account_id).await?;
+    let Some(currency) = account.currency.clone() else {
+        return Err(AppError::bad_request(format!("{} {} is kept in the home currency", account.code, account.name)));
+    };
+    if rate <= 0 {
+        return Err(AppError::bad_request("Enter the exchange rate"));
+    }
+    let (debit, credit, foreign): (i64, i64, i64) = sqlx::query_as(
+        r#"SELECT COALESCE(SUM(l."debit"), 0), COALESCE(SUM(l."credit"), 0), COALESCE(SUM(l."foreignAmount"), 0)
+           FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."journalEntryId"
+           WHERE l."accountId" = ?1 AND e."date" <= ?2"#,
+    )
+    .bind(account_id)
+    .bind(date)
+    .fetch_one(&mut *tx)
+    .await?;
+    // Both in the debit direction: what the books hold, and what the foreign balance is worth.
+    let held = Money::from_cents(debit).checked_sub(Money::from_cents(credit)).ok_or_else(overflow)?;
+    let worth = to_base(Money::from_cents(foreign), rate)?;
+    let change = worth.checked_sub(held).ok_or_else(overflow)?;
+    if change == Money::ZERO {
+        return Ok(None);
+    }
+    let abs = if change > Money::ZERO { change } else { Money::ZERO.checked_sub(change).ok_or_else(overflow)? };
+    let gain = change > Money::ZERO;
+    let exchange = exchange_account(&mut tx).await?;
+    let lines = vec![
+        ledger::NewLine {
+            account_id: account.id.clone(),
+            debit: if gain { abs } else { Money::ZERO },
+            credit: if gain { Money::ZERO } else { abs },
+            description: Some(format!("Revalued at {} per {currency}", rate_text(rate))),
+        },
+        ledger::NewLine {
+            account_id: exchange,
+            debit: if gain { Money::ZERO } else { abs },
+            credit: if gain { abs } else { Money::ZERO },
+            description: Some(if gain { "Unrealised exchange gain".into() } else { "Unrealised exchange loss".into() }),
+        },
+    ];
+    let entry = ledger::entries::post_with_foreign(
+        &mut tx,
+        ledger::NewEntry {
+            date: date.to_string(),
+            description: format!("Revaluation of {} {} ({currency})", account.code, account.name),
+            reference: Some(format!("REVAL-{}", &date[..date.len().min(7)])),
+            source_type: Some("REVALUATION".into()),
+            source_id: Some(account.id.clone()),
+            lines,
+        },
+        // The foreign balance itself does not move.
+        vec![Some(Money::ZERO), None],
+    )
+    .await?;
+    remember_rate(&mut tx, &Some(currency), rate).await?;
+    tx.commit().await?;
+    Ok(Some(entry))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

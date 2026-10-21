@@ -61,12 +61,14 @@ pub struct Account {
     pub description: Option<String>,
     pub is_active: bool,
     pub parent_id: Option<String>,
+    /// D34: a foreign currency the account is kept in (a USD bank account); None = home.
+    pub currency: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 pub(crate) const COLUMNS: &str =
-    r#""id","code","name","type","subtype","description","isActive","parentId","createdAt","updatedAt""#;
+    r#""id","code","name","type","subtype","description","isActive","parentId","currency","createdAt","updatedAt""#;
 
 pub(crate) fn from_row(row: &SqliteRow) -> AppResult<Account> {
     let t: String = row.try_get("type")?;
@@ -79,6 +81,7 @@ pub(crate) fn from_row(row: &SqliteRow) -> AppResult<Account> {
         description: row.try_get("description")?,
         is_active: row.try_get::<i64, _>("isActive")? != 0,
         parent_id: row.try_get("parentId")?,
+        currency: row.try_get("currency")?,
         created_at: row.try_get("createdAt")?,
         updated_at: row.try_get("updatedAt")?,
     })
@@ -131,6 +134,8 @@ pub struct CreateAccount {
     pub subtype: Option<String>,
     pub description: Option<String>,
     pub parent_id: Option<String>,
+    /// D34: a foreign currency (None = home).
+    pub currency: Option<String>,
 }
 
 pub async fn create(db: &Db, dto: CreateAccount) -> AppResult<Account> {
@@ -144,8 +149,8 @@ pub async fn create(db: &Db, dto: CreateAccount) -> AppResult<Account> {
     let id = new_id();
     let now = now_iso();
     sqlx::query(
-        r#"INSERT INTO "accounts" ("id","code","name","type","subtype","description","isActive","parentId","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,1,?7,?8,?8)"#,
+        r#"INSERT INTO "accounts" ("id","code","name","type","subtype","description","isActive","parentId","createdAt","updatedAt","currency")
+           VALUES (?1,?2,?3,?4,?5,?6,1,?7,?8,?8,?9)"#,
     )
     .bind(&id)
     .bind(&dto.code)
@@ -155,6 +160,7 @@ pub async fn create(db: &Db, dto: CreateAccount) -> AppResult<Account> {
     .bind(&dto.description)
     .bind(&dto.parent_id)
     .bind(&now)
+    .bind(&dto.currency)
     .execute(&mut *tx)
     .await?;
     let account = find_one(&mut tx, &id).await?;
@@ -171,6 +177,17 @@ pub struct UpdateAccount {
     pub subtype: Option<Option<String>>,
     pub description: Option<Option<String>>,
     pub parent_id: Option<Option<String>>,
+    /// D34: `Some(None)` makes it a home-currency account again.
+    pub currency: Option<Option<String>>,
+}
+
+/// Whether any ledger line uses the account.
+pub async fn is_used(conn: &mut SqliteConnection, id: &str) -> AppResult<bool> {
+    let n: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "journal_lines" WHERE "accountId" = ?1"#)
+        .bind(id)
+        .fetch_one(conn)
+        .await?;
+    Ok(n > 0)
 }
 
 pub async fn update(db: &Db, id: &str, dto: UpdateAccount) -> AppResult<Account> {
@@ -202,10 +219,20 @@ pub async fn update(db: &Db, id: &str, dto: UpdateAccount) -> AppResult<Account>
         }
         next.parent_id = p;
     }
+    if let Some(c) = dto.currency {
+        next.currency = c;
+    }
+    // D33: an account with postings keeps its type and currency — changing either would
+    // silently move or re-value amounts already in the reports.
+    if (next.account_type != current.account_type || next.currency != current.currency) && is_used(&mut tx, id).await? {
+        return Err(AppError::bad_request(
+            "This account already has entries, so its type and currency cannot change. Create a new account instead.",
+        ));
+    }
     if next != current {
         sqlx::query(
-            r#"UPDATE "accounts" SET "code"=?1, "name"=?2, "type"=?3, "subtype"=?4, "description"=?5, "parentId"=?6, "updatedAt"=?7
-               WHERE "id"=?8"#,
+            r#"UPDATE "accounts" SET "code"=?1, "name"=?2, "type"=?3, "subtype"=?4, "description"=?5, "parentId"=?6, "updatedAt"=?7,
+               "currency"=?9 WHERE "id"=?8"#,
         )
         .bind(&next.code)
         .bind(&next.name)
@@ -215,6 +242,7 @@ pub async fn update(db: &Db, id: &str, dto: UpdateAccount) -> AppResult<Account>
         .bind(&next.parent_id)
         .bind(now_iso())
         .bind(id)
+        .bind(&next.currency)
         .execute(&mut *tx)
         .await?;
     }

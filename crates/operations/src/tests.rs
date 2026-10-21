@@ -44,6 +44,7 @@ async fn shop() -> AppResult<Shop> {
                 subtype: None,
                 description: None,
                 parent_id: None,
+                currency: None,
             },
         )
         .await?;
@@ -107,6 +108,7 @@ impl Shop {
             withholding_tax_code_id: None,
             withholding_amount: Money::ZERO,
             exchange_rate: None,
+            payable_account_id: None,
         }
     }
 }
@@ -233,6 +235,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
             prices_include_tax: false,
             currency: None,
             exchange_rate: None,
+            payable_account_id: None,
             lines: vec![line("Paper", "3", "12.5"), line("Ink", "1", "20")],
         },
     )
@@ -271,6 +274,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
             prices_include_tax: false,
             currency: None,
             exchange_rate: None,
+            payable_account_id: None,
             lines: vec![line("Unposted", "1", "9")],
         },
     )
@@ -401,6 +405,7 @@ async fn voiding_a_payment_reverses_it_and_reopens_the_invoice_and_bill() -> App
             prices_include_tax: false,
             currency: None,
             exchange_rate: None,
+            payable_account_id: None,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),
@@ -543,6 +548,7 @@ async fn debit_notes_reduce_what_is_owed_to_the_vendor() -> AppResult<()> {
             prices_include_tax: false,
             currency: None,
             exchange_rate: None,
+            payable_account_id: None,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),
@@ -620,6 +626,7 @@ async fn taxes_split_every_document_and_post_to_the_tax_accounts() -> AppResult<
         subtype: None,
         description: None,
         parent_id: None,
+        currency: None,
     };
     let payable = accounts::create(&s.db, account("2300", AccountType::Liability)).await?.id;
     let receivable = accounts::create(&s.db, account("1400", AccountType::Asset)).await?.id;
@@ -680,6 +687,7 @@ async fn taxes_split_every_document_and_post_to_the_tax_accounts() -> AppResult<
             prices_include_tax: false,
             currency: None,
             exchange_rate: None,
+            payable_account_id: None,
             lines: vec![BillLineInput {
                 description: "Paper".into(),
                 quantity: m("1"),

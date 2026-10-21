@@ -268,7 +268,16 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
             "Choose an active expense or asset account for a debit note"
         }));
     }
-    let control = accounts::find_by_code(&mut tx, control_code).await?;
+    // D33: a debit note reduces the bill's own payable account.
+    let control = if kind == AR {
+        accounts::find_by_code(&mut tx, control_code).await?
+    } else {
+        let payable: Option<String> = sqlx::query_scalar(r#"SELECT "payableAccountId" FROM "bills" WHERE "id" = ?1"#)
+            .bind(&dto.document_id)
+            .fetch_one(&mut *tx)
+            .await?;
+        crate::bills::payable_account(&mut tx, payable.as_deref()).await?
+    };
     // D26: the tax inside the gross amount goes back to the code's tax account.
     let (parts, tax) = match &dto.tax_code_id {
         Some(code) => crate::tax::line_tax(&mut tx, code, dto.amount, true).await?,

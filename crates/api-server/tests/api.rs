@@ -2196,3 +2196,244 @@ async fn foreign_currency_invoices_bills_payments_and_exchange_differences() -> 
     assert_eq!((rates.body["fx.rate.USD"].as_str(), rates.body["fx.rate.EUR"].as_str()), (Some("300"), Some("320")));
     Ok(())
 }
+
+#[tokio::test]
+async fn payable_accounts_account_edits_and_a_usd_bank_account() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(
+        Method::PATCH,
+        "/api/settings",
+        Some(&admin),
+        Some(json!({"company.name": "Lanka Ltd", "region.currency": "LKR"})),
+    )
+    .await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let new_account = |code: &str, name: &str, kind: &str, currency: Option<&str>| {
+        let mut body = json!({"code": code, "name": name, "type": kind});
+        if let Some(c) = currency {
+            body["currency"] = json!(c);
+        }
+        body
+    };
+    let tel = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(new_account("2400", "Telephone Payable", "LIABILITY", None)),
+        )
+        .await?;
+    let tel_exp = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(new_account("6500", "Telephone Expense", "EXPENSE", None)),
+        )
+        .await?;
+    let capital = app
+        .call(Method::POST, "/api/accounts", Some(&admin), Some(new_account("3100", "Capital", "EQUITY", None)))
+        .await?;
+    let usd = app
+        .call(Method::POST, "/api/accounts", Some(&admin), Some(new_account("1020", "USD Bank", "ASSET", Some("usd"))))
+        .await?;
+    assert_eq!(usd.body["currency"].as_str(), Some("USD"), "{}", usd.body);
+    let lkr_home = app
+        .call(Method::POST, "/api/accounts", Some(&admin), Some(new_account("1030", "Odd", "ASSET", Some("LKR"))))
+        .await?;
+    assert!(lkr_home.body["currency"].is_null(), "the home currency is stored as none");
+    let id = |v: &Value| v["id"].as_str().unwrap_or_default().to_string();
+    let (tel, tel_exp, capital, usd) = (id(&tel.body), id(&tel_exp.body), id(&capital.body), id(&usd.body));
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let code_id = |code: &str| -> String {
+        accounts.body.as_array().and_then(|a| a.iter().find(|x| x["code"] == code)).map(id).unwrap_or_default()
+    };
+    let (cash, revenue) = (code_id("1000"), code_id("4000"));
+    let tb = |body: &Value, code: &str| {
+        body.as_array()
+            .and_then(|rows| rows.iter().find(|r| r["account"]["code"] == code).map(|r| r["balance"].clone()))
+    };
+
+    // The senior's example: a telephone bill accrued by journal entry, owed on its own payable.
+    let je = app
+        .call(
+            Method::POST,
+            "/api/ledger/entries",
+            Some(&admin),
+            Some(json!({"date": "2026-04-30", "description": "Telephone bill April", "lines": [
+                {"accountId": tel_exp, "debit": 18337.13, "credit": 0},
+                {"accountId": tel, "debit": 0, "credit": 18337.13}]})),
+        )
+        .await?;
+    assert_eq!(je.status, StatusCode::CREATED, "{}", je.body);
+
+    // A bill owed on Telephone Payable instead of 2000, with a debit note, then paid.
+    let vendor = app.call(Method::POST, "/api/vendors", Some(&admin), Some(json!({"name": "Telecom"}))).await?;
+    let bad = app
+        .call(
+            Method::POST,
+            "/api/bills",
+            Some(&admin),
+            Some(json!({"vendorId": vendor.body["id"], "date": "2026-05-01", "payableAccountId": tel_exp,
+            "lines": [{"description": "May", "quantity": 1, "unitPrice": 100, "accountId": tel_exp}]})),
+        )
+        .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "an expense is not a payable account");
+    let bill = app
+        .call(
+            Method::POST,
+            "/api/bills",
+            Some(&admin),
+            Some(json!({"vendorId": vendor.body["id"], "date": "2026-05-01", "payableAccountId": tel,
+            "lines": [{"description": "Telephone May", "quantity": 1, "unitPrice": 20000, "accountId": tel_exp}]})),
+        )
+        .await?;
+    assert_eq!(bill.body["payableAccountId"].as_str(), Some(tel.as_str()), "{}", bill.body);
+    let bill_id = id(&bill.body);
+    app.call(Method::POST, &format!("/api/bills/{bill_id}/post"), Some(&admin), None).await?;
+    let dn = app
+        .call(Method::POST, "/api/debit-notes", Some(&admin), Some(json!({"billId": bill_id, "date": "2026-05-03", "reason": "Overcharge", "amount": 2000, "accountId": tel_exp})))
+        .await?;
+    assert_eq!(dn.status, StatusCode::CREATED, "{}", dn.body);
+    let t1 = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(tb(&t1.body, "2400"), Some(json!(36337.13)), "18,337.13 accrued + 20,000 billed - 2,000 debit note");
+    assert!(tb(&t1.body, "2000").is_none_or(|v| v == json!(0)), "nothing went to Accounts Payable");
+    let pay_bill = app
+        .call(
+            Method::POST,
+            "/api/payments",
+            Some(&admin),
+            Some(json!({"type": "AP", "billId": bill_id, "date": "2026-05-20", "amount": 18000,
+            "paymentMethod": "BANK_TRANSFER", "paymentAccountId": cash})),
+        )
+        .await?;
+    assert_eq!(pay_bill.status, StatusCode::CREATED, "{}", pay_bill.body);
+
+    // Paying the payable account itself, with no bill behind it.
+    let pay_acct = |amount: f64, account: &str, from: &str, rate: Option<f64>| {
+        let mut b = json!({"type": "AP", "payableAccountId": account, "date": "2026-05-25", "amount": amount,
+            "paymentMethod": "BANK_TRANSFER", "paymentAccountId": from});
+        if let Some(r) = rate {
+            b["exchangeRate"] = json!(r);
+        }
+        b
+    };
+    let wrong =
+        app.call(Method::POST, "/api/payments", Some(&admin), Some(pay_acct(10.0, &revenue, &cash, None))).await?;
+    assert_eq!(wrong.status, StatusCode::BAD_REQUEST, "revenue is not a payable account");
+    let p = app.call(Method::POST, "/api/payments", Some(&admin), Some(pay_acct(18337.13, &tel, &cash, None))).await?;
+    assert_eq!(p.status, StatusCode::CREATED, "{}", p.body);
+    assert_eq!(p.body["payableAccountId"].as_str(), Some(tel.as_str()));
+    let t2 = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(tb(&t2.body, "2400"), Some(json!(0)), "the telephone payable is cleared");
+    // Voiding it puts the liability back.
+    let void = app.call(Method::POST, &format!("/api/payments/{}/void", id(&p.body)), Some(&admin), None).await?;
+    assert!(void.status.is_success(), "{}", void.body);
+    let t3 = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(tb(&t3.body, "2400"), Some(json!(18337.13)));
+
+    // Editing the chart: a name changes; a used account keeps its type.
+    let renamed = app
+        .call(
+            Method::PATCH,
+            &format!("/api/accounts/{tel}"),
+            Some(&admin),
+            Some(json!({"name": "Telephone & Internet Payable", "subtype": "current_liability"})),
+        )
+        .await?;
+    assert_eq!(renamed.body["name"].as_str(), Some("Telephone & Internet Payable"), "{}", renamed.body);
+    let retype = app
+        .call(Method::PATCH, &format!("/api/accounts/{tel}"), Some(&admin), Some(json!({"type": "EXPENSE"})))
+        .await?;
+    assert_eq!(retype.status, StatusCode::BAD_REQUEST, "a used account keeps its type");
+
+    // The USD bank account: every line on it needs its USD amount.
+    let no_usd = app
+        .call(
+            Method::POST,
+            "/api/ledger/entries",
+            Some(&admin),
+            Some(json!({"date": "2026-04-01", "description": "USD deposit", "lines": [
+            {"accountId": usd, "debit": 300000, "credit": 0}, {"accountId": capital, "debit": 0, "credit": 300000}]})),
+        )
+        .await?;
+    assert_eq!(no_usd.status, StatusCode::BAD_REQUEST, "a USD account line needs its USD amount");
+    let deposit = app
+        .call(Method::POST, "/api/ledger/entries", Some(&admin), Some(json!({"date": "2026-04-01", "description": "USD deposit", "lines": [
+            {"accountId": usd, "debit": 300000, "credit": 0, "foreignAmount": 1000}, {"accountId": capital, "debit": 0, "credit": 300000}]})))
+        .await?;
+    assert_eq!(deposit.status, StatusCode::CREATED, "{}", deposit.body);
+    // A USD invoice paid into the USD account; an LKR one cannot be.
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "US Client"}))).await?;
+    let inv = |cur: Option<&str>| {
+        let mut b = json!({"customerId": cust.body["id"], "date": "2026-04-05",
+            "lines": [{"description": "Export", "quantity": 1, "unitPrice": 200, "accountId": revenue}]});
+        if let Some(c) = cur {
+            b["currency"] = json!(c);
+            b["exchangeRate"] = json!(300);
+        }
+        b
+    };
+    let usd_inv = app.call(Method::POST, "/api/invoices", Some(&admin), Some(inv(Some("USD")))).await?;
+    let lkr_inv = app.call(Method::POST, "/api/invoices", Some(&admin), Some(inv(None))).await?;
+    for i in [&usd_inv, &lkr_inv] {
+        app.call(Method::POST, &format!("/api/invoices/{}/post", id(&i.body)), Some(&admin), None).await?;
+    }
+    let receive = |inv: &Value, rate: f64| {
+        json!({"type": "AR", "invoiceId": inv["id"], "date": "2026-04-20", "amount": 200, "exchangeRate": rate,
+            "paymentMethod": "BANK_TRANSFER", "paymentAccountId": usd})
+    };
+    let refused = app.call(Method::POST, "/api/payments", Some(&admin), Some(receive(&lkr_inv.body, 1.0))).await?;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "an LKR invoice is not paid into the USD account");
+    let got = app.call(Method::POST, "/api/payments", Some(&admin), Some(receive(&usd_inv.body, 305.0))).await?;
+    assert_eq!(got.status, StatusCode::CREATED, "{}", got.body);
+    // Paying the telephone payable from the USD account at 310: USD 50 = LKR 15,500.
+    let no_rate = app.call(Method::POST, "/api/payments", Some(&admin), Some(pay_acct(50.0, &tel, &usd, None))).await?;
+    assert_eq!(no_rate.status, StatusCode::BAD_REQUEST, "paying from USD needs the rate");
+    let usd_out =
+        app.call(Method::POST, "/api/payments", Some(&admin), Some(pay_acct(50.0, &tel, &usd, Some(310.0)))).await?;
+    assert_eq!(usd_out.body["baseAmount"].as_str(), Some("15500.00"), "{}", usd_out.body);
+
+    // USD balance 1,000 + 200 - 50 = 1,150; LKR 300,000 + 61,000 - 15,500 = 345,500.
+    let act = app.call(Method::GET, &format!("/api/ledger/activity/{usd}"), Some(&admin), None).await?;
+    assert_eq!(
+        (act.body["currency"].as_str(), act.body["foreignClosing"].clone(), act.body["closingBalance"].clone()),
+        (Some("USD"), json!(1150), json!(345500)),
+        "{}",
+        act.body
+    );
+    // Revalued at 302 on 31 May: worth 347,300, a gain of 1,800.
+    let reval = app
+        .call(
+            Method::POST,
+            &format!("/api/accounts/{usd}/revalue"),
+            Some(&admin),
+            Some(json!({"date": "2026-05-31", "exchangeRate": 302})),
+        )
+        .await?;
+    assert_eq!(reval.status, StatusCode::CREATED, "{}", reval.body);
+    let t4 = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(tb(&t4.body, "1020"), Some(json!(347300)));
+    assert_eq!(tb(&t4.body, "7900"), Some(json!(-2800)), "realised gain 1,000 on the receipt + unrealised 1,800");
+    let again = app
+        .call(
+            Method::POST,
+            &format!("/api/accounts/{usd}/revalue"),
+            Some(&admin),
+            Some(json!({"date": "2026-05-31", "exchangeRate": 302})),
+        )
+        .await?;
+    assert_eq!(again.status, StatusCode::NO_CONTENT, "nothing left to revalue");
+    let recurrency =
+        app.call(Method::PATCH, &format!("/api/accounts/{usd}"), Some(&admin), Some(json!({"currency": ""}))).await?;
+    assert_eq!(recurrency.status, StatusCode::BAD_REQUEST, "a used account keeps its currency");
+    // Reversing the deposit brings the USD balance back exactly.
+    let rev = app
+        .call(Method::POST, &format!("/api/ledger/entries/{}/reverse", id(&deposit.body)), Some(&admin), None)
+        .await?;
+    assert!(rev.status.is_success(), "{}", rev.body);
+    let act2 = app.call(Method::GET, &format!("/api/ledger/activity/{usd}"), Some(&admin), None).await?;
+    assert_eq!(act2.body["foreignClosing"], json!(150));
+    Ok(())
+}

@@ -32,6 +32,7 @@ async fn books() -> AppResult<Books> {
                 subtype: None,
                 description: None,
                 parent_id: None,
+                currency: None,
             },
         )
         .await?;
@@ -274,6 +275,7 @@ async fn account_rules_match_reference() -> AppResult<()> {
             subtype: None,
             description: None,
             parent_id: None,
+            currency: None,
         },
     )
     .await;

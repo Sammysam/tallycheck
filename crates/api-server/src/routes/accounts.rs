@@ -29,6 +29,10 @@ pub async fn create(
     body: JsonBody,
 ) -> AppResult<(StatusCode, Json<Account>)> {
     let dto: AccountDto = validate::create_account(body.object())?;
+    let currency = {
+        let mut conn = state.db.read().acquire().await?;
+        operations::fx::account_currency(&mut conn, dto.currency.clone().flatten().as_deref()).await?
+    };
     let account = accounts::create(
         &state.db,
         CreateAccount {
@@ -39,6 +43,7 @@ pub async fn create(
             subtype: dto.subtype.flatten(),
             description: dto.description.flatten(),
             parent_id: dto.parent_id.flatten(),
+            currency,
         },
     )
     .await?;
@@ -63,6 +68,13 @@ pub async fn update(
     body: JsonBody,
 ) -> AppResult<Json<Account>> {
     let dto = validate::update_account(body.object())?;
+    let currency = match &dto.currency {
+        None => None,
+        Some(c) => {
+            let mut conn = state.db.read().acquire().await?;
+            Some(operations::fx::account_currency(&mut conn, c.as_deref()).await?)
+        }
+    };
     let account = accounts::update(
         &state.db,
         &id,
@@ -73,6 +85,7 @@ pub async fn update(
             subtype: dto.subtype,
             description: dto.description,
             parent_id: dto.parent_id,
+            currency,
         },
     )
     .await?;
@@ -91,4 +104,21 @@ pub async fn remove(
 pub async fn seed(State(state): State<AppState>, _auth: Authorized<perm::Accounts>) -> AppResult<StatusCode> {
     accounts::seed(&state.db).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// D34: revalues an account kept in a foreign currency at the rate on `date` (month end).
+/// Body: `{ "date": "YYYY-MM-DD", "exchangeRate": 302.5 }`. Answers the posted entry, or 204 when the
+/// home value already matches.
+pub async fn revalue(
+    State(state): State<AppState>,
+    _auth: Authorized<perm::Ledger>,
+    Path(id): Path<String>,
+    body: JsonBody,
+) -> AppResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    let (date, rate) = validate::ops::revaluation(body.object())?;
+    match operations::fx::revalue(&state.db, &id, &date, rate).await? {
+        Some(entry) => Ok((StatusCode::CREATED, Json(entry)).into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
 }
