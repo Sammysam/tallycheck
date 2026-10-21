@@ -75,35 +75,78 @@ impl<T> Paginated<T> {
     }
 }
 
-pub async fn list(db: &Db, page: i64, limit: i64, user_id: Option<&str>) -> AppResult<Paginated<AuditLog>> {
+/// D36: what the Activity Log can be narrowed to. Every field is optional.
+#[derive(Debug, Clone, Default)]
+pub struct Filter {
+    pub user_id: Option<String>,
+    /// Inclusive local dates (`YYYY-MM-DD`), compared with the stored timestamp's local date.
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    /// Text to find in the activity, its details or the user name.
+    pub search: Option<String>,
+    /// `signin`, `users`, `settings` or `documents`.
+    pub kind: Option<String>,
+}
+
+const SIGNIN: &str = r#"(lower("action") LIKE '%login%' OR lower("action") LIKE 'logged%' OR lower("action") LIKE '%2fa%' OR lower("action") LIKE '%two-factor%')"#;
+const USERS: &str = r#"(lower("action") LIKE '%user%' OR lower("action") LIKE '%role%' OR lower("action") LIKE '%password%' OR lower("action") LIKE '%administrator%')"#;
+const SETTINGS: &str = r#"(lower("action") LIKE '%setting%' OR lower("action") LIKE '%tax%' OR lower("action") LIKE '%lock%' OR lower("action") LIKE '%backup%' OR lower("action") LIKE '%restore%')"#;
+
+/// The SQL condition for a kind of activity, on the lower-cased action text.
+fn kind_condition(kind: &str) -> Option<String> {
+    Some(match kind {
+        "signin" => SIGNIN.to_string(),
+        "users" => format!("({USERS} AND NOT {SIGNIN})"),
+        "settings" => SETTINGS.to_string(),
+        "documents" => format!("NOT ({SIGNIN} OR {USERS} OR {SETTINGS})"),
+        _ => return None,
+    })
+}
+
+pub async fn list(db: &Db, page: i64, limit: i64, filter: &Filter) -> AppResult<Paginated<AuditLog>> {
     let offset = (page - 1).saturating_mul(limit);
-    let (rows, total) = match user_id {
-        Some(uid) => {
-            let rows = sqlx::query(
-                r#"SELECT * FROM "audit_logs" WHERE "userId" = ?1 ORDER BY "createdAt" DESC, rowid DESC LIMIT ?2 OFFSET ?3"#,
-            )
-            .bind(uid)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(db.read())
-            .await?;
-            let total: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "audit_logs" WHERE "userId" = ?1"#)
-                .bind(uid)
-                .fetch_one(db.read())
-                .await?;
-            (rows, total)
-        }
-        None => {
-            let rows =
-                sqlx::query(r#"SELECT * FROM "audit_logs" ORDER BY "createdAt" DESC, rowid DESC LIMIT ?1 OFFSET ?2"#)
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(db.read())
-                    .await?;
-            let total: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "audit_logs""#).fetch_one(db.read()).await?;
-            (rows, total)
-        }
-    };
+    let mut binds: Vec<String> = Vec::new();
+    let mut conditions: Vec<String> = Vec::new();
+    if let Some(u) = &filter.user_id {
+        binds.push(u.clone());
+        conditions.push(format!(r#""userId" = ?{}"#, binds.len()));
+    }
+    if let Some(d) = &filter.date_from {
+        binds.push(d.clone());
+        conditions.push(format!(r#"date("createdAt", 'localtime') >= ?{}"#, binds.len()));
+    }
+    if let Some(d) = &filter.date_to {
+        binds.push(d.clone());
+        conditions.push(format!(r#"date("createdAt", 'localtime') <= ?{}"#, binds.len()));
+    }
+    if let Some(q) = filter.search.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+        binds.push(format!("%{}%", q.to_lowercase()));
+        let n = binds.len();
+        conditions.push(format!(
+            r#"(lower("action") LIKE ?{n} OR lower(COALESCE("detail", '')) LIKE ?{n} OR lower(COALESCE("username", '')) LIKE ?{n})"#
+        ));
+    }
+    if let Some(cond) = filter.kind.as_deref().and_then(kind_condition) {
+        conditions.push(cond);
+    }
+    let clause = if conditions.is_empty() { String::new() } else { format!("WHERE {}", conditions.join(" AND ")) };
+    let n = binds.len();
+    let sql = format!(
+        r#"SELECT * FROM "audit_logs" {clause} ORDER BY "createdAt" DESC, rowid DESC LIMIT ?{} OFFSET ?{}"#,
+        n + 1,
+        n + 2
+    );
+    let mut q = sqlx::query(&sql);
+    for b in &binds {
+        q = q.bind(b);
+    }
+    let rows = q.bind(limit).bind(offset).fetch_all(db.read()).await?;
+    let count_sql = format!(r#"SELECT COUNT(*) FROM "audit_logs" {clause}"#);
+    let mut c = sqlx::query_scalar::<_, i64>(&count_sql);
+    for b in &binds {
+        c = c.bind(b);
+    }
+    let total = c.fetch_one(db.read()).await?;
     let data = rows
         .iter()
         .map(|r| {
@@ -121,6 +164,24 @@ pub async fn list(db: &Db, page: i64, limit: i64, user_id: Option<&str>) -> AppR
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
     Ok(Paginated::new(data, total, page, limit))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastSignIn {
+    pub user_id: String,
+    pub at: String,
+}
+
+/// D36: each user's most recent successful sign-in, from the log.
+pub async fn last_sign_ins(db: &Db) -> AppResult<Vec<LastSignIn>> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        r#"SELECT "userId", MAX("createdAt") FROM "audit_logs"
+           WHERE "userId" IS NOT NULL AND "action" = 'Logged in' GROUP BY "userId""#,
+    )
+    .fetch_all(db.read())
+    .await?;
+    Ok(rows.into_iter().map(|(user_id, at)| LastSignIn { user_id, at }).collect())
 }
 
 #[derive(Debug, Serialize)]

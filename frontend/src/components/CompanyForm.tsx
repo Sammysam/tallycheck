@@ -2,6 +2,8 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import api, { errMsg } from '../api/client';
 import { COUNTRIES } from '../lib/countries';
 import { regionFromSettings, setRegion } from '../lib/region';
+import { setUnsaved } from '../lib/commands';
+import { toast } from '../lib/toast';
 
 /**
  * D25: the customer's own company and region. Used by the first-run Company setup screen and
@@ -18,6 +20,14 @@ const FIELDS = [
 type Key = (typeof FIELDS)[number];
 type Form = Record<Key, string>;
 
+/** D36: Settings shows the form a section at a time; each section saves only its own fields. */
+export type CompanyPart = 'all' | 'company' | 'region' | 'documents';
+const PART_FIELDS: Record<Exclude<CompanyPart, 'all'>, Key[]> = {
+  company: ['company.name', 'company.address', 'company.phone', 'company.fax', 'company.email', 'company.website', 'company.taxNumber', 'company.logo'],
+  region: ['region.country', 'region.currency', 'region.currencySymbol', 'region.currencyWord', 'region.currencyMinorWord', 'region.locale', 'region.fiscalYearStart'],
+  documents: ['company.paymentInstructions', 'company.footerNote'],
+};
+
 const EMPTY: Form = Object.fromEntries(FIELDS.map((k) => [k, ''])) as Form;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const MAX_LOGO_BYTES = 250_000;
@@ -32,7 +42,8 @@ function example(form: Form) {
   }
 }
 
-export default function CompanyForm({ onSaved, submitLabel = 'Save' }: { onSaved?: () => void; submitLabel?: string }) {
+export default function CompanyForm({ onSaved, submitLabel = 'Save', part = 'all' }: { onSaved?: () => void; submitLabel?: string; part?: CompanyPart }) {
+  const show = (p: Exclude<CompanyPart, 'all'>) => part === 'all' || part === p;
   const [form, setForm] = useState<Form>(EMPTY);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,11 +65,13 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save' }: { onSaved
 
   const set = (k: Key) => (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setSaved(false);
+    setUnsaved(true);
     setForm((f) => ({ ...f, [k]: e.target.value }));
   };
 
   const chooseCountry = (code: string) => {
     setSaved(false);
+    setUnsaved(true);
     const c = COUNTRIES.find((x) => x.code === code);
     setForm((f) => (c ? {
       ...f,
@@ -88,6 +101,7 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save' }: { onSaved
     reader.onload = () => {
       setError('');
       setSaved(false);
+    setUnsaved(true);
       setForm((f) => ({ ...f, 'company.logo': String(reader.result) }));
     };
     reader.readAsDataURL(file);
@@ -98,10 +112,13 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save' }: { onSaved
     setError('');
     setSaving(true);
     try {
-      const body = Object.fromEntries(FIELDS.map((k) => [k, form[k].trim()]));
+      const keys = part === 'all' ? [...FIELDS] : PART_FIELDS[part];
+      const body = Object.fromEntries(keys.map((k) => [k, form[k].trim()]));
       const r = await api.patch('/settings', body);
       setRegion(regionFromSettings(r.data));
       setSaved(true);
+      setUnsaved(false);
+      if (part !== 'all') toast('Saved.');
       onSaved?.();
     } catch (err) {
       setError(errMsg(err, 'Could not save the company details'));
@@ -121,8 +138,9 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save' }: { onSaved
 
   return (
     <form onSubmit={submit} className="space-y-4" aria-label="Company details">
+      {show('company') && (
       <fieldset className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <legend className="text-sm font-semibold text-gray-800 mb-2">Company</legend>
+        {part === 'all' && <legend className="text-sm font-semibold text-gray-800 mb-2">Company</legend>}
         {field('company.name', 'Company name *', { required: true, maxLength: 120, placeholder: 'Your company’s legal name' })}
         {field('company.taxNumber', 'Tax / VAT / GST number', { maxLength: 60, placeholder: 'Printed on invoices' })}
         <label className="text-xs font-medium text-gray-600 md:col-span-2">
@@ -147,18 +165,25 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save' }: { onSaved
           )}
           <span className="text-xs text-gray-500">PNG, JPEG or WebP, under 250 KB. Shown on invoices and statements.</span>
         </div>
-        <label className="text-xs font-medium text-gray-600 md:col-span-2">
+      </fieldset>
+      )}
+
+      {show('documents') && (
+      <fieldset className="grid grid-cols-1 gap-3">
+        <label className="text-xs font-medium text-gray-600">
           How customers pay you (printed on invoices and statements)
           <textarea className="mt-1" rows={3} maxLength={2000} value={form['company.paymentInstructions']} onChange={set('company.paymentInstructions')} placeholder="e.g. Bank transfer to … account number …" />
         </label>
-        <label className="text-xs font-medium text-gray-600 md:col-span-2">
+        <label className="text-xs font-medium text-gray-600">
           Footer note on invoices
           <input className="mt-1" maxLength={300} value={form['company.footerNote']} onChange={set('company.footerNote')} placeholder="e.g. Thank you for your business" />
         </label>
       </fieldset>
+      )}
 
+      {show('region') && (
       <fieldset className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <legend className="text-sm font-semibold text-gray-800 mb-2">Country and currency</legend>
+        {part === 'all' && <legend className="text-sm font-semibold text-gray-800 mb-2">Country and currency</legend>}
         <label className="text-xs font-medium text-gray-600">
           Country
           <select className="mt-1" value={COUNTRIES.some((c) => c.code === form['region.country']) ? form['region.country'] : ''} onChange={(e) => chooseCountry(e.target.value)} aria-label="Country">
@@ -181,6 +206,7 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save' }: { onSaved
           Amounts will look like: <strong data-testid="money-example">{example(form)}</strong>
         </p>
       </fieldset>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {saved && <p className="text-sm text-green-700">Company details saved.</p>}

@@ -249,6 +249,7 @@ try {
     await waitFor(`!!document.querySelector('input[placeholder=Username]')`, 'new user form');
     await type('input[placeholder=Username]', 'clerk.one');
     await type('input[placeholder="Password (min 8 chars)"]', 'clerkpass1');
+    await type('input[placeholder="Confirm password"]', 'clerkpass1');
     await evaluate(`(() => { const sel = document.querySelector('form select'); if (sel) { const o = [...sel.options].find((x) => x.textContent.includes('Viewer')); if (o) { sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); } } return true; })()`);
     await clickText('Save');
     await waitFor(`document.body.innerText.includes('clerk.one')`, 'new user row');
@@ -261,8 +262,16 @@ try {
     await shot('05-roles');
   });
 
-  await check('Settings page saves the signatory', async () => {
+  /** D36: Settings is tabbed. */
+  const settingsTab = async (label) => {
     await go('/settings');
+    await waitFor(`[...document.querySelectorAll('[role=tab]')].some((b) => b.textContent.trim() === ${JSON.stringify(label)})`, 'settings tabs');
+    await evaluate(`[...document.querySelectorAll('[role=tab]')].find((b) => b.textContent.trim() === ${JSON.stringify(label)}).click()`);
+    await sleep(500);
+  };
+
+  await check('Settings page saves the signatory', async () => {
+    await settingsTab('Invoices & documents');
     await waitFor(`!!document.querySelector('input[placeholder="e.g. Jane Smith"]')`, 'settings form');
     await type('input[placeholder="e.g. Jane Smith"]', 'Jane Doe');
     // D25: no title ships with the app either.
@@ -276,7 +285,7 @@ try {
 
   await check('Activity log shows the audited actions', async () => {
     await go('/audit');
-    await waitFor(`['Created an user', 'Updated company settings', 'Logged in'].every((a) => document.body.innerText.includes(a))`, 'audit rows');
+    await waitFor(`['Created a user', 'Updated company settings', 'Logged in'].every((a) => document.body.innerText.includes(a))`, 'audit rows');
     await shot('07-audit');
   });
 
@@ -791,14 +800,13 @@ try {
 
   // ── W6: backup and restore page ─────────────────────────────────────────────
   await check('Backup page sets a password, writes a verified backup and checks it', async () => {
-    await go('/system/backup');
-    await waitFor(`!document.getElementById('password-card').hidden`, 'backup page loaded');
+    await settingsTab('Backup & restore');
+    await waitFor(`!!document.getElementById('pw-new')`, 'backup page loaded');
     await type('#pw-new', 'office backup 2026');
     await type('#pw-again', 'office backup 2026');
     await evaluate(`document.getElementById('pw-save').click()`);
     await waitFor(`document.getElementById('pw-msg').textContent.includes('Backup password saved')`, 'password saved');
     const folder = join(SHOTS, 'backups');
-    await evaluate(`document.getElementById('bk-folder').value = ''`);
     await type('#bk-folder', folder);
     await evaluate(`document.getElementById('bk-run').click()`);
     await waitFor(`document.getElementById('bk-msg').textContent.includes('Backup written and verified')`, 'backup written', 60000);
@@ -1092,7 +1100,7 @@ try {
   });
 
   await check('Settings page locks the books and postings on the lock date are refused (D19)', async () => {
-    await go('/settings');
+    await settingsTab('Closing');
     await waitFor(`document.body.innerText.includes('not locked')`, 'lock card');
     await fillDates('2026-04-30');
     await clickText('Lock');
@@ -1107,6 +1115,44 @@ try {
     await waitFor(`!!document.querySelector('[role=dialog]')`, 'unlock confirmation');
     await evaluate(`document.querySelector('[role=dialog] .btn-primary').click()`);
     await waitFor(`document.querySelector('[data-testid=lock-status]')?.innerText.includes('not locked')`, 'unlocked');
+  });
+
+  await check('Administration: Admin Centre, user dialogs, plain-word roles, log filters (D36)', async () => {
+    await go('/admin');
+    await waitFor(`document.querySelectorAll('[data-testid=admin-tile]').length === 6 && document.body.innerText.includes('Latest activity')`, 'admin centre');
+    await shot('40-admin-centre');
+    await go('/users');
+    await waitFor(`document.body.innerText.includes('clerk.one') && document.body.innerText.includes('Last sign-in')`, 'users table');
+    // Deactivating yourself is not offered; the server refuses it anyway.
+    const me = (await api('GET', '/api/users')).body.find((u) => u.username === 'admin');
+    const self = await api('PATCH', `/api/users/${me.id}`, { isActive: false });
+    if (self.status !== 400) throw new Error('self-deactivation answered ' + self.status);
+    // Change role through the dialog.
+    await evaluate(`(() => { const row = [...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes('clerk.one'));
+      row.querySelector('button').click(); return true; })()`);
+    await waitFor(`[...document.querySelectorAll('button,[role=menuitem]')].some((x) => x.textContent.trim() === 'Change role…')`, 'user menu');
+    await evaluate(`[...document.querySelectorAll('button,[role=menuitem]')].find((x) => x.textContent.trim() === 'Change role…').click()`);
+    await waitFor(`!!document.querySelector('select[aria-label="New role"]')`, 'role dialog');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="New role"]');
+      const o = [...sel.options].find((x) => x.textContent === 'Accountant');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, o.value);
+      sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await clickText('Save change');
+    await waitFor(`!!document.querySelector('[data-testid=toast]') && [...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('clerk.one') && tr.innerText.includes('Accountant'))`, 'role changed');
+    await shot('41-users');
+    await go('/roles');
+    await waitFor(`document.querySelectorAll('[data-testid=role-card]').length >= 3 && document.body.innerText.includes('Sales:')`, 'role cards');
+    await shot('42-roles');
+    // The activity log narrows to sign-ins.
+    await go('/audit');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Kind of activity"]');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(sel, 'signin');
+      sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`document.body.innerText.includes('the filters') && [...document.querySelectorAll('tbody tr')].every((tr) => /log/i.test(tr.innerText))`, 'sign-ins only');
+    await shot('43-activity-log');
+    const searched = await api('GET', '/api/audit-logs?search=company&limit=50');
+    if (!searched.body.data.length || !searched.body.data.every((r) => /company/i.test(r.action + (r.detail ?? '') + (r.username ?? ''))))
+      throw new Error('search returned ' + JSON.stringify(searched.body.data.map((r) => r.action)));
   });
 
   await check('An administrator turns a user off', async () => {

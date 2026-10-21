@@ -459,6 +459,16 @@ recommendations without answering each one individually; revisit any of them on 
   expense, note; payroll links to its run). Ledger rows, account-activity entry numbers (so every
   report drills down to it) and the document numbers in the Invoices, Bills, Expenses, Payments and
   Credit / Debit Notes lists open it. Manual entries are reversed from there.
+- **D36 Administration redesign** (2026-10-21). An Admin Centre (`/admin`) with status cards (users,
+  2FA, last backup, lock date, company details, tax codes), quick actions and the latest activity.
+  Users: search, 2FA and last sign-in columns (`GET /users/last-sign-in`, from the log), a "⋯" menu
+  and dialogs for role, password and 2FA; nobody can deactivate or demote themselves (the last
+  Admin keeps the reference's own rule and message). Roles: permissions in plain words, grouped,
+  with user counts and Duplicate. Activity Log: user / kind / date / text filters (`kind`,
+  `dateFrom`, `dateTo`, `search` on `/audit-logs`) and Excel export; "an user" is shown as
+  "a user" (the stored text is unchanged). Settings: tabs (Company, Region & currency, Invoices &
+  documents, Closing, Backup & restore); backup moved into the React app and `/system/backup`
+  now redirects there. Toasts and the app's own dialogs replace browser alert / confirm here.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
