@@ -6,6 +6,7 @@ pub mod auth;
 pub mod books;
 pub mod employees;
 pub mod imports;
+pub mod items;
 pub mod ledger;
 pub mod operations;
 pub mod payroll;
@@ -139,6 +140,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/imports/layouts/{id}", axum::routing::delete(imports::layout_remove))
         .route("/imports", get(imports::list).post(imports::run))
         .route("/imports/{id}", axum::routing::delete(imports::undo))
+        .route("/items", get(items::list).post(items::create))
+        .route("/items/{id}", get(items::get).patch(items::update).delete(items::remove))
+        .route("/items/{id}/moves", get(items::moves))
+        .route("/items/{id}/adjust", post(items::adjust))
         .route("/bank-lines", get(imports::bank_list))
         .route("/bank-lines/accounts", get(imports::bank_accounts))
         .route("/bank-lines/{id}/documents", get(imports::bank_documents))

@@ -96,7 +96,9 @@ pub(crate) fn invoice_line_rules(item: &Value, prefix: String) -> (Vec<String>, 
         .field("quantity", true, &[Rule::IsQuantity, Rule::MinNum(0.001, "0.001")])
         .field("unitPrice", true, &[Rule::IsMoneyNumber, Rule::MinZero])
         .field("accountId", true, &[Rule::IsUuid])
-        .field("taxCodeId", true, &[Rule::IsUuid]);
+        .field("taxCodeId", true, &[Rule::IsUuid])
+        .field("itemId", true, &[Rule::IsUuid])
+        .field("discountAmount", true, &[Rule::IsMoneyNumber, Rule::MinZero]);
     v.into_parts()
 }
 
@@ -129,6 +131,8 @@ fn invoice_lines(m: &Map<String, Value>) -> Option<Option<Vec<LineInput>>> {
                     unit_price: l.get("unitPrice").and_then(Money::from_json),
                     account_id: l.get("accountId").and_then(Value::as_str).map(str::to_string),
                     tax_code_id: l.get("taxCodeId").and_then(Value::as_str).map(str::to_string),
+                    item_id: l.get("itemId").and_then(Value::as_str).map(str::to_string),
+                    discount: l.get("discountAmount").and_then(Money::from_json).unwrap_or_default(),
                 })
                 .collect()
         })
@@ -239,7 +243,8 @@ pub(crate) fn bill_line_rules(item: &Value, prefix: String) -> (Vec<String>, Map
         .field("quantity", false, &[Rule::IsQuantity, Rule::MinNum(0.001, "0.001")])
         .field("unitPrice", false, &[Rule::IsMoneyNumber, Rule::MinZero])
         .field("accountId", false, &[Rule::IsUuid])
-        .field("taxCodeId", true, &[Rule::IsUuid]);
+        .field("taxCodeId", true, &[Rule::IsUuid])
+        .field("itemId", true, &[Rule::IsUuid]);
     v.into_parts()
 }
 
@@ -271,6 +276,7 @@ pub fn create_bill(body: Map<String, Value>) -> Result<operations::bills::Create
                     unit_price: l.get("unitPrice").and_then(Money::from_json).unwrap_or_default(),
                     account_id: l.get("accountId").and_then(Value::as_str).unwrap_or_default().to_string(),
                     tax_code_id: l.get("taxCodeId").and_then(Value::as_str).map(str::to_string),
+                    item_id: l.get("itemId").and_then(Value::as_str).map(str::to_string),
                 })
                 .collect()
         })

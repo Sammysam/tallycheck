@@ -33,6 +33,8 @@ pub struct BillLine {
     pub tax_amount: Money,
     /// D27: the tax split by standard code.
     pub taxes: Vec<crate::tax::TaxPart>,
+    /// D38: the product bought, if any.
+    pub item_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +117,7 @@ impl Bill {
                     "accountId": l.account_id,
                     "taxCodeId": opt(&l.tax_code_id),
                     "taxAmount": money_str(l.tax_amount),
+                    "itemId": opt(&l.item_id),
                     "taxes": l.taxes.iter().map(|t| json!({
                         "taxCodeId": t.tax_code_id,
                         "taxAmount": money_str(t.amount),
@@ -180,7 +183,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Bill> {
 
 async fn attach(conn: &mut SqliteConnection, bill: &mut Bill) -> AppResult<()> {
     let rows = sqlx::query(
-        r#"SELECT "id","billId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount"
+        r#"SELECT "id","billId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount","itemId"
            FROM "bill_lines" WHERE "billId" = ?1 ORDER BY rowid"#,
     )
     .bind(&bill.id)
@@ -200,6 +203,7 @@ async fn attach(conn: &mut SqliteConnection, bill: &mut Bill) -> AppResult<()> {
                 tax_code_id: r.try_get("taxCodeId")?,
                 tax_amount: Money::from_cents(r.try_get("taxAmount")?),
                 taxes: Vec::new(),
+                item_id: r.try_get("itemId")?,
             })
         })
         .collect::<AppResult<Vec<_>>>()?;
@@ -248,6 +252,8 @@ pub struct BillLineInput {
     pub account_id: String,
     /// D26: optional tax code for the line.
     pub tax_code_id: Option<String>,
+    /// D38: optional product; a stock item's line always goes to its inventory account.
+    pub item_id: Option<String>,
 }
 
 pub struct CreateBill {
@@ -280,9 +286,17 @@ pub async fn payable_account(conn: &mut SqliteConnection, id: Option<&str>) -> A
     Ok(account)
 }
 
-pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
+pub async fn create(db: &Db, mut dto: CreateBill) -> AppResult<Bill> {
     let mut tx = db.begin().await?;
     parties::find_one(&mut tx, PartyKind::Vendor, &dto.vendor_id).await?;
+    for l in &mut dto.lines {
+        if let Some(item_id) = &l.item_id {
+            let item = crate::stock::find_one(&mut tx, item_id).await?;
+            if let (true, Some(inventory)) = (item.counted(), item.inventory_account_id.clone()) {
+                l.account_id = inventory;
+            }
+        }
+    }
     for l in &dto.lines {
         require_account(&mut tx, &l.account_id).await?;
     }
@@ -330,8 +344,8 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     for (l, (amount, tax, parts)) in dto.lines.iter().zip(amounts) {
         let line_id = new_id();
         sqlx::query(
-            r#"INSERT INTO "bill_lines" ("id","billId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount")
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
+            r#"INSERT INTO "bill_lines" ("id","billId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount","itemId")
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"#,
         )
         .bind(&line_id)
         .bind(&id)
@@ -342,6 +356,7 @@ pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
         .bind(&l.account_id)
         .bind(&l.tax_code_id)
         .bind(tax.cents())
+        .bind(&l.item_id)
         .execute(&mut *tx)
         .await?;
         crate::tax::save_parts(&mut tx, "BILL_LINE", &line_id, &parts).await?;
@@ -456,6 +471,12 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
         },
     )
     .await?;
+    // D38: stock bought comes in at the line's cost without tax, in the home currency.
+    for (l, net) in bill.lines.iter().zip(&figures.nets) {
+        if let Some(item_id) = &l.item_id {
+            crate::stock::receive(&mut tx, item_id, l.quantity, *net, &bill.date, &bill.id, &entry.id).await?;
+        }
+    }
     set_status(&mut tx, id, "POSTED", Some(&entry.id)).await?;
     let out = find_one(&mut tx, id).await?;
     tx.commit().await?;
@@ -480,7 +501,8 @@ pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Bill> {
         return Err(AppError::bad_request("Cannot void a part-paid bill — reverse the payments first"));
     }
     if let Some(je) = &bill.journal_entry_id {
-        entries::reverse(&mut tx, je, today).await?;
+        let reversal = entries::reverse(&mut tx, je, today).await?;
+        crate::stock::undo_source(&mut tx, "BILL", "BILL_VOID", id, today, &reversal.id).await?;
     }
     set_status(&mut tx, id, "VOID", None).await?;
     let out = find_one(&mut tx, id).await?;

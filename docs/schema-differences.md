@@ -74,6 +74,11 @@ externalKey)` unique so an outside record comes in once), `bank_lines` (imported
 amount in the account's currency, signed; MATCHED needs a match type and id) and `import_layouts`
 (saved column mappings, JSON).
 
+D38 adds `items` (products & services; quantity on hand in hundredths and stock value in cents for
+stock items, both never negative) and `stock_moves` (every change in stock with the value posted
+to the inventory account), plus `invoice_lines.itemId`, `invoice_lines.discountAmount` (NOT NULL,
+default 0) and `bill_lines.itemId`.
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

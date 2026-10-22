@@ -101,6 +101,8 @@ async fn books() -> AppResult<Books> {
             unit_price: Some(m(amount)),
             account_id: Some(b.acct["4000"].clone()),
             tax_code_id: None,
+            item_id: None,
+            discount: app_core::money::Money::ZERO,
         }],
         ..Default::default()
     };
@@ -148,6 +150,7 @@ async fn books() -> AppResult<Books> {
                 unit_price: m("250"),
                 account_id: b.acct["5000"].clone(),
                 tax_code_id: None,
+                item_id: None,
             }],
         },
     )

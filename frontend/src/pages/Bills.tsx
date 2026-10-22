@@ -10,11 +10,12 @@ import CurrencyPicker from '../components/CurrencyPicker';
 import { region } from '../lib/region';
 import { lineCodes, summarize, useTaxCodes } from '../lib/taxes';
 import TxnLink from '../components/TxnLink';
+import type { PickItem } from '../lib/items';
 
 interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; totalAmount: number; status: string; currency?: string | null }
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const emptyLine = () => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId: '', taxCodeId: region().defaultPurchaseTax });
+const emptyLine = () => ({ _key: uid(), itemId: '', description: '', quantity: 1, unitPrice: 0, accountId: '', taxCodeId: region().defaultPurchaseTax });
 
 export default function Bills() {
   const [rows, setRows] = useState<Bill[]>([]);
@@ -25,6 +26,8 @@ export default function Bills() {
 
   const [vendors, setVendors] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  // D38: products & services for the lines.
+  const [items, setItems] = useState<PickItem[]>([]);
   const [showForm, setShowForm] = useState(false);
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
@@ -51,10 +54,29 @@ export default function Bills() {
     // D33: a bill line may be an expense, an asset bought on credit or a liability; the bill is
     // owed on a payable (liability) account, Accounts Payable by default.
     api.get('/accounts').then((r) => setAccounts(r.data.filter((a: any) => !a.currency)));
+    api.get('/items').then((r) => setItems((r.data as PickItem[]).filter((i) => i.isActive))).catch(() => {});
   }, []);
 
   const LINE_GROUPS: [string, string][] = [['EXPENSE', 'Expenses'], ['ASSET', 'Assets'], ['LIABILITY', 'Liabilities']];
+  const cols = taxCodes.length ? '1.5fr 3fr 80px 100px 2fr 1.4fr' : '1.5fr 3fr 80px 100px 2fr';
   const payables = accounts.filter((a) => a.type === 'LIABILITY');
+
+  /** D38: picking a product fills the line; a stock item always goes to its inventory account. */
+  const chooseItem = (i: number, itemId: string) => {
+    const it = items.find((x) => x.id === itemId);
+    const lines = form.lines.map((l, idx) => {
+      if (idx !== i) return l;
+      if (!it) return { ...l, itemId: '' };
+      return {
+        ...l, itemId,
+        description: it.description || it.name,
+        unitPrice: it.purchaseCost ?? l.unitPrice,
+        accountId: (it.type === 'INVENTORY' ? it.inventoryAccountId : it.expenseAccountId) || l.accountId,
+      };
+    });
+    setForm({ ...form, lines });
+  };
+  const isStock = (itemId: string) => items.find((x) => x.id === itemId)?.type === 'INVENTORY';
 
   const setLine = (i: number, field: string, val: any) => {
     const lines = form.lines.map((l, idx) => idx === i ? { ...l, [field]: val } : l);
@@ -72,7 +94,7 @@ export default function Bills() {
         currency: currency || undefined,
         exchangeRate: currency ? Number(exchangeRate) : undefined,
         payableAccountId: doc.payableAccountId || undefined,
-        lines: lines.map(({ _key, taxCodeId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined })),
+        lines: lines.map(({ _key, taxCodeId, itemId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined, itemId: itemId || undefined })),
       });
       setShowForm(false);
       setForm({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
@@ -111,7 +133,8 @@ export default function Bills() {
                 onChange={(currency, exchangeRate) => setForm({ ...form, currency, exchangeRate })} />
             </div>
             <div>
-              <div className="grid gap-2 mb-1" style={{ gridTemplateColumns: taxCodes.length ? '3fr 80px 100px 2fr 1.4fr' : '3fr 80px 100px 2fr' }}>
+              <div className="grid gap-2 mb-1" style={{ gridTemplateColumns: cols }}>
+                <span className="text-xs text-gray-500 font-medium">Product</span>
                 <span className="text-xs text-gray-500 font-medium">Description</span>
                 <span className="text-xs text-gray-500 font-medium">Qty</span>
                 <span className="text-xs text-gray-500 font-medium">Unit Price</span>
@@ -119,11 +142,16 @@ export default function Bills() {
                 {taxCodes.length > 0 && <span className="text-xs text-gray-500 font-medium">Tax</span>}
               </div>
               {form.lines.map((line, i) => (
-                <div key={line._key} className="grid gap-2 mb-2" style={{ gridTemplateColumns: taxCodes.length ? '3fr 80px 100px 2fr 1.4fr' : '3fr 80px 100px 2fr' }}>
+                <div key={line._key} className="grid gap-2 mb-2" style={{ gridTemplateColumns: cols }}>
+                  <select value={line.itemId} onChange={(e) => chooseItem(i, e.target.value)} aria-label={`Product for line ${i + 1}`}>
+                    <option value="">—</option>
+                    {items.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
+                  </select>
                   <input required placeholder="Item description" value={line.description} onChange={(e) => setLine(i, 'description', e.target.value)} />
                   <input required type="number" min="0.001" step="any" value={line.quantity} onChange={(e) => setLine(i, 'quantity', Number(e.target.value))} />
                   <input required type="number" min="0" step="0.01" value={line.unitPrice || ''} onChange={(e) => setLine(i, 'unitPrice', Number(e.target.value))} />
-                  <select required value={line.accountId} onChange={(e) => setLine(i, 'accountId', e.target.value)} aria-label={`Account for line ${i + 1}`}>
+                  <select required value={line.accountId} disabled={isStock(line.itemId)} title={isStock(line.itemId) ? 'A stock item is bought into its inventory account' : undefined}
+                    onChange={(e) => setLine(i, 'accountId', e.target.value)} aria-label={`Account for line ${i + 1}`}>
                     <option value="">Account</option>
                     {LINE_GROUPS.map(([type, label]) => (
                       <optgroup key={type} label={label}>

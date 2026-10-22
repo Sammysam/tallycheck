@@ -54,6 +54,9 @@ const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
     ("payments", "payableAccountId", false),
     ("accounts", "currency", false), // D34
     ("journal_lines", "foreignAmount", false),
+    ("invoice_lines", "itemId", false),        // D38
+    ("invoice_lines", "discountAmount", true), // D38
+    ("bill_lines", "itemId", false),           // D38
 ];
 
 /// Tables this project adds on purpose (approved deviations); the reference has no such table.
@@ -68,7 +71,9 @@ const APPROVED_EXTRA_TABLES: &[&str] = &[
     "import_items",
     "bank_lines",
     "import_layouts",
-]; // D21, D22, D26, D27, D37
+    "items",
+    "stock_moves",
+]; // D21, D22, D26, D27, D37, D38
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =

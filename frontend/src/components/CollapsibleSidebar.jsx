@@ -23,6 +23,8 @@ export const navigation = [
       { label: 'Accounts',  to: '/accounts',  permission: 'accounts' },
       { label: 'Customers', to: '/customers', permission: 'customers' },
       { label: 'Vendors',   to: '/vendors',   permission: 'vendors' },
+      // D38: everyone who raises invoices or bills picks products.
+      { label: 'Products & Services', to: '/items', permission: ['invoices', 'bills'] },
     ],
   },
   {

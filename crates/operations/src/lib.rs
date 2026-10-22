@@ -22,6 +22,7 @@ pub mod parties;
 pub mod payments;
 pub mod sheet;
 pub mod statements;
+pub mod stock;
 pub mod tax;
 
 use app_core::money::Money;

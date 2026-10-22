@@ -2699,3 +2699,199 @@ async fn import_from_file_bank_matching_and_undo() -> TestResult {
     assert!(!log.body.to_string().contains("/imports/preview"));
     Ok(())
 }
+
+#[tokio::test]
+async fn products_stock_at_average_cost_and_invoice_discounts() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"region.currency": "LKR"}))).await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let code_id = |code: &str| -> String {
+        accounts
+            .body
+            .as_array()
+            .and_then(|a| a.iter().find(|x| x["code"] == code))
+            .and_then(|x| x["id"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (revenue, opex, equity) = (code_id("4000"), code_id("6000"), code_id("3000"));
+    let id = |v: &Value| v["id"].as_str().unwrap_or_default().to_string();
+    // Trial-balance figure of an account by code (in its normal direction: revenue positive).
+    let tb = |body: &Value, code: &str| -> f64 {
+        body.as_array()
+            .and_then(|r| r.iter().find(|x| x["account"]["code"] == code))
+            .and_then(|r| r["balance"].as_f64())
+            .unwrap_or(0.0)
+    };
+
+    let tea = app
+        .call(
+            Method::POST,
+            "/api/items",
+            Some(&admin),
+            Some(json!({"name": "Tea 400g", "sku": "T400", "type": "INVENTORY", "salePrice": 850, "reorderPoint": 5})),
+        )
+        .await?;
+    assert_eq!(tea.status, StatusCode::CREATED, "{}", tea.body);
+    assert!(tea.body["inventoryAccountId"].is_string() && tea.body["cogsAccountId"].is_string(), "{}", tea.body);
+    let tea_id = id(&tea.body);
+    let twin = app.call(Method::POST, "/api/items", Some(&admin), Some(json!({"name": " tea 400G "}))).await?;
+    assert_eq!(twin.status, StatusCode::BAD_REQUEST, "names are unique");
+
+    // Two purchases: 10 at 500 and 10 at 600 → 20 worth 11,000 (average 550).
+    let vendor = app.call(Method::POST, "/api/vendors", Some(&admin), Some(json!({"name": "Estate Ltd"}))).await?;
+    let mut bills = Vec::new();
+    for price in [500, 600] {
+        let b = app
+            .call(
+                Method::POST,
+                "/api/bills",
+                Some(&admin),
+                Some(json!({"vendorId": id(&vendor.body), "date": "2026-10-01",
+                    "lines": [{"description": "Tea", "quantity": 10, "unitPrice": price, "accountId": opex, "itemId": tea_id}]})),
+            )
+            .await?;
+        assert_eq!(b.status, StatusCode::CREATED, "{}", b.body);
+        let bid = id(&b.body);
+        let p = app.call(Method::POST, &format!("/api/bills/{bid}/post"), Some(&admin), None).await?;
+        assert_eq!(p.status, StatusCode::CREATED, "{}", p.body);
+        bills.push(bid);
+    }
+    let item = app.call(Method::GET, &format!("/api/items/{tea_id}"), Some(&admin), None).await?;
+    assert_eq!((item.body["quantityOnHand"].clone(), item.body["stockValue"].clone()), (json!(20), json!(11000)));
+    assert_eq!(item.body["averageCost"], json!(550));
+    let t = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!((tb(&t.body, "1200"), tb(&t.body, "6000")), (11000.0, 0.0), "stock lines go to inventory, not expense");
+
+    // Sell 3 with a 10% discount and VAT 10% on top.
+    let vat_acct = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "2300", "name": "VAT", "type": "LIABILITY"})),
+        )
+        .await?;
+    let vat = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "VAT 10%", "rate": 10, "salesAccountId": id(&vat_acct.body), "purchaseAccountId": id(&vat_acct.body)})),
+        )
+        .await?;
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Corner Shop"}))).await?;
+    let sale = |qty: i64| {
+        json!({"customerId": id(&cust.body), "date": "2026-10-05", "lines": [{"description": "Tea 400g", "quantity": qty,
+            "unitPrice": 850, "discountAmount": 255, "itemId": tea_id, "taxCodeId": id(&vat.body)}]})
+    };
+    let inv = app.call(Method::POST, "/api/invoices", Some(&admin), Some(sale(3))).await?;
+    assert_eq!(inv.status, StatusCode::CREATED, "{}", inv.body);
+    assert_eq!(inv.body["lines"][0]["accountId"], json!(revenue), "the item's income account is used");
+    let inv_id = id(&inv.body);
+    let read = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    // 3 × 850 = 2,550 − 255 = 2,295 + VAT 229.50 = 2,524.50.
+    assert_eq!((read.body["totalAmount"].as_str(), read.body["taxAmount"].as_str()), (Some("2524.50"), Some("229.50")));
+    assert_eq!(read.body["lines"][0]["discountAmount"], json!("255.00"));
+    let too_big = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": id(&cust.body), "date": "2026-10-05",
+        "lines": [{"description": "x", "quantity": 1, "unitPrice": 10, "discountAmount": 11, "accountId": revenue}]})),
+        )
+        .await?;
+    assert_eq!(too_big.status, StatusCode::BAD_REQUEST, "a discount cannot exceed the line");
+    let posted = app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+    assert_eq!(posted.status, StatusCode::CREATED, "{}", posted.body);
+    let t = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(tb(&t.body, "5000"), 1650.0, "COGS = 3 × 550: {}", t.body);
+    assert_eq!(tb(&t.body, "1200"), 9350.0);
+    assert_eq!(tb(&t.body, "4000"), 2550.0, "revenue is the price before the discount");
+    assert_eq!(tb(&t.body, "4900"), -255.0, "the discount is its own (contra-revenue) account");
+    assert_eq!(tb(&t.body, "1100"), 2524.5);
+
+    // Prices including tax: 1,100 incl. VAT less 110 → 990 charged (VAT 90). The discount without
+    // its tax (100) goes to 4900 and revenue is 1,000 (the price without tax).
+    let incl = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": id(&cust.body), "date": "2026-10-05", "pricesIncludeTax": true,
+                "lines": [{"description": "Service", "quantity": 1, "unitPrice": 1100, "discountAmount": 110,
+                           "accountId": revenue, "taxCodeId": id(&vat.body)}]})),
+        )
+        .await?;
+    let p = app.call(Method::POST, &format!("/api/invoices/{}/post", id(&incl.body)), Some(&admin), None).await?;
+    assert_eq!(p.status, StatusCode::CREATED, "{}", p.body);
+    let t = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!((tb(&t.body, "4000"), tb(&t.body, "4900"), tb(&t.body, "2300")), (3550.0, -355.0, 319.5));
+
+    // Selling more than is in stock is refused; the draft stays.
+    let big = app.call(Method::POST, "/api/invoices", Some(&admin), Some(sale(50))).await?;
+    let refused = app.call(Method::POST, &format!("/api/invoices/{}/post", id(&big.body)), Some(&admin), None).await?;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.body);
+    assert!(refused.body["message"]
+        .as_str()
+        .is_some_and(|m| m.starts_with("Not enough stock of Tea 400g: 17 on hand, 50 needed")));
+
+    // Voiding the sale puts the stock back at what it cost.
+    let v = app.call(Method::POST, &format!("/api/invoices/{inv_id}/void"), Some(&admin), None).await?;
+    assert_eq!(v.status, StatusCode::CREATED, "{}", v.body);
+    let item = app.call(Method::GET, &format!("/api/items/{tea_id}"), Some(&admin), None).await?;
+    assert_eq!((item.body["quantityOnHand"].clone(), item.body["stockValue"].clone()), (json!(20), json!(11000)));
+
+    // Adjustments: 2 lost (at average cost, to 6000), 5 found at 600 (against equity).
+    let lost = app
+        .call(
+            Method::POST,
+            &format!("/api/items/{tea_id}/adjust"),
+            Some(&admin),
+            Some(json!({"date": "2026-10-06", "quantity": -2, "accountId": opex, "note": "Stock count"})),
+        )
+        .await?;
+    assert_eq!(
+        (lost.body["quantityOnHand"].clone(), lost.body["stockValue"].clone()),
+        (json!(18), json!(9900)),
+        "{}",
+        lost.body
+    );
+    let found = app
+        .call(
+            Method::POST,
+            &format!("/api/items/{tea_id}/adjust"),
+            Some(&admin),
+            Some(json!({"date": "2026-10-06", "quantity": 5, "unitCost": 600, "accountId": equity})),
+        )
+        .await?;
+    assert_eq!(found.body["stockValue"], json!(12900));
+    // Voiding the first bill takes out exactly what it brought in.
+    let vb = app.call(Method::POST, &format!("/api/bills/{}/void", bills[0]), Some(&admin), None).await?;
+    assert_eq!(vb.status, StatusCode::CREATED, "{}", vb.body);
+    let item = app.call(Method::GET, &format!("/api/items/{tea_id}"), Some(&admin), None).await?;
+    assert_eq!((item.body["quantityOnHand"].clone(), item.body["stockValue"].clone()), (json!(13), json!(7900)));
+    let t = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert_eq!(tb(&t.body, "1200"), 7900.0, "the inventory account always equals the stock value");
+    let moves = app.call(Method::GET, &format!("/api/items/{tea_id}/moves"), Some(&admin), None).await?;
+    assert_eq!(moves.body.as_array().map(Vec::len), Some(7), "{}", moves.body);
+
+    // A used item cannot be deleted, only made inactive; a Viewer cannot add items.
+    let del = app.call(Method::DELETE, &format!("/api/items/{tea_id}"), Some(&admin), None).await?;
+    assert_eq!(del.status, StatusCode::BAD_REQUEST);
+    let off = app
+        .call(Method::PATCH, &format!("/api/items/{tea_id}"), Some(&admin), Some(json!({"isActive": false})))
+        .await?;
+    assert_eq!(off.body["isActive"], json!(false));
+    let retype = app
+        .call(Method::PATCH, &format!("/api/items/{tea_id}"), Some(&admin), Some(json!({"type": "SERVICE"})))
+        .await?;
+    assert_eq!(retype.status, StatusCode::BAD_REQUEST, "a stock item that has moved stays one");
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    let denied = app.call(Method::POST, "/api/items", Some(&viewer), Some(json!({"name": "X"}))).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    Ok(())
+}
