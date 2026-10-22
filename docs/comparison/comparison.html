@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cenango Accounting and QuickBooks — Feature Comparison</title>
+<style>
+  @page { size: A4; margin: 14mm 14mm 16mm; }
+  :root { --orange: #ea580c; --navy: #13203b; --ink: #1f2937; --muted: #5b6472; --line: #e5e7eb; --soft: #f6f7f9; --green: #15803d; --red: #b91c1c; --amber: #b45309; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); font-size: 9.6pt; line-height: 1.45; margin: 0; background: #fff; }
+  h1, h2, h3 { color: var(--navy); line-height: 1.25; }
+  h2 { font-size: 16pt; margin: 0 0 3mm; padding-bottom: 2mm; border-bottom: 2.5px solid var(--orange); break-before: page; }
+  h2 .num { color: var(--orange); margin-right: 2.5mm; }
+  p { margin: 0 0 2.5mm; }
+  .lead { font-size: 10.5pt; color: var(--muted); margin-bottom: 4mm; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 4mm; }
+  th, td { border: 1px solid var(--line); padding: 1.3mm 2.2mm; text-align: left; vertical-align: top; }
+  th { background: var(--navy); color: #fff; font-weight: 600; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  tr { break-inside: avoid; }
+  tr.cat td { background: #fff7ed; color: var(--navy); font-weight: 700; border-left: 3px solid var(--orange); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  td.n { width: 8mm; color: var(--muted); text-align: right; }
+  td.c { width: 22mm; text-align: center; white-space: nowrap; }
+  .y { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .p { color: var(--amber); font-weight: 700; }
+  .note { background: var(--soft); border-left: 3px solid #94a3b8; padding: 2.5mm 4mm; margin: 3mm 0; font-size: 9pt; break-inside: avoid; }
+  .cover-band { background: linear-gradient(120deg, #3a2318 0%, #13203b 55%, #1b2f5a 100%); color: #fff; padding: 16mm 12mm 14mm; border-radius: 6px; margin-bottom: 6mm;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cover-band .brand { font-size: 22pt; font-weight: 700; letter-spacing: .5px; }
+  .cover-band .sub { color: #fdba74; font-size: 9pt; letter-spacing: 3px; text-transform: uppercase; margin-top: 1mm; }
+  .cover-band h1 { color: #fff; font-size: 24pt; margin: 10mm 0 2mm; }
+  .cover-band p { color: #cbd5e1; font-size: 11pt; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; margin: 0 0 6mm; }
+  .stat { border: 1px solid var(--line); border-top: 3px solid var(--orange); border-radius: 4px; padding: 3mm 4mm; }
+  .stat b { display: block; font-size: 22pt; color: var(--navy); }
+  .stat span { color: var(--muted); font-size: 9pt; }
+  ol.plan { margin: 0 0 3mm; padding-left: 6mm; }
+  ol.plan li { margin-bottom: 1mm; }
+</style>
+</head>
+<body>
+
+<section>
+  <div class="cover-band">
+    <div class="brand">CENANGO</div>
+    <div class="sub">Accounting System</div>
+    <h1>Feature comparison with QuickBooks</h1>
+    <p>What QuickBooks has that we do not, what we have that QuickBooks does not, and what both have.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>73</b><span>features in QuickBooks that our app does not have yet</span></div>
+    <div class="stat"><b>18</b><span>features in our app that QuickBooks does not have</span></div>
+    <div class="stat"><b>20</b><span>core features both have</span></div>
+  </div>
+
+  <h3>In short</h3>
+  <p>For a small or medium company, the core books are covered as well as QuickBooks covers them: sales, purchases, payments, taxes, foreign currency, bank reconciliation and the main reports. This is especially true for companies in Sri Lanka.</p>
+  <p><b>Our app's advantages:</b> it works offline, has no subscription, keeps the data on the company's own PC, has Sri Lankan payroll and withholding tax built in, stores HR documents encrypted, makes encrypted backups and allows unlimited users.</p>
+  <p><b>QuickBooks' advantages:</b> automation (bank feeds, recurring transactions, reminders), inventory items, quotes and purchase orders, classes and projects, budgets, a custom report builder, cloud and mobile access, and integrations with other apps.</p>
+
+  <h3>Suggested next features, in order</h3>
+  <ol class="plan">
+    <li>Products and services list with inventory (A28–A32)</li>
+    <li>Quotes / estimates and purchase orders (A1, A21)</li>
+    <li>Bank statement import with matching (A38–A40)</li>
+    <li>Recurring invoices, bills and journal entries (A4, A22, A43)</li>
+    <li>Attachments on transactions (A51)</li>
+    <li>Classes and projects (A44–A46)</li>
+    <li>Budgets and budget vs actual (A47)</li>
+  </ol>
+
+  <div class="note">“QuickBooks” here means QuickBooks Online (Simple Start, Essentials, Plus, Advanced) and QuickBooks Desktop (Pro, Premier, Enterprise). Some QuickBooks features need a higher plan or a paid add-on. Our app's features are as of version 0.1.0, 22 October 2026. Legend: <span class="y">✓</span> has it · <span class="x">✗</span> does not · <span class="p">◐</span> partly / depends on plan.</div>
+</section>
+
+<!-- ───────── A ───────── -->
+<h2><span class="num">A</span>QuickBooks has it, our app does not</h2>
+<table>
+  <thead><tr><th>#</th><th>Feature</th><th style="width:22mm;text-align:center">QuickBooks</th><th style="width:22mm;text-align:center">Our app</th></tr></thead>
+  <tr class="cat"><td colspan="4">Sales</td></tr>
+  <tr><td class="n">1</td><td>Estimates / quotes, converted into an invoice</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">2</td><td>Sales orders</td><td class="c p">◐ Desktop</td><td class="c x">✗</td></tr>
+  <tr><td class="n">3</td><td>Progress invoicing (billing a job in parts)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">4</td><td>Recurring invoices made automatically</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">5</td><td>Sales receipts (sale paid on the spot, no invoice)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">6</td><td>Delayed charges and delayed credits</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">7</td><td>Emailing invoices directly from the app</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">8</td><td>Online payment links on invoices (card / bank)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">9</td><td>Automatic reminders for overdue invoices</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">10</td><td>Customer portal to view and pay invoices online</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">11</td><td>Invoice template designer (layouts, colours)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">12</td><td>Custom fields on invoices, customers and vendors</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">13</td><td>Customer deposits / advances applied to later invoices</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">14</td><td>Refund receipts</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">15</td><td>Billable expenses re-charged to a customer</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">16</td><td>Undeposited funds (grouping receipts into one deposit)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">17</td><td>Bank deposits screen</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">18</td><td>Customer types, price levels and price rules</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">19</td><td>Discount lines / percentage discount on the whole invoice</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">20</td><td>Shipping charges, shipping address and tracking</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr class="cat"><td colspan="4">Purchases</td></tr>
+  <tr><td class="n">21</td><td>Purchase orders, converted into a bill</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">22</td><td>Recurring bills and expenses</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">23</td><td>Vendor credits applied automatically to later bills</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">24</td><td>Paying many bills in one batch</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">25</td><td>Cheque writing and cheque printing</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">26</td><td>Bill approval workflow</td><td class="c p">◐ Advanced</td><td class="c x">✗</td></tr>
+  <tr><td class="n">27</td><td>Vendor 1099 tracking (USA)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr class="cat"><td colspan="4">Products and inventory</td></tr>
+  <tr><td class="n">28</td><td>Products and services list (price, cost, income account)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">29</td><td>Inventory quantity tracking (stock on hand)</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">30</td><td>Cost of goods sold per item (average / FIFO)</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">31</td><td>Reorder points and low-stock alerts</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">32</td><td>Inventory adjustments and stock counts</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">33</td><td>Bundles / assemblies</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">34</td><td>Multiple warehouses / bin locations</td><td class="c p">◐ Enterprise</td><td class="c x">✗</td></tr>
+  <tr><td class="n">35</td><td>Lot and serial numbers</td><td class="c p">◐ Enterprise</td><td class="c x">✗</td></tr>
+  <tr><td class="n">36</td><td>Barcode scanning</td><td class="c p">◐ Enterprise</td><td class="c x">✗</td></tr>
+  <tr class="cat"><td colspan="4">Banking</td></tr>
+  <tr><td class="n">37</td><td>Bank feeds (transactions downloaded automatically)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">38</td><td>Import bank statements (CSV, QBO, OFX)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">39</td><td>Bank rules (auto-categorising transactions)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">40</td><td>Matching downloaded transactions to invoices and bills</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">41</td><td>Credit card accounts with feeds</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">42</td><td>Transfer between accounts as its own screen</td><td class="c y">✓</td><td class="c p">◐ by journal entry</td></tr>
+  <tr class="cat"><td colspan="4">Accounting</td></tr>
+  <tr><td class="n">43</td><td>Recurring journal entries</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">44</td><td>Classes (departments)</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">45</td><td>Locations (branches)</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">46</td><td>Projects / job costing</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">47</td><td>Budgets and budget vs actual</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr><td class="n">48</td><td>Fixed asset register with depreciation</td><td class="c p">◐ Desktop / Advanced</td><td class="c x">✗</td></tr>
+  <tr><td class="n">49</td><td>Revaluing open foreign invoices and bills at month-end</td><td class="c y">✓</td><td class="c p">◐ bank accounts only</td></tr>
+  <tr><td class="n">50</td><td>Three-decimal home currency (e.g. KWD, BHD)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">51</td><td>Attachments on any transaction</td><td class="c y">✓</td><td class="c p">◐ employees only</td></tr>
+  <tr><td class="n">52</td><td>Receipt capture (photo becomes an expense)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">53</td><td>Accountant tools (reclassify, write-offs, accountant login)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">54</td><td>Year-end closing adjustments workflow</td><td class="c y">✓</td><td class="c p">◐ lock date only</td></tr>
+  <tr class="cat"><td colspan="4">Reports</td></tr>
+  <tr><td class="n">55</td><td>100+ ready-made reports (sales by customer / item, expenses by vendor…)</td><td class="c y">✓</td><td class="c p">◐ 9 reports</td></tr>
+  <tr><td class="n">56</td><td>Custom report builder</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">57</td><td>Saved reports and scheduled emailing of reports</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">58</td><td>Management report packs</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">59</td><td>Custom dashboards and charts</td><td class="c p">◐ Advanced</td><td class="c x">✗</td></tr>
+  <tr><td class="n">60</td><td>Reports by class, location or project</td><td class="c p">◐ Plus+</td><td class="c x">✗</td></tr>
+  <tr class="cat"><td colspan="4">Payroll and people</td></tr>
+  <tr><td class="n">61</td><td>Payroll for the USA, Canada, UK and Australia with tax filing</td><td class="c p">◐ paid add-on</td><td class="c x">✗</td></tr>
+  <tr><td class="n">62</td><td>Direct deposit of salaries</td><td class="c p">◐ paid add-on</td><td class="c x">✗</td></tr>
+  <tr><td class="n">63</td><td>Employee self-service portal (payslips online)</td><td class="c p">◐ paid add-on</td><td class="c x">✗</td></tr>
+  <tr><td class="n">64</td><td>Time tracking / timesheets</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">65</td><td>Mileage tracking</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">66</td><td>Contractor payments</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr class="cat"><td colspan="4">Platform</td></tr>
+  <tr><td class="n">67</td><td>Cloud access from anywhere</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">68</td><td>Mobile apps (iOS / Android)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">69</td><td>Many companies under one login</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">70</td><td>750+ app integrations (Shopify, PayPal, Stripe, CRM…)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">71</td><td>Import customers, vendors, items, accounts and transactions from Excel / CSV</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">72</td><td>AI assistant (categorising, reminders, insights)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">73</td><td>Cash-flow forecast / planner</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+</table>
+
+<!-- ───────── B ───────── -->
+<h2><span class="num">B</span>Our app has it, QuickBooks does not</h2>
+<table>
+  <thead><tr><th>#</th><th>Feature</th><th style="width:22mm;text-align:center">Our app</th><th style="width:22mm;text-align:center">QuickBooks</th></tr></thead>
+  <tr class="cat"><td colspan="4">Ownership and cost</td></tr>
+  <tr><td class="n">1</td><td>Works fully offline; no internet ever needed</td><td class="c y">✓</td><td class="c x">✗ Online needs internet</td></tr>
+  <tr><td class="n">2</td><td>Data stays on the company's own PC</td><td class="c y">✓</td><td class="c x">✗ Intuit cloud</td></tr>
+  <tr><td class="n">3</td><td>No subscription</td><td class="c y">✓</td><td class="c x">✗ monthly fee</td></tr>
+  <tr><td class="n">4</td><td>Unlimited users at no extra cost</td><td class="c y">✓</td><td class="c p">◐ 1 / 3 / 5 / 25 by plan</td></tr>
+  <tr><td class="n">5</td><td>Office LAN mode: one PC holds the data, others connect over the office network</td><td class="c y">✓</td><td class="c p">◐ Desktop only</td></tr>
+  <tr><td class="n">6</td><td>Any of 244 countries with one product</td><td class="c y">✓</td><td class="c x">✗ regional editions; not sold in Sri Lanka</td></tr>
+  <tr class="cat"><td colspan="4">Payroll and HR</td></tr>
+  <tr><td class="n">7</td><td>Sri Lankan payroll: EPF 8% + 12%, ETF 3%, PAYE, stamp duty, statutory forms</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">8</td><td>Statutory remittance tracking per payroll run (due, remitted, outstanding)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">9</td><td>Staff loans with automatic payroll instalments</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">10</td><td>Salary history with components and increments by effective date</td><td class="c y">✓</td><td class="c p">◐ basic</td></tr>
+  <tr><td class="n">11</td><td>Encrypted employee document vault with expiry dates; payslips filed automatically</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">12</td><td>Employee photo and full HR profile, stored encrypted</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr class="cat"><td colspan="4">Tax</td></tr>
+  <tr><td class="n">13</td><td>Withholding tax deducted by the customer, recorded on the payment itself</td><td class="c y">✓</td><td class="c p">◐ workarounds</td></tr>
+  <tr class="cat"><td colspan="4">Safety and administration</td></tr>
+  <tr><td class="n">14</td><td>Encrypted, password-protected backups that the company keeps</td><td class="c y">✓</td><td class="c p">◐ paid add-on (Online)</td></tr>
+  <tr><td class="n">15</td><td>Restore checked first; old data kept in a “pre-restore” folder</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+  <tr><td class="n">16</td><td>Daily automatic backup to your own folder, keeping the last 14</td><td class="c y">✓</td><td class="c p">◐ Desktop only</td></tr>
+  <tr><td class="n">17</td><td>2FA, full activity log and custom roles on every installation</td><td class="c y">✓</td><td class="c p">◐ higher plans</td></tr>
+  <tr><td class="n">18</td><td>Admin Centre health page (backups, 2FA coverage, lock date, missing details)</td><td class="c y">✓</td><td class="c x">✗</td></tr>
+</table>
+
+<!-- ───────── C ───────── -->
+<h2><span class="num">C</span>Both have it</h2>
+<table>
+  <thead><tr><th>#</th><th>Feature</th><th style="width:22mm;text-align:center">Our app</th><th style="width:22mm;text-align:center">QuickBooks</th></tr></thead>
+  <tr><td class="n">1</td><td>Chart of accounts (add, edit, currency per account)</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">2</td><td>Manual journal entries</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">3</td><td>Transaction details / drill-down to ledger lines</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">4</td><td>Customers and vendors</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">5</td><td>Invoices (draft, post, print / PDF, void)</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">6</td><td>Bills and expenses</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">7</td><td>Customer and vendor payments, partial payments, void</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">8</td><td>Credit notes and debit notes (vendor credits)</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">9</td><td>Separate payable accounts; paying a liability directly</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">10</td><td>Foreign-currency invoices and bills with exchange gain / loss</td><td class="c y">✓</td><td class="c p">◐ Plus+</td></tr>
+  <tr><td class="n">11</td><td>Foreign-currency bank accounts and revaluation</td><td class="c y">✓</td><td class="c p">◐ Plus+</td></tr>
+  <tr><td class="n">12</td><td>VAT / GST / sales tax, tax groups, tax return report</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">13</td><td>Bank reconciliation</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">14</td><td>Lock the books (closing date)</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">15</td><td>Profit &amp; Loss with comparison, Balance Sheet, Cash Flow, Trial Balance</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">16</td><td>AR / AP ageing and customer statements</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">17</td><td>Users, roles, activity log, two-factor sign-in</td><td class="c y">✓</td><td class="c p">◐ by plan</td></tr>
+  <tr><td class="n">18</td><td>Print / PDF and export to Excel</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">19</td><td>Company setup wizard</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+  <tr><td class="n">20</td><td>Dashboard (income, expenses, overdue items)</td><td class="c y">✓</td><td class="c y">✓</td></tr>
+</table>
+<div class="note">QuickBooks features and plan limits change over time; check the plan in question before deciding. This comparison is a guide to direction, not a buying recommendation.</div>
+
+</body>
+</html>
