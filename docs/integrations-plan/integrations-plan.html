@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cenango Accounting — Integrations Plan</title>
+<style>
+  @page { size: A4; margin: 14mm 15mm 16mm; }
+  :root { --orange: #ea580c; --navy: #13203b; --ink: #1f2937; --muted: #5b6472; --line: #e5e7eb; --soft: #f6f7f9; --green: #15803d; --red: #b91c1c; --amber: #b45309; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); font-size: 10pt; line-height: 1.5; margin: 0; background: #fff; }
+  h1, h2, h3 { color: var(--navy); line-height: 1.25; }
+  h2 { font-size: 16pt; margin: 0 0 3mm; padding-bottom: 2mm; border-bottom: 2.5px solid var(--orange); break-before: page; }
+  h2 .num { color: var(--orange); margin-right: 2.5mm; }
+  h3 { font-size: 12pt; margin: 5mm 0 2mm; break-after: avoid; }
+  p { margin: 0 0 2.5mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+  li { margin-bottom: 1mm; }
+  .lead { font-size: 10.5pt; color: var(--muted); margin-bottom: 4mm; }
+  table { width: 100%; border-collapse: collapse; margin: 1mm 0 3mm; font-size: 9pt; }
+  th, td { border: 1px solid var(--line); padding: 1mm 2.2mm; text-align: left; vertical-align: top; }
+  th { background: var(--navy); color: #fff; font-weight: 600; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  tr { break-inside: avoid; }
+  .y { color: var(--green); font-weight: 700; }
+  .x { color: var(--red); font-weight: 700; }
+  .p { color: var(--amber); font-weight: 700; }
+  .note { background: var(--soft); border-left: 3px solid #94a3b8; padding: 2.5mm 4mm; margin: 3mm 0; font-size: 9.4pt; break-inside: avoid; }
+  .tip { background: #fff7ed; border-left: 3px solid var(--orange); padding: 2.5mm 4mm; margin: 3mm 0; font-size: 9.4pt; break-inside: avoid; }
+  .cover-band { background: linear-gradient(120deg, #3a2318 0%, #13203b 55%, #1b2f5a 100%); color: #fff; padding: 16mm 12mm 14mm; border-radius: 6px; margin-bottom: 6mm;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cover-band .brand { font-size: 22pt; font-weight: 700; letter-spacing: .5px; }
+  .cover-band .sub { color: #fdba74; font-size: 9pt; letter-spacing: 3px; text-transform: uppercase; margin-top: 1mm; }
+  .cover-band h1 { color: #fff; font-size: 24pt; margin: 10mm 0 2mm; }
+  .cover-band p { color: #cbd5e1; font-size: 11pt; }
+  .ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; margin: 2mm 0 5mm; }
+  .way { border: 1px solid var(--line); border-top: 3px solid var(--orange); border-radius: 4px; padding: 3mm 4mm; font-size: 9.2pt; }
+  .way b { display: block; color: var(--navy); font-size: 10.5pt; margin-bottom: 1mm; }
+  .diagram { font-family: Consolas, monospace; font-size: 8.8pt; background: var(--soft); border: 1px solid var(--line); border-radius: 4px; padding: 3mm 4mm; white-space: pre; margin: 2mm 0 4mm; }
+  .phase { border: 1px solid var(--line); border-left: 4px solid var(--orange); border-radius: 4px; padding: 3mm 4mm; margin: 0 0 4mm; break-inside: avoid; }
+  .phase h3 { margin: 0 0 1.5mm; }
+  .phase .meta { color: var(--muted); font-size: 9pt; margin-bottom: 2mm; }
+</style>
+</head>
+<body>
+
+<section>
+  <div class="cover-band">
+    <div class="brand">CENANGO</div>
+    <div class="sub">Accounting System</div>
+    <h1>Integrations plan</h1>
+    <p>Connecting the app to Shopify, payment services, banks, spreadsheets and other systems, and to Claude through an MCP plugin.</p>
+  </div>
+
+  <h3>The goal</h3>
+  <p>Today every transaction is typed into the app by hand. The goal is for sales, payments, fees and bank transactions to come in <b>automatically</b> from the systems the company already uses, as <b>drafts</b> that a person checks and posts.</p>
+
+  <h3>Three ways to connect</h3>
+  <div class="ways">
+    <div class="way"><b>1. Import from file</b>Excel / CSV from any bank, shop or system, with a column-mapping screen. Works with <strong>everything</strong>, fully offline.</div>
+    <div class="way"><b>2. Direct connectors</b>Built into the app for the most-used services (Shopify, WooCommerce, PayPal, Stripe, PayHere). One “Sync now” button.</div>
+    <div class="way"><b>3. Claude (MCP plugin)</b>Claude reads and drafts records through our MCP server and connects to any other service that has an MCP server or API.</div>
+  </div>
+
+  <div class="diagram">  Shopify · WooCommerce · PayPal · Stripe · PayHere · Bank files · Excel · CRM · Email
+          │                    │                         │
+   (1) file import      (2) direct connector       (3) Claude + MCP
+          └────────────────────┼─────────────────────────┘
+                               ▼
+                 Cenango Accounting  →  DRAFTS  →  a person checks and posts
+                               │
+                         Ledger · Reports · Tax return</div>
+
+  <h3>Rules that never change</h3>
+  <ul>
+    <li><b>Drafts only.</b> Nothing imported or created by Claude reaches the ledger until a person posts it.</li>
+    <li><b>No duplicates.</b> Each outside record (a Shopify order, a bank line) is imported once, remembered by its own ID.</li>
+    <li><b>Everything is logged</b> in the Activity Log, with its source (“via Shopify”, “via Claude”, “from file”).</li>
+    <li><b>Off by default.</b> Each integration is switched on by an administrator. Keys are stored encrypted and can be removed at any time.</li>
+    <li><b>Offline stays the default.</b> The internet is needed only while a connector syncs or Claude is used.</li>
+  </ul>
+</section>
+
+<!-- ───────── 1 ───────── -->
+<h2><span class="num">1</span>What can be connected</h2>
+<table>
+  <tr><th style="width:20%">Type</th><th style="width:34%">Examples</th><th>What comes into the app</th><th style="width:16%">How</th></tr>
+  <tr><td>Online shops</td><td>Shopify, WooCommerce, Wix, Squarespace, Amazon, Daraz</td><td>Orders → invoices; refunds → credit notes; fees → expenses; payouts → bank</td><td>Connector · file · Claude</td></tr>
+  <tr><td>Payments</td><td>PayPal, Stripe, Square, PayHere, card machines</td><td>Payments received, fees, payouts to the bank</td><td>Connector · file · Claude</td></tr>
+  <tr><td>Banks</td><td>Statement files (CSV / Excel) from any bank</td><td>Bank lines for matching and reconciliation</td><td>File</td></tr>
+  <tr><td>POS / shop billing</td><td>Retail and restaurant POS systems</td><td>Daily sales totals</td><td>File · Claude</td></tr>
+  <tr><td>Spreadsheets</td><td>Excel, Google Sheets</td><td>Customers, vendors, opening balances, transactions</td><td>File · Claude</td></tr>
+  <tr><td>Email</td><td>Gmail, Outlook</td><td>Send invoices and reminders; read supplier bills</td><td>Claude</td></tr>
+  <tr><td>CRM</td><td>HubSpot, Zoho CRM, Salesforce</td><td>Customers; a won deal → draft invoice</td><td>Claude</td></tr>
+  <tr><td>Receipts</td><td>Photos / PDFs of receipts and bills</td><td>Draft expenses and bills</td><td>Claude</td></tr>
+  <tr><td>Couriers</td><td>Delivery services with an API</td><td>Shipping costs</td><td>File · Claude</td></tr>
+  <tr><td>Tax / statutory</td><td>VAT, EPF / ETF returns</td><td>Export files in the format the office accepts</td><td>Export</td></tr>
+</table>
+
+<h3>Shopify in detail</h3>
+<table>
+  <tr><th style="width:30%">Shopify data</th><th>Becomes in our app</th><th style="width:20%">Ready today?</th></tr>
+  <tr><td>Orders</td><td>Invoices with lines, tax and shipping</td><td class="y">✓</td></tr>
+  <tr><td>Customers</td><td>Customers, matched by email</td><td class="y">✓</td></tr>
+  <tr><td>Payments and payouts</td><td>Payments; bank deposit when the payout arrives</td><td class="y">✓</td></tr>
+  <tr><td>Shopify / payment fees</td><td>Expense, e.g. “Shopify fees”</td><td class="y">✓</td></tr>
+  <tr><td>Refunds and returns</td><td>Credit notes</td><td class="y">✓</td></tr>
+  <tr><td>Taxes per order</td><td>Mapped to our tax codes</td><td class="y">✓</td></tr>
+  <tr><td>Orders in USD, EUR…</td><td>Foreign-currency invoices</td><td class="y">✓</td></tr>
+  <tr><td>Discounts</td><td>Discount lines</td><td class="p">◐ to add</td></tr>
+  <tr><td>Shipping charged</td><td>Shipping income line</td><td class="p">◐ to add</td></tr>
+  <tr><td>Gift cards</td><td>A liability until used</td><td class="p">◐ to add</td></tr>
+  <tr><td>Products</td><td>Products &amp; services list</td><td class="x">✗ to build</td></tr>
+  <tr><td>Stock and cost of goods</td><td>Inventory quantities and COGS</td><td class="x">✗ to build</td></tr>
+</table>
+<div class="note">About 70% of Shopify can be connected today. Products and inventory must be built first; they are also the largest gap compared with QuickBooks.</div>
+
+<!-- ───────── 2 ───────── -->
+<h2><span class="num">2</span>The phases</h2>
+
+<div class="phase">
+  <h3>Phase 1 — Import from file</h3>
+  <div class="meta">Version 1.1 · about 2–3 weeks · works offline · needs nothing else</div>
+  <ul>
+    <li>One <b>Import</b> screen: choose an Excel or CSV file, then match its columns to ours (date, description, amount, customer…). The mapping is saved per source, so next month is one click.</li>
+    <li>Imports bank statements (for reconciliation), sales, customers, vendors and opening balances.</li>
+    <li>Preview before import; duplicates skipped; everything lands as drafts.</li>
+    <li>Bank lines are matched automatically to open invoices and bills, with suggestions to confirm.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <h3>Phase 2 — Products, inventory, discounts and shipping</h3>
+  <div class="meta">Version 1.2 · about 3–4 weeks · needed before Shopify products and stock</div>
+  <ul>
+    <li>Products &amp; services list: name, SKU, sale price, cost, income and expense accounts, tax code.</li>
+    <li>Stock quantities, cost of goods sold per item (average cost), stock adjustments, low-stock list.</li>
+    <li>Discount lines and shipping lines on invoices.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <h3>Phase 3 — Integrations framework and the Shopify connector</h3>
+  <div class="meta">Version 1.3 · about 3 weeks · needs internet only while syncing</div>
+  <ul>
+    <li><b>Settings → Integrations</b>: connect, disconnect, last sync, errors. Keys stored encrypted.</li>
+    <li><b>Mapping screen</b>: which bank receives payouts, which account gets fees, Shopify tax → our tax codes, Shopify products → our products.</li>
+    <li><b>Sync now</b> (and optional hourly sync): orders, refunds, payouts and fees arrive as drafts. Each Shopify ID is imported once.</li>
+    <li>A summary after each sync: “12 orders, 1 refund, 2 payouts imported as drafts”.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <h3>Phase 4 — More connectors</h3>
+  <div class="meta">Version 1.4 · about 1–2 weeks each</div>
+  <ul>
+    <li>Built on the same framework, in the order customers need them, for example WooCommerce, PayPal, Stripe and PayHere.</li>
+  </ul>
+</div>
+
+<div class="phase">
+  <h3>Phase 5 — Claude MCP server and plugin</h3>
+  <div class="meta">Version 1.5 · about 3–4 weeks · optional for each company</div>
+  <ul>
+    <li><b>API keys</b> in Settings, each tied to a user and role (a key can be read-only). Reachable from the same PC only.</li>
+    <li><b>MCP server</b> installed with the app. Read tools: invoices, bills, customers, reports, account activity. Draft tools: invoice, bill, journal entry. <b>No posting, voiding or deleting.</b></li>
+    <li><b>Claude plugin</b> with ready-made skills: Month-end close · Import Shopify sales · Chase overdue customers · Prepare VAT return · Explain a report.</li>
+    <li>With Shopify's (or another service's) own connector added to Claude, Claude can move data between them and our app, e.g. “Import this week's Shopify orders as draft invoices”.</li>
+  </ul>
+</div>
+
+<h3>Timeline</h3>
+<table>
+  <tr><th style="width:12%">Version</th><th>Contents</th><th style="width:22%">Estimate</th></tr>
+  <tr><td>1.1</td><td>Import from file (bank, sales, lists, opening balances) with matching</td><td>2–3 weeks</td></tr>
+  <tr><td>1.2</td><td>Products, inventory, discount and shipping lines</td><td>3–4 weeks</td></tr>
+  <tr><td>1.3</td><td>Integrations framework + Shopify connector</td><td>3 weeks</td></tr>
+  <tr><td>1.4</td><td>Further connectors (WooCommerce, PayPal, Stripe, PayHere…)</td><td>1–2 weeks each</td></tr>
+  <tr><td>1.5</td><td>API keys, MCP server, Claude plugin and skills</td><td>3–4 weeks</td></tr>
+</table>
+<div class="note">Estimates are rough and assume one developer working with Claude. Phases 1, 2 and 5 do not depend on each other and can be reordered.</div>
+
+<!-- ───────── 3 ───────── -->
+<h2><span class="num">3</span>Safety, privacy and what we need</h2>
+<h3>Safety and privacy</h3>
+<ul>
+  <li><b>Drafts only</b> from every source; a person posts. Claude can never post, void or delete.</li>
+  <li><b>Audit trail:</b> every imported or Claude-created record shows its source in the Activity Log and on its transaction details page.</li>
+  <li><b>Undo:</b> an import can be removed as a whole while its records are still drafts.</li>
+  <li><b>Keys:</b> Shopify, PayPal and API keys are stored encrypted, never shown again after saving, and can be revoked.</li>
+  <li><b>Privacy notice:</b> connectors send nothing except the requests needed to fetch data. When Claude is used, the data it reads is sent to Claude (Anthropic) to answer the question. Customers are told this clearly, and both can stay switched off.</li>
+  <li><b>Offline default:</b> without connectors or Claude, the app never uses the internet.</li>
+</ul>
+
+<h3>What we need to start</h3>
+<table>
+  <tr><th style="width:40%">Item</th><th>Why</th></tr>
+  <tr><td>The list of services customers actually use</td><td>Decides which connectors come first (Phase 4)</td></tr>
+  <tr><td>A Shopify store for testing (a free development store is fine)</td><td>To build and test the Shopify connector</td></tr>
+  <tr><td>Sample bank statement files from the banks customers use</td><td>To test the file import</td></tr>
+  <tr><td>PayPal / Stripe / PayHere sandbox accounts</td><td>To test payment connectors without real money</td></tr>
+  <tr><td>Approval of the privacy notice wording</td><td>Before the Claude plugin is offered</td></tr>
+  <tr><td>A Claude account for testing the plugin</td><td>Phase 5</td></tr>
+</table>
+
+<h3>Decisions for management</h3>
+<ol>
+  <li>Agree the order: <b>file import → products/inventory → Shopify → more connectors → Claude</b>, or move Claude earlier?</li>
+  <li>Which connectors come first after Shopify?</li>
+  <li>Should Claude start <b>read-only</b> (questions and reports only) before it is allowed to create drafts?</li>
+  <li>Are connectors and the Claude plugin part of the standard product, or a paid add-on?</li>
+</ol>
+
+<p class="lead" style="margin-top:6mm">Prepared 22 October 2026 for Cenango Accounting version 0.1.0.</p>
+
+</body>
+</html>
