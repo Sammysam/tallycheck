@@ -25,6 +25,8 @@ import AccountActivity from './pages/AccountActivity';
 import TransactionDetail from './pages/TransactionDetail';
 import CreditNotes from './pages/CreditNotes';
 import Ledger from './pages/Ledger';
+import ImportData from './pages/ImportData';
+import BankTransactions from './pages/BankTransactions';
 import BankReconciliation from './pages/BankReconciliation';
 import TrialBalance from './pages/reports/TrialBalance';
 import ProfitLoss from './pages/reports/ProfitLoss';
@@ -80,6 +82,10 @@ export default function App() {
                   <Route path="/credit-notes"             element={<CreditNotes kind="AR" key="AR" />} />
                   <Route path="/debit-notes"              element={<CreditNotes kind="AP" key="AP" />} />
                   <Route path="/ledger"                   element={<Ledger />} />
+                  <Route path="/import"                   element={<ImportData />} />
+                  <Route path="/bank-transactions" element={
+                    <ProtectedRoute permission="banking"><BankTransactions /></ProtectedRoute>
+                  } />
                   <Route path="/ledger/entries/:id" element={
                     <ProtectedRoute permission="ledger"><TransactionDetail /></ProtectedRoute>
                   } />

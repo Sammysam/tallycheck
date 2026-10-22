@@ -1165,6 +1165,52 @@ try {
       throw new Error('search returned ' + JSON.stringify(searched.body.data.map((r) => r.action)));
   });
 
+  await check('Import from file: a bank statement is read, checked, imported and matched (D37)', async () => {
+    const choose = (sel, text) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)});
+      const o = [...el.options].find((x) => x.textContent.includes(${JSON.stringify(text)})); if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, o.value);
+      el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    const csv = join(SHOTS, 'statement.csv');
+    writeFileSync(csv, '\uFEFFDate,Narration,Ref,Credit,Debit\r\n09/10/2026,Cash deposit,DEP-1,"12,500.00",\r\n10/10/2026,Bank charges October,,,250.00\r\n');
+    await go('/import');
+    await waitFor(`!!document.querySelector('[data-testid=kind-BANK]')`, 'import kinds');
+    await evaluate(`document.querySelector('[data-testid=kind-BANK]').click()`);
+    const doc = await send('DOM.getDocument', {});
+    const { nodeId } = await send('DOM.querySelector', { nodeId: doc.root.nodeId, selector: 'input[type=file]' });
+    await send('DOM.setFileInputFiles', { nodeId, files: [csv] });
+    await waitFor(`!!document.querySelector('select[aria-label="Bank account"]')`, 'mapping step');
+    // The headings were recognised: Credit = money in, Debit = money out, Narration = description.
+    const mapped = await evaluate(`['Date', 'Description', 'Money in', 'Money out'].map((f) => document.querySelector('select[aria-label="Column for ' + f + '"]').selectedOptions[0].textContent)`);
+    if (!mapped[1].includes('Narration') || !mapped[2].includes('Credit') || !mapped[3].includes('Debit')) throw new Error('mapping ' + mapped.join(' / '));
+    await choose('select[aria-label="Bank account"]', '1000');
+    await shot('44-import-map');
+    await clickText('Next: check the rows');
+    await waitFor(`document.querySelector('[data-testid=import-counts]')?.innerText.includes('2 new')`, 'preview counts');
+    await shot('45-import-preview');
+    await clickText('Import 2 rows');
+    await waitFor(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Match the transactions now')`, 'import done');
+    await clickText('Match the transactions now');
+    await waitFor(`document.querySelectorAll('[data-testid=bank-lines] tbody tr').length === 2`, 'bank lines');
+    // Record the bank charges as an expense through the row menu.
+    await evaluate(`(() => { const row = [...document.querySelectorAll('[data-testid=bank-lines] tbody tr')].find((tr) => tr.innerText.includes('Bank charges'));
+      row.querySelector('td:last-child button').click(); return true; })()`);
+    await waitFor(`[...document.querySelectorAll('button,[role=menuitem]')].some((x) => x.textContent.trim() === 'Record as an expense…')`, 'line menu');
+    await evaluate(`[...document.querySelectorAll('button,[role=menuitem]')].find((x) => x.textContent.trim() === 'Record as an expense…').click()`);
+    await waitFor(`!!document.querySelector('select[aria-label="Expense account"]')`, 'expense dialog');
+    await choose('select[aria-label="Expense account"]', '6000');
+    await shot('46-bank-expense');
+    await clickText('Record and post');
+    await waitFor(`document.querySelectorAll('[data-testid=bank-lines] tbody tr').length === 1 && [...document.querySelectorAll('[role=tab]')].some((t) => t.innerText.includes('Matched') && t.innerText.includes('(1)'))`, 'one matched');
+    await shot('47-bank-transactions');
+    const exp = (await api('GET', '/api/expenses')).body.data.find((e) => e.description === 'Bank charges October');
+    if (!exp || exp.status !== 'POSTED') throw new Error('expense from the bank line: ' + JSON.stringify(exp));
+    // The import is listed and can be undone only once its lines are unmatched.
+    const imports = (await api('GET', '/api/imports')).body;
+    if (!imports.length || imports[0].created !== 2) throw new Error('import history ' + JSON.stringify(imports[0]));
+    const blocked = await api('DELETE', `/api/imports/${imports[0].id}`);
+    if (blocked.status !== 400) throw new Error('undo of a matched import answered ' + blocked.status);
+  });
+
   await check('An administrator turns a user off', async () => {
     const users = (await api('GET', '/api/users')).body;
     const clerk = (users.data ?? users).find((u) => u.username === 'clerk.one');

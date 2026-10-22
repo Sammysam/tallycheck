@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -15,6 +15,8 @@ interface Account { id: string; code: string; name: string; currency?: string | 
 /** On a foreign-currency account (D34) debit / credit are in that currency and `rate` converts. */
 interface FormLine { _key: number; accountId: string; debit: string; credit: string; description: string; rate: string }
 
+interface Prefill { date: string; description: string; reference: string; lines: { accountId: string; debit: string; credit: string; description: string }[] }
+
 let nextKey = 1;
 const blankLine = (): FormLine => ({ _key: nextKey++, accountId: '', debit: '', credit: '', description: '', rate: '' });
 /** Amounts in cents, so the balance check never meets floating-point noise. */
@@ -22,15 +24,26 @@ const cents = (v: string) => Math.round((Number(v) || 0) * 100);
 
 export default function Ledger() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [prefill] = useState(() => (location.state as { prefill?: Prefill } | null)?.prefill);
   const [rows, setRows] = useState<Entry[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [date, setDate] = useState(todayIso());
-  const [description, setDescription] = useState('');
-  const [reference, setReference] = useState('');
-  const [lines, setLines] = useState<FormLine[]>([blankLine(), blankLine()]);
+  const [showForm, setShowForm] = useState(!!prefill);
+  const [date, setDate] = useState(prefill?.date ?? todayIso());
+  const [description, setDescription] = useState(prefill?.description ?? '');
+  const [reference, setReference] = useState(prefill?.reference ?? '');
+  const [lines, setLines] = useState<FormLine[]>(() => prefill
+    ? [...prefill.lines.map((l) => ({ ...blankLine(), ...l })), ...(prefill.lines.length < 2 ? [blankLine()] : [])]
+    : [blankLine(), blankLine()]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // D37: opening balances from Import from File arrive as a ready journal entry to check and post.
+  useEffect(() => {
+    if (!prefill) return;
+    setUnsaved(true);
+    navigate('.', { replace: true, state: null });
+  }, [prefill, navigate]);
 
   const load = () => api.get('/ledger/entries').then((r) => setRows(r.data));
   useEffect(() => {

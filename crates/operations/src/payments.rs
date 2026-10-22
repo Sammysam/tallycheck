@@ -175,6 +175,14 @@ pub struct CreatePayment {
 }
 
 pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
+    let mut tx = db.begin().await?;
+    let p = create_in(&mut tx, dto).await?;
+    tx.commit().await?;
+    Ok(p)
+}
+
+/// The same, inside a transaction the caller commits (D37: a bank line matched to a new payment).
+pub async fn create_in(tx: &mut database::Tx, dto: CreatePayment) -> AppResult<Payment> {
     let is_ar = dto.kind == "AR";
     if is_ar && dto.invoice_id.is_none() {
         return Err(AppError::bad_request("invoiceId is required for AR payments"));
@@ -188,20 +196,18 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     if is_ar && dto.payable_account_id.is_some() {
         return Err(AppError::bad_request("A payable account is paid with an AP payment"));
     }
-    let mut tx = db.begin().await?;
     let id = new_id();
     // D34: the account the money moves through, and the currency it is kept in.
-    let bank = ledger::accounts::find_one(&mut tx, &dto.payment_account_id).await?;
+    let bank = ledger::accounts::find_one(tx, &dto.payment_account_id).await?;
     if let Some(account_id) = dto.payable_account_id.clone() {
-        let p = pay_liability(&mut tx, &dto, &id, &bank, &account_id).await?;
-        tx.commit().await?;
+        let p = pay_liability(tx, &dto, &id, &bank, &account_id).await?;
         return Ok(p);
     }
 
     // D27: what settles the document is the money paid plus any tax withheld.
     let withholding = match (&dto.withholding_tax_code_id, dto.withholding_amount > Money::ZERO) {
         (Some(code), true) => {
-            let c = crate::tax::usable(&mut tx, code).await?;
+            let c = crate::tax::usable(tx, code).await?;
             if c.kind != crate::tax::WITHHOLDING {
                 return Err(AppError::bad_request(format!("\"{}\" is not a withholding tax code", c.name)));
             }
@@ -218,7 +224,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     // Validate the referenced documents before touching the ledger.
     let mut invoice = None;
     if let Some(iid) = &dto.invoice_id {
-        let inv = invoices::load_any(&mut tx, iid).await?;
+        let inv = invoices::load_any(tx, iid).await?;
         if inv.status == invoices::VOID {
             return Err(AppError::bad_request("Cannot pay a voided invoice"));
         }
@@ -236,7 +242,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     }
     let mut bill = None;
     if let Some(bid) = &dto.bill_id {
-        let b = bills::find_one(&mut tx, bid).await?;
+        let b = bills::find_one(tx, bid).await?;
         if b.status == "VOID" {
             return Err(AppError::bad_request("Cannot pay a voided bill"));
         }
@@ -255,10 +261,10 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     }
     // The reference stored any customer/vendor id it was given; here they must exist (D6).
     if let Some(c) = &dto.customer_id {
-        parties::find_one(&mut tx, PartyKind::Customer, c).await?;
+        parties::find_one(tx, PartyKind::Customer, c).await?;
     }
     if let Some(v) = &dto.vendor_id {
-        parties::find_one(&mut tx, PartyKind::Vendor, v).await?;
+        parties::find_one(tx, PartyKind::Vendor, v).await?;
     }
 
     // D30: the document's currency and booked rate, and what is still owed on it.
@@ -289,14 +295,14 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         }
     }
 
-    let number = counters::next_formatted(&mut tx, "PAY", 6).await?;
+    let number = counters::next_formatted(tx, "PAY", 6).await?;
     let (source_type, source_id, label) =
         if is_ar { ("PAYMENT_AR", dto.invoice_id.clone(), "AR") } else { ("PAYMENT_AP", dto.bill_id.clone(), "AP") };
     // D33: a bill is cleared from its own payable account.
     let control = if is_ar {
-        ledger::accounts::find_by_code(&mut tx, "1100").await?
+        ledger::accounts::find_by_code(tx, "1100").await?
     } else {
-        bills::payable_account(&mut tx, bill.as_ref().and_then(|b| b.payable_account_id.as_deref())).await?
+        bills::payable_account(tx, bill.as_ref().and_then(|b| b.payable_account_id.as_deref())).await?
     };
     let mut lines = if is_ar {
         vec![
@@ -322,7 +328,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     // D30: booked − (received + withheld). On a customer payment a positive difference is a loss
     // (debit); on a vendor payment it is a gain (credit) — and the other way round.
     if difference != Money::ZERO {
-        let account_id = crate::fx::exchange_account(&mut tx).await?;
+        let account_id = crate::fx::exchange_account(tx).await?;
         let abs = if difference > Money::ZERO {
             difference
         } else {
@@ -361,7 +367,7 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
         bank_foreign[if is_ar { 0 } else { 1 }] = Some(signed);
     }
     let entry = entries::post_with_foreign(
-        &mut tx,
+        tx,
         NewEntry {
             date: dto.date.clone(),
             description: format!("{label} Payment {number}"),
@@ -380,18 +386,18 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
             let paid = inv.amount_paid.checked_add(settled).ok_or_else(overflow)?;
             let base_paid = inv.base_amount_paid.checked_add(base_settled).ok_or_else(overflow)?;
             let status = invoices::settled_status(&inv.status, inv.total_amount, paid, inv.amount_credited)?;
-            invoices::set_paid(&mut tx, inv, paid, base_paid, status).await?;
+            invoices::set_paid(tx, inv, paid, base_paid, status).await?;
         }
     } else if let Some(b) = &bill {
         let paid = b.amount_paid.checked_add(settled).ok_or_else(overflow)?;
         let base_paid = b.base_amount_paid.checked_add(base_settled).ok_or_else(overflow)?;
         let status = invoices::settled_status(&b.status, b.total_amount, paid, b.amount_credited)?;
-        bills::set_paid(&mut tx, &b.id, paid, base_paid, status).await?;
+        bills::set_paid(tx, &b.id, paid, base_paid, status).await?;
     }
     if foreign {
         let currency =
             invoice.as_ref().and_then(|i| i.currency.clone()).or(bill.as_ref().and_then(|b| b.currency.clone()));
-        crate::fx::remember_rate(&mut tx, &currency, rate).await?;
+        crate::fx::remember_rate(tx, &currency, rate).await?;
     }
 
     let now = now_iso();
@@ -421,10 +427,9 @@ pub async fn create(db: &Db, dto: CreatePayment) -> AppResult<Payment> {
     .bind(base_amount.cents())
     .bind(base_settled.cents())
     .bind(difference.cents())
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    let p = find_one(&mut tx, &id).await?;
-    tx.commit().await?;
+    let p = find_one(tx, &id).await?;
     Ok(p)
 }
 

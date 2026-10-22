@@ -109,13 +109,20 @@ pub struct CreateExpense {
 
 pub async fn create(db: &Db, dto: CreateExpense) -> AppResult<Expense> {
     let mut tx = db.begin().await?;
-    require_account(&mut tx, &dto.expense_account_id).await?;
-    require_account(&mut tx, &dto.payment_account_id).await?;
+    let e = create_in(&mut tx, dto).await?;
+    tx.commit().await?;
+    Ok(e)
+}
+
+/// The same, inside a transaction the caller commits (D37).
+pub async fn create_in(tx: &mut Tx, dto: CreateExpense) -> AppResult<Expense> {
+    require_account(tx, &dto.expense_account_id).await?;
+    require_account(tx, &dto.payment_account_id).await?;
     let (parts, tax) = match &dto.tax_code_id {
-        Some(code) => crate::tax::line_tax(&mut tx, code, dto.amount, true).await?,
+        Some(code) => crate::tax::line_tax(tx, code, dto.amount, true).await?,
         None => (Vec::new(), Money::ZERO),
     };
-    let number = counters::next_formatted(&mut tx, "EXP", 6).await?;
+    let number = counters::next_formatted(tx, "EXP", 6).await?;
     let id = new_id();
     let now = now_iso();
     sqlx::query(
@@ -134,11 +141,10 @@ pub async fn create(db: &Db, dto: CreateExpense) -> AppResult<Expense> {
     .bind(&now)
     .bind(&dto.tax_code_id)
     .bind(tax.cents())
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    crate::tax::save_parts(&mut tx, "EXPENSE", &id, &parts).await?;
-    let e = find_one(&mut tx, &id).await?;
-    tx.commit().await?;
+    crate::tax::save_parts(tx, "EXPENSE", &id, &parts).await?;
+    let e = find_one(tx, &id).await?;
     Ok(e)
 }
 
@@ -155,7 +161,14 @@ async fn set(tx: &mut Tx, id: &str, status: &str, journal_entry_id: Option<&str>
 
 pub async fn post(db: &Db, id: &str) -> AppResult<Expense> {
     let mut tx = db.begin().await?;
-    let e = find_one(&mut tx, id).await?;
+    let e = post_in(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(e)
+}
+
+/// The same, inside a transaction the caller commits (D37).
+pub async fn post_in(tx: &mut Tx, id: &str) -> AppResult<Expense> {
+    let e = find_one(tx, id).await?;
     if e.status != "DRAFT" {
         return Err(AppError::bad_request(format!("Expense is already {}", e.status)));
     }
@@ -165,8 +178,8 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Expense> {
     let mut lines =
         vec![NewLine { account_id: e.expense_account_id.clone(), debit: net, credit: Money::ZERO, description: None }];
     // D27: each part of the tax to its own code's account.
-    let parts = crate::tax::load_parts(&mut tx, "EXPENSE", std::slice::from_ref(&e.id)).await?.remove(&e.id);
-    for (account_id, tax) in crate::tax::by_account(&mut tx, parts.unwrap_or_default(), false).await? {
+    let parts = crate::tax::load_parts(tx, "EXPENSE", std::slice::from_ref(&e.id)).await?.remove(&e.id);
+    for (account_id, tax) in crate::tax::by_account(tx, parts.unwrap_or_default(), false).await? {
         lines.push(NewLine { account_id, debit: tax, credit: Money::ZERO, description: Some("Tax".into()) });
     }
     lines.push(NewLine {
@@ -176,7 +189,7 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Expense> {
         description: None,
     });
     let entry = entries::post(
-        &mut tx,
+        tx,
         NewEntry {
             date: e.date.clone(),
             description: format!("Expense {}: {}", e.expense_number, e.description),
@@ -187,9 +200,8 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Expense> {
         },
     )
     .await?;
-    set(&mut tx, id, "POSTED", Some(&entry.id)).await?;
-    let out = find_one(&mut tx, id).await?;
-    tx.commit().await?;
+    set(tx, id, "POSTED", Some(&entry.id)).await?;
+    let out = find_one(tx, id).await?;
     Ok(out)
 }
 

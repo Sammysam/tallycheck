@@ -2515,3 +2515,187 @@ async fn admins_cannot_lock_themselves_out_and_the_log_filters() -> TestResult {
     assert_eq!(future.body["total"], json!(0));
     Ok(())
 }
+
+#[tokio::test]
+async fn import_from_file_bank_matching_and_undo() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"region.currency": "LKR"}))).await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let code_id = |code: &str| -> String {
+        accounts
+            .body
+            .as_array()
+            .and_then(|a| a.iter().find(|x| x["code"] == code))
+            .and_then(|x| x["id"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (cash, revenue, opex) = (code_id("1000"), code_id("4000"), code_id("6000"));
+    let id = |v: &Value| v["id"].as_str().unwrap_or_default().to_string();
+
+    // Reading a file: a bank's CSV with a BOM, semicolons and a quoted field.
+    let csv = "\u{feff}Date;Details;Amount\n05/10/2026;\"Deposit; ABC Traders\";1,000.00\n".as_bytes();
+    let read =
+        app.upload("/api/imports/read", &admin, multipart(&[], Some(("file", "stmt.csv", "text/csv", csv)))).await?;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.body);
+    assert_eq!(read.body["sheets"][0]["rows"][1], json!(["05/10/2026", "Deposit; ABC Traders", "1,000.00"]));
+    let pdf = app
+        .upload("/api/imports/read", &admin, multipart(&[], Some(("file", "a.pdf", "application/pdf", b"%PDF"))))
+        .await?;
+    assert_eq!(pdf.status, StatusCode::BAD_REQUEST);
+
+    // An invoice for ABC Traders, posted, to be paid from the statement.
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "ABC Traders"}))).await?;
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": id(&cust.body), "date": "2026-10-01",
+                "lines": [{"description": "Goods", "quantity": 1, "unitPrice": 1000, "accountId": revenue}]})),
+        )
+        .await?;
+    let inv_id = id(&inv.body);
+    app.call(Method::POST, &format!("/api/invoices/{inv_id}/post"), Some(&admin), None).await?;
+
+    let bank = json!({"kind": "BANK", "source": "Commercial Bank", "fileName": "stmt.csv", "accountId": cash, "dateOrder": "DMY",
+    "rows": [
+        {"date": "05/10/2026", "description": "Deposit ABC Traders", "amount": "1,000.00"},
+        {"date": "06/10/2026", "description": "Bank charges", "moneyIn": "", "moneyOut": "250.00"},
+        {"date": "31/02/2026", "description": "Bad date", "amount": "1"},
+        {"date": "07/10/2026", "description": "Opening balance", "amount": ""}
+    ]});
+    // The preview saves nothing and is not logged.
+    let preview = app.call(Method::POST, "/api/imports/preview", Some(&admin), Some(bank.clone())).await?;
+    assert_eq!(preview.status, StatusCode::OK, "{}", preview.body);
+    assert_eq!((preview.body["created"].clone(), preview.body["errors"].clone()), (json!(2), json!(2)));
+    assert!(preview.body["id"].is_null());
+    let statuses: Vec<&str> =
+        preview.body["rows"].as_array().ok_or("rows")?.iter().filter_map(|r| r["status"].as_str()).collect();
+    assert_eq!(statuses, ["NEW", "NEW", "ERROR", "ERROR"]);
+    let lines_url = format!("/api/bank-lines?accountId={cash}&status=UNMATCHED");
+    let none = app.call(Method::GET, &lines_url, Some(&admin), None).await?;
+    assert_eq!(none.body["data"], json!([]), "a preview leaves nothing behind");
+
+    let imported = app.call(Method::POST, "/api/imports", Some(&admin), Some(bank.clone())).await?;
+    assert_eq!(imported.status, StatusCode::CREATED, "{}", imported.body);
+    assert_eq!(imported.body["created"], json!(2));
+    let import_id = imported.body["id"].as_str().ok_or("import id")?.to_string();
+    // The same file again: nothing new.
+    let again = app.call(Method::POST, "/api/imports", Some(&admin), Some(bank.clone())).await?;
+    assert_eq!((again.body["created"].clone(), again.body["skipped"].clone()), (json!(0), json!(2)));
+    assert!(again.body["id"].is_null(), "an import with nothing new is not kept");
+
+    // The deposit is suggested against the open invoice; the payment is recorded from the line.
+    let lines = app.call(Method::GET, &lines_url, Some(&admin), None).await?;
+    let data = lines.body["data"].as_array().ok_or("lines")?.clone();
+    assert_eq!(data.len(), 2, "{}", lines.body);
+    let deposit = data.iter().find(|l| l["amount"] == json!(1000)).ok_or("deposit")?;
+    let charges = data.iter().find(|l| l["amount"] == json!(-250)).ok_or("charges")?;
+    assert_eq!(deposit["suggestions"][0]["type"], json!("INVOICE"), "{deposit}");
+    assert_eq!(deposit["suggestions"][0]["id"], json!(inv_id));
+    let wrong = app
+        .call(
+            Method::POST,
+            &format!("/api/bank-lines/{}/payment", id(charges)),
+            Some(&admin),
+            Some(json!({"invoiceId": inv_id})),
+        )
+        .await?;
+    assert_eq!(wrong.status, StatusCode::BAD_REQUEST, "money out is not paid against an invoice");
+    let paid = app
+        .call(
+            Method::POST,
+            &format!("/api/bank-lines/{}/payment", id(deposit)),
+            Some(&admin),
+            Some(json!({"invoiceId": inv_id})),
+        )
+        .await?;
+    assert_eq!(paid.status, StatusCode::OK, "{}", paid.body);
+    assert_eq!((paid.body["status"].as_str(), paid.body["match"]["type"].as_str()), (Some("MATCHED"), Some("PAYMENT")));
+    let inv_after = app.call(Method::GET, &format!("/api/invoices/{inv_id}"), Some(&admin), None).await?;
+    assert_eq!(inv_after.body["status"], json!("PAID"));
+    let exp = app
+        .call(
+            Method::POST,
+            &format!("/api/bank-lines/{}/expense", id(charges)),
+            Some(&admin),
+            Some(json!({"expenseAccountId": opex})),
+        )
+        .await?;
+    assert_eq!(exp.status, StatusCode::OK, "{}", exp.body);
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    let cash_row = tb.body.as_array().and_then(|r| r.iter().find(|x| x["account"]["code"] == "1000")).cloned();
+    assert_eq!(cash_row.map(|r| r["balance"].clone()), Some(json!(750)), "{}", tb.body);
+
+    // A matched import cannot be undone; once unmatched it can (the payment and expense stay).
+    let blocked = app.call(Method::DELETE, &format!("/api/imports/{import_id}"), Some(&admin), None).await?;
+    assert_eq!(blocked.status, StatusCode::BAD_REQUEST, "{}", blocked.body);
+    for l in [deposit, charges] {
+        let u = app.call(Method::POST, &format!("/api/bank-lines/{}/unmatch", id(l)), Some(&admin), None).await?;
+        assert_eq!(u.body["status"], json!("UNMATCHED"));
+    }
+    let undone = app.call(Method::DELETE, &format!("/api/imports/{import_id}"), Some(&admin), None).await?;
+    assert_eq!(undone.body["status"], json!("UNDONE"), "{}", undone.body);
+    let all = app.call(Method::GET, &format!("/api/bank-lines?accountId={cash}"), Some(&admin), None).await?;
+    assert_eq!(all.body["data"], json!([]));
+    let pays = app.call(Method::GET, "/api/payments", Some(&admin), None).await?;
+    assert_eq!(pays.body["total"], json!(1), "unmatching never removes the payment");
+
+    // Customers: new names only.
+    let people = app
+        .call(
+            Method::POST,
+            "/api/imports",
+            Some(&admin),
+            Some(json!({"kind": "CUSTOMERS", "source": "Old system", "rows": [
+                {"name": "abc traders "}, {"name": "New Co", "email": "not-an-email"}, {"name": "New Co", "email": "a@newco.lk"}]})),
+        )
+        .await?;
+    assert_eq!(
+        (people.body["created"].clone(), people.body["skipped"].clone(), people.body["errors"].clone()),
+        (json!(1), json!(1), json!(1)),
+        "{}",
+        people.body
+    );
+
+    // Invoices: rows with one number are one draft; an unknown customer is created; undo removes both.
+    let sales = json!({"kind": "INVOICES", "source": "Shop", "defaultAccountId": revenue, "dateOrder": "DMY", "rows": [
+        {"number": "S-1", "customer": "Walk-in Shop", "date": "10/10/2026", "description": "Tea", "quantity": "2", "unitPrice": "150"},
+        {"number": "S-1", "customer": "Walk-in Shop", "date": "10/10/2026", "description": "Cake", "unitPrice": "200.50"},
+        {"number": "S-2", "customer": "Walk-in Shop", "date": "someday", "description": "Tea", "unitPrice": "150"}
+    ]});
+    let s = app.call(Method::POST, "/api/imports", Some(&admin), Some(sales.clone())).await?;
+    assert_eq!((s.body["created"].clone(), s.body["errors"].clone()), (json!(1), json!(1)), "{}", s.body);
+    let drafts = app.call(Method::GET, "/api/invoices?status=DRAFT", Some(&admin), None).await?;
+    let draft = drafts.body["data"].as_array().and_then(|d| d.first()).cloned().ok_or("draft")?;
+    assert_eq!((draft["totalAmount"].as_str(), draft["status"].as_str()), (Some("500.50"), Some("DRAFT")));
+    let s2 = app.call(Method::POST, "/api/imports", Some(&admin), Some(sales)).await?;
+    assert_eq!(s2.body["skipped"], json!(1), "S-1 was imported before");
+    let sid = s.body["id"].as_str().ok_or("sales import")?;
+    let u = app.call(Method::DELETE, &format!("/api/imports/{sid}"), Some(&admin), None).await?;
+    assert_eq!(u.status, StatusCode::OK, "{}", u.body);
+    let custs = app.call(Method::GET, "/api/customers", Some(&admin), None).await?;
+    assert!(custs.body.as_array().is_some_and(|c| c.iter().all(|x| x["name"] != "Walk-in Shop")));
+
+    // Layouts are saved by name and replaced when saved again.
+    let lay = json!({"kind": "BANK", "name": "Commercial Bank", "layout": {"date": "Date", "amount": "Amount"}});
+    app.call(Method::PUT, "/api/imports/layouts", Some(&admin), Some(lay.clone())).await?;
+    app.call(Method::PUT, "/api/imports/layouts", Some(&admin), Some(lay)).await?;
+    let lays = app.call(Method::GET, "/api/imports/layouts?kind=BANK", Some(&admin), None).await?;
+    assert_eq!(lays.body.as_array().map(Vec::len), Some(1));
+
+    // A Viewer cannot import; the log has the import but not the preview.
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    let denied = app.call(Method::POST, "/api/imports/preview", Some(&viewer), Some(bank)).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
+    let actions: Vec<&str> =
+        log.body["data"].as_array().ok_or("log")?.iter().filter_map(|r| r["action"].as_str()).collect();
+    assert!(actions.contains(&"Imported records from a file") && actions.contains(&"Undid an import"), "{actions:?}");
+    assert!(actions.contains(&"Recorded a payment from a bank transaction"));
+    assert!(!log.body.to_string().contains("/imports/preview"));
+    Ok(())
+}

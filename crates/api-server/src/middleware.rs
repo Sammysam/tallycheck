@@ -74,7 +74,10 @@ pub async fn audit_log(State(state): State<AppState>, req: Request, next: Next) 
     let method = req.method().clone();
     let path_and_query = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
     let mutating = matches!(method, Method::POST | Method::PATCH | Method::PUT | Method::DELETE);
-    if !mutating || !path_and_query.starts_with("/api/") || path_and_query.contains("/auth/") {
+    // D37: reading a file and previewing an import change nothing.
+    let read_only =
+        path_and_query.starts_with("/api/imports/read") || path_and_query.starts_with("/api/imports/preview");
+    if !mutating || !path_and_query.starts_with("/api/") || path_and_query.contains("/auth/") || read_only {
         return next.run(req).await;
     }
     let claims = req

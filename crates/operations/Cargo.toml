@@ -8,6 +8,9 @@ publish.workspace = true
 
 [dependencies]
 app-core.workspace = true
+calamine.workspace = true
+csv.workspace = true
+encoding_rs.workspace = true
 chrono.workspace = true
 database.workspace = true
 ledger.workspace = true

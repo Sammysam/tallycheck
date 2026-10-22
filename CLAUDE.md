@@ -469,6 +469,24 @@ recommendations without answering each one individually; revisit any of them on 
   "a user" (the stored text is unchanged). Settings: tabs (Company, Region & currency, Invoices &
   documents, Closing, Backup & restore); backup moved into the React app and `/system/backup`
   now redirects there. Toasts and the app's own dialogs replace browser alert / confirm here.
+- **D37 Import from file** (2026-10-22, integrations plan phase 1, approved by the user's senior).
+  `POST /imports/read` reads an uploaded CSV / Excel file (`operations::sheet`: UTF-8 / UTF-16 /
+  Windows-1252, `,` `;` tab; XLSX / XLS / ODS via calamine, numbers kept as their shortest text so
+  money is parsed to exact cents, never computed in floating point). The screen (`/import`) maps the
+  columns (saved per source in `import_layouts`), `POST /imports/preview` runs the import and rolls
+  back, `POST /imports` commits. Kinds: BANK (statement lines into `bank_lines`), INVOICES (DRAFT
+  invoices; rows with one number are one invoice; unknown customers are created), CUSTOMERS /
+  VENDORS (new names only). Opening balances never reach the server as an import: they open as a
+  prefilled journal entry on the Ledger to check and post. Each outside record's key is unique in
+  `import_items`, so re-importing a file skips what is there; each row runs in a savepoint; rows with
+  errors are reported and skipped. `DELETE /imports/:id` undoes an import while its lines are
+  unmatched, its invoices drafts and its customers / vendors unused. Permissions: those of the
+  records created (banking, invoices, customers, vendors). Bank Transactions (`/bank-transactions`,
+  `banking`): each line is matched to a posted payment / expense on that account (same money and
+  direction; suggested within 7 days), or pays an open invoice / bill in the account's currency
+  (`payments::create_in`), or becomes an expense created and posted at once
+  (`expenses::create_in` + `post_in`), or is ignored. Nothing is matched without a click; unmatching
+  keeps the payment / expense. Reading and previewing are not written to the activity log.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
