@@ -6,7 +6,7 @@ import PageHeader from '../components/PageHeader';
 import BooksLock from '../components/BooksLock';
 import CompanyForm from '../components/CompanyForm';
 import BackupPanel from '../components/admin/BackupPanel';
-import ShopifyPanel from '../components/admin/ShopifyPanel';
+import IntegrationsPanel from '../components/admin/IntegrationsPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { isUnsaved, setUnsaved } from '../lib/commands';
 import { toast } from '../lib/toast';
@@ -19,7 +19,7 @@ const TABS = [
   { id: 'documents', label: 'Invoices & documents', icon: FileText, help: 'What prints on invoices and statements: payment details, footer and signatory.' },
   { id: 'closing', label: 'Closing', icon: CalendarCheck, help: 'Lock a closed period so nothing more is posted to it.' },
   { id: 'backup', label: 'Backup & restore', icon: HardDrive, help: 'Encrypted backups, the daily backup, and restoring from a backup.' },
-  { id: 'integrations', label: 'Integrations', icon: Plug, help: 'Connect Shopify: orders arrive as draft invoices, Shopify Payments as lines to match.' },
+  { id: 'integrations', label: 'Integrations', icon: Plug, help: 'Shopify, WooCommerce, PayPal and Stripe: orders arrive as draft invoices, payments as lines to match.' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
 
@@ -133,7 +133,7 @@ export default function Settings() {
           )}
           {tab === 'closing' && <BooksLock />}
           {tab === 'backup' && <BackupPanel />}
-          {tab === 'integrations' && <ShopifyPanel />}
+          {tab === 'integrations' && <IntegrationsPanel />}
         </div>
       </div>
 

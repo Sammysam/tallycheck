@@ -1,13 +1,14 @@
-//! D39: Settings → Integrations (Shopify). Connecting and the account matching need `settings`;
-//! a sync creates draft invoices and bank lines, so it needs `invoices` and `banking`.
+//! D39/D40: Settings → Integrations (Shopify, WooCommerce, PayPal, Stripe). Connecting and the
+//! account matching need `settings`; a sync creates draft invoices and bank lines, so it needs
+//! `invoices` and `banking`.
 
 use crate::body::JsonBody;
 use crate::extract::{perm, Authorized};
 use crate::state::AppState;
 use app_core::{AppError, AppResult};
-use axum::extract::State;
+use axum::extract::{Path as UrlPath, State};
 use axum::Json;
-use integrations::shopify;
+use integrations::{common, Connector};
 use ledger::AccountType;
 use serde_json::{Map, Value};
 use std::path::Path;
@@ -16,23 +17,42 @@ fn data_dir(s: &AppState) -> AppResult<&Path> {
     s.data_dir.as_deref().ok_or_else(|| AppError::internal("no data directory configured"))
 }
 
-pub async fn get(State(s): State<AppState>, _auth: Authorized<perm::Settings>) -> AppResult<Json<Value>> {
-    let cfg = shopify::load_config(&s.db).await?;
-    Ok(Json(shopify::status_json(&cfg, shopify::connected(data_dir(&s)?))))
+fn connector(id: &str) -> AppResult<Connector> {
+    Connector::parse(id).ok_or_else(|| AppError::NotFound(format!("No integration called {id}")))
+}
+
+/// Every connector and its state.
+pub async fn list(State(s): State<AppState>, _auth: Authorized<perm::Settings>) -> AppResult<Json<Value>> {
+    let mut out = Vec::new();
+    for c in Connector::ALL {
+        out.push(common::connected_status(&s.db, data_dir(&s)?, c).await?);
+    }
+    Ok(Json(Value::Array(out)))
+}
+
+pub async fn get(
+    State(s): State<AppState>,
+    _auth: Authorized<perm::Settings>,
+    UrlPath(id): UrlPath<String>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(common::connected_status(&s.db, data_dir(&s)?, connector(&id)?).await?))
 }
 
 pub async fn connect(
     State(s): State<AppState>,
     _auth: Authorized<perm::Settings>,
+    UrlPath(id): UrlPath<String>,
     body: JsonBody,
 ) -> AppResult<Json<Value>> {
-    let m = body.object();
-    let text = |k: &str| m.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    Ok(Json(shopify::connect(&s.db, data_dir(&s)?, &text("shop"), &text("token")).await?))
+    Ok(Json(integrations::connect(&s.db, data_dir(&s)?, connector(&id)?, &body.object()).await?))
 }
 
-pub async fn disconnect(State(s): State<AppState>, _auth: Authorized<perm::Settings>) -> AppResult<Json<Value>> {
-    Ok(Json(shopify::disconnect(&s.db, data_dir(&s)?).await?))
+pub async fn disconnect(
+    State(s): State<AppState>,
+    _auth: Authorized<perm::Settings>,
+    UrlPath(id): UrlPath<String>,
+) -> AppResult<Json<Value>> {
+    Ok(Json(common::disconnect(&s.db, data_dir(&s)?, connector(&id)?).await?))
 }
 
 /// `None` = not sent; `Some(None)` = cleared.
@@ -58,12 +78,14 @@ async fn check_account(s: &AppState, id: &str, allowed: &[AccountType], what: &s
 pub async fn update(
     State(s): State<AppState>,
     _auth: Authorized<perm::Settings>,
+    UrlPath(id): UrlPath<String>,
     body: JsonBody,
 ) -> AppResult<Json<Value>> {
+    let c = connector(&id)?;
     let m = body.object();
     let mut values: Vec<(&str, Option<String>)> = Vec::new();
     let accounts: [(&str, &[AccountType], &str); 5] = [
-        ("clearingAccountId", &[AccountType::Asset], "Shopify clearing account"),
+        ("clearingAccountId", &[AccountType::Asset], "money account"),
         ("payoutAccountId", &[AccountType::Asset], "account payouts reach"),
         ("feeAccountId", &[AccountType::Expense], "fee account"),
         ("incomeAccountId", &[AccountType::Revenue], "sales account"),
@@ -85,15 +107,18 @@ pub async fn update(
         }
         values.push(("startDate", v));
     }
-    if let Some(v) = opt_text(&m, "apiVersion")? {
-        if let Some(ver) = &v {
-            let ok =
-                ver.len() == 7 && ver.as_bytes()[4] == b'-' && ver.chars().filter(|c| c.is_ascii_digit()).count() == 6;
-            if !ok {
-                return Err(AppError::bad_request("apiVersion looks like 2026-07"));
+    if c == Connector::Shopify {
+        if let Some(v) = opt_text(&m, "apiVersion")? {
+            if let Some(ver) = &v {
+                let ok = ver.len() == 7
+                    && ver.as_bytes()[4] == b'-'
+                    && ver.chars().filter(|c| c.is_ascii_digit()).count() == 6;
+                if !ok {
+                    return Err(AppError::bad_request("apiVersion looks like 2026-07"));
+                }
             }
+            values.push(("apiVersion", v));
         }
-        values.push(("apiVersion", v));
     }
     match m.get("autoSync") {
         None => {}
@@ -111,22 +136,28 @@ pub async fn update(
         }
         values.push(("taxMap", Some(Value::Object(clean).to_string())));
     }
-    shopify::save(&s.db, &values).await?;
-    let cfg = shopify::load_config(&s.db).await?;
-    Ok(Json(shopify::status_json(&cfg, shopify::connected(data_dir(&s)?))))
+    common::save(&s.db, c, &values).await?;
+    Ok(Json(common::connected_status(&s.db, data_dir(&s)?, c).await?))
 }
 
-/// Adds "1090 Shopify Clearing" (an asset account the store's money passes through) if needed
-/// and chooses it.
-pub async fn clearing_account(State(s): State<AppState>, _auth: Authorized<perm::Settings>) -> AppResult<Json<Value>> {
-    shopify::ensure_clearing_account(&s.db).await?;
-    let cfg = shopify::load_config(&s.db).await?;
-    Ok(Json(shopify::status_json(&cfg, shopify::connected(data_dir(&s)?))))
+/// Adds the connector's money account ("1090 Shopify Clearing", "1091 PayPal", "1092 Stripe").
+pub async fn clearing_account(
+    State(s): State<AppState>,
+    _auth: Authorized<perm::Settings>,
+    UrlPath(id): UrlPath<String>,
+) -> AppResult<Json<Value>> {
+    let c = connector(&id)?;
+    common::ensure_clearing_account(&s.db, c).await?;
+    Ok(Json(common::connected_status(&s.db, data_dir(&s)?, c).await?))
 }
 
-pub async fn sync(State(s): State<AppState>, auth: Authorized<perm::Invoices>) -> AppResult<Json<Value>> {
+pub async fn sync(
+    State(s): State<AppState>,
+    auth: Authorized<perm::Invoices>,
+    UrlPath(id): UrlPath<String>,
+) -> AppResult<Json<Value>> {
     if !auth.user().has_permission("banking") {
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
-    Ok(Json(shopify::sync(&s.db, data_dir(&s)?, Some(&auth.user().id)).await?))
+    Ok(Json(integrations::sync(&s.db, data_dir(&s)?, connector(&id)?, Some(&auth.user().id)).await?))
 }

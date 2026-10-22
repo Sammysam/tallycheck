@@ -141,13 +141,11 @@ pub fn api_router() -> Router<AppState> {
         .route("/imports/layouts/{id}", axum::routing::delete(imports::layout_remove))
         .route("/imports", get(imports::list).post(imports::run))
         .route("/imports/{id}", axum::routing::delete(imports::undo))
-        .route(
-            "/integrations/shopify",
-            get(integrations::get).put(integrations::update).delete(integrations::disconnect),
-        )
-        .route("/integrations/shopify/connect", post(integrations::connect))
-        .route("/integrations/shopify/clearing-account", post(integrations::clearing_account))
-        .route("/integrations/shopify/sync", post(integrations::sync))
+        .route("/integrations", get(integrations::list))
+        .route("/integrations/{id}", get(integrations::get).put(integrations::update).delete(integrations::disconnect))
+        .route("/integrations/{id}/connect", post(integrations::connect))
+        .route("/integrations/{id}/clearing-account", post(integrations::clearing_account))
+        .route("/integrations/{id}/sync", post(integrations::sync))
         .route("/items", get(items::list).post(items::create))
         .route("/items/{id}", get(items::get).patch(items::update).delete(items::remove))
         .route("/items/{id}/moves", get(items::moves))

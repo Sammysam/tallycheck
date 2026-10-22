@@ -3018,8 +3018,11 @@ async fn shopify_orders_become_drafts_and_payments_bank_lines() -> TestResult {
         )
         .await?;
     assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
-    assert_eq!((ok.body["connected"].clone(), ok.body["shop"].clone()), (json!(true), json!("hilltea.myshopify.com")));
-    assert_eq!(ok.body["shopName"], json!("Hill Tea Store"));
+    assert_eq!(
+        (ok.body["connected"].clone(), ok.body["remoteId"].clone()),
+        (json!(true), json!("hilltea.myshopify.com"))
+    );
+    assert_eq!(ok.body["remoteName"], json!("Hill Tea Store"));
     assert!(!ok.body.to_string().contains("shpat_"), "the key never comes back");
 
     // The matching: a clearing account, payouts to Cash, fees to 6000, VAT 18% to a tax code.
@@ -3172,5 +3175,296 @@ async fn shopify_orders_become_drafts_and_payments_bank_lines() -> TestResult {
     let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
     let text = log.body.to_string();
     assert!(text.contains("Connected Shopify") && text.contains("Synced with Shopify") && !text.contains("shpat_"));
+    Ok(())
+}
+
+/// Stand-ins for WooCommerce, Stripe and PayPal on one local server.
+async fn fake_services() -> Result<String, Box<dyn std::error::Error>> {
+    use axum::extract::{Query, Request};
+    use axum::response::IntoResponse;
+    type Q = Query<std::collections::HashMap<String, String>>;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let base = format!("http://{}", listener.local_addr()?);
+    let header =
+        |req: &Request, name: &str| req.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    // ck_test_key:cs_test_secret, as HTTP Basic.
+    let woo_ok = move |req: &Request, q: &std::collections::HashMap<String, String>| {
+        header(req, "authorization") == "Basic Y2tfdGVzdF9rZXk6Y3NfdGVzdF9zZWNyZXQ="
+            || q.get("consumer_key").map(String::as_str) == Some("ck_test_key")
+    };
+    let stripe_ok = move |req: &Request| header(req, "authorization") == "Bearer sk_test_abcdefghijklmnop1234";
+    let day = |d: u32| {
+        chrono::NaiveDate::from_ymd_opt(2026, 10, d)
+            .and_then(|x| x.and_hms_opt(6, 0, 0))
+            .map(|x| x.and_utc().timestamp())
+    };
+    let (d10, d12) = (day(10).unwrap_or_default(), day(12).unwrap_or_default());
+    let app = Router::new()
+        .route(
+            "/wp-json/wc/v3/settings/general",
+            axum::routing::get(move |Query(q): Q, req: Request| async move {
+                if !woo_ok(&req, &q) {
+                    return (StatusCode::UNAUTHORIZED, "{}").into_response();
+                }
+                axum::Json(json!([{"id": "woocommerce_currency", "value": "LKR"}])).into_response()
+            }),
+        )
+        .route(
+            "/wp-json/wc/v3/orders",
+            axum::routing::get(move |Query(q): Q, req: Request| async move {
+                if !woo_ok(&req, &q) {
+                    return (StatusCode::UNAUTHORIZED, "{}").into_response();
+                }
+                (
+                    [("X-WP-TotalPages", "1")],
+                    axum::Json(json!([
+                        {"id": 77, "number": "1077", "status": "completed", "currency": "LKR", "date_created": "2026-10-10T10:00:00",
+                         "total": "2360.00", "billing": {"first_name": "Ruwan", "last_name": "Jay", "email": "ruwan@example.lk"},
+                         "tax_lines": [{"rate_id": 5, "label": "VAT", "rate_percent": 18}],
+                         "line_items": [{"name": "Tea", "sku": "", "quantity": 2, "subtotal": "2000.00", "total": "1800.00",
+                                         "taxes": [{"id": 5, "total": "324.00"}]}],
+                         "shipping_lines": [{"method_title": "Courier", "total": "200.00", "taxes": [{"id": 5, "total": "36.00"}]}]},
+                        {"id": 78, "number": "1078", "status": "pending", "currency": "LKR", "date_created": "2026-10-11T10:00:00",
+                         "total": "100.00", "billing": {}, "line_items": []}
+                    ])),
+                )
+                    .into_response()
+            }),
+        )
+        .route(
+            "/v1/balance",
+            axum::routing::get(move |req: Request| async move {
+                if !stripe_ok(&req) {
+                    return (StatusCode::UNAUTHORIZED, "{}").into_response();
+                }
+                axum::Json(json!({"available": [{"currency": "lkr", "amount": 0}]})).into_response()
+            }),
+        )
+        .route("/v1/account", axum::routing::get(|| async { axum::Json(json!({"id": "acct_1", "settings": {"dashboard": {"display_name": "Tea Ltd"}}})) }))
+        .route(
+            "/v1/balance_transactions",
+            axum::routing::get(move |Query(q): Q, req: Request| async move {
+                if !stripe_ok(&req) {
+                    return (StatusCode::UNAUTHORIZED, "{}").into_response();
+                }
+                if q.get("starting_after").map(String::as_str) == Some("txn_1") {
+                    return axum::Json(json!({"has_more": false, "data": [
+                        {"id": "txn_2", "type": "payout", "amount": -228920, "fee": 0, "currency": "lkr", "created": d12, "source": "po_1"}]}))
+                    .into_response();
+                }
+                axum::Json(json!({"has_more": true, "data": [
+                    {"id": "txn_1", "type": "charge", "amount": 236000, "fee": 7080, "currency": "lkr", "created": d10,
+                     "description": "Order 1077", "source": {"id": "ch_1", "billing_details": {"name": "Ruwan Jay"}}}]}))
+                .into_response()
+            }),
+        )
+        .route(
+            "/v1/oauth2/token",
+            axum::routing::post(move |req: Request| async move {
+                // client id "AppClientId123" : secret "AppSecret12345".
+                if header(&req, "authorization") != "Basic QXBwQ2xpZW50SWQxMjM6QXBwU2VjcmV0MTIzNDU=" {
+                    return (StatusCode::UNAUTHORIZED, "{}").into_response();
+                }
+                axum::Json(json!({"access_token": "A21AA", "token_type": "Bearer"})).into_response()
+            }),
+        )
+        .route("/v1/reporting/balances", axum::routing::get(|| async { axum::Json(json!({"balances": [{"currency": "USD", "primary": true}]})) }))
+        .route(
+            "/v1/reporting/transactions",
+            axum::routing::get(move |req: Request| async move {
+                if header(&req, "authorization") != "Bearer A21AA" {
+                    return (StatusCode::UNAUTHORIZED, "{}").into_response();
+                }
+                axum::Json(json!({"total_pages": 1, "transaction_details": [
+                    {"transaction_info": {"transaction_id": "9AB", "transaction_event_code": "T0006", "transaction_status": "S",
+                        "transaction_initiation_date": "2026-10-10T05:00:00+0000", "invoice_id": "INV-77",
+                        "transaction_amount": {"currency_code": "USD", "value": "100.00"}, "fee_amount": {"currency_code": "USD", "value": "-4.20"}},
+                     "payer_info": {"payer_name": {"given_name": "Ann", "surname": "Lee"}}},
+                    {"transaction_info": {"transaction_id": "W1", "transaction_event_code": "T0400", "transaction_status": "S",
+                        "transaction_initiation_date": "2026-10-11T05:00:00+0000",
+                        "transaction_amount": {"currency_code": "USD", "value": "-95.80"}}}
+                ]}))
+                .into_response()
+            }),
+        );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    Ok(base)
+}
+
+#[tokio::test]
+async fn woocommerce_orders_paid_through_stripe_and_paypal_activity() -> TestResult {
+    let base = fake_services().await?;
+    for id in ["WOOCOMMERCE", "STRIPE", "PAYPAL"] {
+        std::env::set_var(format!("ACCOUNTING_{id}_BASE_URL"), &base);
+    }
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"region.currency": "LKR"}))).await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let code_id = |code: &str| -> String {
+        accounts
+            .body
+            .as_array()
+            .and_then(|a| a.iter().find(|x| x["code"] == code))
+            .and_then(|x| x["id"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (cash, revenue, opex) = (code_id("1000"), code_id("4000"), code_id("6000"));
+    let id = |v: &Value| v["id"].as_str().unwrap_or_default().to_string();
+    let vat_acct = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "2300", "name": "VAT", "type": "LIABILITY"})),
+        )
+        .await?;
+    let vat = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "VAT 18%", "rate": 18, "salesAccountId": id(&vat_acct.body), "purchaseAccountId": id(&vat_acct.body)})),
+        )
+        .await?;
+
+    // All four integrations are listed.
+    let list = app.call(Method::GET, "/api/integrations", Some(&admin), None).await?;
+    let ids: Vec<&str> = list.body.as_array().ok_or("list")?.iter().filter_map(|x| x["id"].as_str()).collect();
+    assert_eq!(ids, ["shopify", "woocommerce", "paypal", "stripe"]);
+
+    // WooCommerce: plain http is refused; the key is checked; a completed order becomes a draft.
+    let insecure = app
+        .call(
+            Method::POST,
+            "/api/integrations/woocommerce/connect",
+            Some(&admin),
+            Some(json!({"site": "http://shop.example.lk", "consumerKey": "ck_test_key", "consumerSecret": "cs_test_secret"})),
+        )
+        .await?;
+    assert_eq!(insecure.status, StatusCode::BAD_REQUEST);
+    let woo = app
+        .call(
+            Method::POST,
+            "/api/integrations/woocommerce/connect",
+            Some(&admin),
+            Some(json!({"site": "shop.example.lk", "consumerKey": "ck_test_key", "consumerSecret": "cs_test_secret"})),
+        )
+        .await?;
+    assert_eq!(woo.status, StatusCode::OK, "{}", woo.body);
+    assert_eq!(
+        (woo.body["remoteId"].as_str(), woo.body["remoteCurrency"].as_str()),
+        (Some("https://shop.example.lk"), Some("LKR"))
+    );
+    app.call(
+        Method::PUT,
+        "/api/integrations/woocommerce",
+        Some(&admin),
+        Some(json!({"startDate": "2026-10-01", "incomeAccountId": revenue, "taxMap": {"VAT|0.18": id(&vat.body)}})),
+    )
+    .await?;
+    let ws = app.call(Method::POST, "/api/integrations/woocommerce/sync", Some(&admin), None).await?;
+    assert_eq!(ws.body["orders"], json!({"created": 1, "skipped": 1, "errors": 0}), "{}", ws.body);
+    let invs = app.call(Method::GET, "/api/invoices?status=DRAFT", Some(&admin), None).await?;
+    let inv = invs.body["data"].as_array().and_then(|d| d.first()).cloned().ok_or("draft")?;
+    assert_eq!((inv["poNumber"].as_str(), inv["totalAmount"].as_str()), (Some("#1077"), Some("2360.00")), "{inv}");
+    let post = app.call(Method::POST, &format!("/api/invoices/{}/post", id(&inv)), Some(&admin), None).await?;
+    assert_eq!(post.status, StatusCode::CREATED, "{}", post.body);
+
+    // Stripe: a publishable key is refused; the charge (two pages), its fee and the payout come in.
+    let pk = app
+        .call(
+            Method::POST,
+            "/api/integrations/stripe/connect",
+            Some(&admin),
+            Some(json!({"secretKey": "pk_test_abcdefghijklmnop1234"})),
+        )
+        .await?;
+    assert_eq!(pk.status, StatusCode::BAD_REQUEST);
+    let st = app
+        .call(
+            Method::POST,
+            "/api/integrations/stripe/connect",
+            Some(&admin),
+            Some(json!({"secretKey": "sk_test_abcdefghijklmnop1234"})),
+        )
+        .await?;
+    assert_eq!(st.status, StatusCode::OK, "{}", st.body);
+    assert_eq!(st.body["remoteName"], json!("Tea Ltd (test mode)"));
+    let money = app.call(Method::POST, "/api/integrations/stripe/clearing-account", Some(&admin), None).await?;
+    let stripe_acct = money.body["clearingAccountId"].as_str().ok_or("stripe account")?.to_string();
+    app.call(
+        Method::PUT,
+        "/api/integrations/stripe",
+        Some(&admin),
+        Some(json!({"startDate": "2026-10-01", "feeAccountId": opex, "payoutAccountId": cash})),
+    )
+    .await?;
+    let ss = app.call(Method::POST, "/api/integrations/stripe/sync", Some(&admin), None).await?;
+    assert_eq!(ss.body["lines"], json!({"created": 3, "skipped": 0}), "{}", ss.body);
+    let bl = app
+        .call(Method::GET, &format!("/api/bank-lines?accountId={stripe_acct}&status=UNMATCHED"), Some(&admin), None)
+        .await?;
+    let data = bl.body["data"].as_array().cloned().unwrap_or_default();
+    let payment = data.iter().find(|l| l["amount"] == json!(2360)).cloned().ok_or("payment")?;
+    assert_eq!(
+        payment["suggestions"][0]["id"],
+        json!(id(&inv)),
+        "the Stripe payment pays the WooCommerce invoice: {payment}"
+    );
+    assert!(data.iter().any(|l| l["amount"] == json!(-70.8) && l["hint"]["action"] == "EXPENSE"));
+    assert!(data.iter().any(|l| l["amount"] == json!(-2289.2) && l["hint"]["action"] == "TRANSFER"));
+    let again = app.call(Method::POST, "/api/integrations/stripe/sync", Some(&admin), None).await?;
+    assert_eq!(again.body["lines"], json!({"created": 0, "skipped": 3}));
+
+    // PayPal: the balance is in USD, so the LKR money account takes nothing; a USD account does.
+    let pp = app
+        .call(
+            Method::POST,
+            "/api/integrations/paypal/connect",
+            Some(&admin),
+            Some(json!({"environment": "sandbox", "clientId": "AppClientId123", "clientSecret": "AppSecret12345"})),
+        )
+        .await?;
+    assert_eq!(pp.status, StatusCode::OK, "{}", pp.body);
+    assert_eq!(
+        (pp.body["remoteCurrency"].as_str(), pp.body["options"]["environment"].as_str()),
+        (Some("USD"), Some("sandbox"))
+    );
+    app.call(Method::POST, "/api/integrations/paypal/clearing-account", Some(&admin), None).await?;
+    app.call(
+        Method::PUT,
+        "/api/integrations/paypal",
+        Some(&admin),
+        Some(json!({"startDate": "2026-10-01", "feeAccountId": opex})),
+    )
+    .await?;
+    let lkr = app.call(Method::POST, "/api/integrations/paypal/sync", Some(&admin), None).await?;
+    assert_eq!(lkr.body["lines"]["created"], json!(0));
+    assert!(lkr.body["notes"].to_string().contains("another currency"), "{}", lkr.body);
+    let usd = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "1093", "name": "PayPal USD", "type": "ASSET", "currency": "USD"})),
+        )
+        .await?;
+    app.call(Method::PUT, "/api/integrations/paypal", Some(&admin), Some(json!({"clearingAccountId": id(&usd.body)})))
+        .await?;
+    let ps = app.call(Method::POST, "/api/integrations/paypal/sync", Some(&admin), None).await?;
+    assert_eq!(ps.body["lines"]["created"], json!(3), "payment, fee, withdrawal: {}", ps.body);
+    let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
+    let text = log.body.to_string();
+    assert!(
+        text.contains("Connected WooCommerce")
+            && text.contains("Synced with Stripe")
+            && text.contains("Connected PayPal")
+    );
+    assert!(!text.contains("cs_test_secret") && !text.contains("sk_test_abc") && !text.contains("AppSecret"));
     Ok(())
 }

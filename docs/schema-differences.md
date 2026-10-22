@@ -80,8 +80,8 @@ to the inventory account), plus `invoice_lines.itemId`, `invoice_lines.discountA
 default 0) and `bill_lines.itemId`.
 
 D39 rebuilds `bank_lines` with `matchType` TRANSFER (a journal entry) and a suggested action
-(`hintAction` EXPENSE / TRANSFER with `hintAccountId`). Shopify settings are rows in `settings`
-(`integration.shopify.*`); the access key is not in the database.
+(`hintAction` EXPENSE / TRANSFER with `hintAccountId`). Connector settings are rows in `settings`
+(`integration.<shopify|woocommerce|paypal|stripe>.*`, D40); their keys are not in the database.
 
 ## Seeds
 

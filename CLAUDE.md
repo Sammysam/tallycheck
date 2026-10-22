@@ -523,6 +523,24 @@ recommendations without answering each one individually; revisit any of them on 
   journal entry, matched once per account, suggested on the other account's statement) and hints
   (`bank_lines` rebuilt; it was new in D37). Refunds still need a credit note by hand (the report
   says so); orders in a currency other than the home currency are not brought in yet.
+- **D40 More connectors** (2026-10-22, integrations plan phase 4; built against each service's
+  published API with stand-in servers in the tests — not yet tried against real accounts).
+  `crates/integrations` now has a shared framework (`common.rs`: settings under
+  `integration.<id>.*` with `remoteId/remoteName/remoteCurrency`, credentials as DPAPI JSON in
+  `<data>/secrets/<id>-credentials.dpapi`, HTTP with 429 retries, writing orders as DRAFT invoices and
+  money movements as hinted bank lines, reports, the hourly loop) and one adapter per service:
+  Shopify (D39, moved onto it), **WooCommerce** (site + REST key, Read; https only, query-string key
+  as fallback; paid statuses processing / completed / on-hold / refunded become drafts; amounts are
+  taken without tax, the discount = subtotal − total; a quantity that does not divide the subtotal
+  becomes one "× n" line; tax rates as label|fraction, converted from percent by text),
+  **PayPal** (REST app client id + secret, live or sandbox; Transaction Search in 31-day windows;
+  completed only; payments, fees, refunds, withdrawals) and **Stripe** (secret or restricted key;
+  balance transactions with the charge expanded; smallest units → cents, zero-decimal currencies
+  ×100; payments, fees, refunds, payouts). Money in another currency than the money account's is
+  left out and reported. Routes are `/integrations` and `/integrations/{id}[/connect|/sync|
+  /clearing-account]`; money accounts 1090 Shopify Clearing, 1091 PayPal, 1092 Stripe on request.
+  PayHere is not connected: as far as known its API only looks up one order at a time, so its
+  settlement export goes through Import from File.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
