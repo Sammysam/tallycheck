@@ -285,6 +285,27 @@ pub fn summarize(method: &str, path: &str) -> String {
         }
         .into();
     }
+    // D37: import from file and bank transactions.
+    if resource == "imports" {
+        return match (method, at(1)) {
+            ("POST", _) => "Imported records from a file",
+            (_, Some("layouts")) if method == "DELETE" => "Deleted an import layout",
+            (_, Some("layouts")) => "Saved an import layout",
+            _ => "Undid an import",
+        }
+        .into();
+    }
+    if resource == "bank-lines" {
+        return match last {
+            "match" => "Matched a bank transaction",
+            "payment" => "Recorded a payment from a bank transaction",
+            "expense" => "Recorded an expense from a bank transaction",
+            "ignore" => "Ignored a bank transaction",
+            "restore" => "Restored an ignored bank transaction",
+            _ => "Unmatched a bank transaction",
+        }
+        .into();
+    }
     if resource == "books" && last == "lock" {
         return "Changed the books lock date".into();
     }

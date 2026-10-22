@@ -5,6 +5,7 @@ pub mod audit_logs;
 pub mod auth;
 pub mod books;
 pub mod employees;
+pub mod imports;
 pub mod ledger;
 pub mod operations;
 pub mod payroll;
@@ -132,6 +133,21 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/runs/{id}/remit", post(pr::remit))
         .route("/payroll/runs/{id}/slips-filed", post(pr::slips_filed))
         .route("/payroll/runs/{id}/void", post(pr::void))
+        .route("/imports/read", post(imports::read).layer(DefaultBodyLimit::max(imports::SHEET_BODY_LIMIT)))
+        .route("/imports/preview", post(imports::preview))
+        .route("/imports/layouts", get(imports::layouts).put(imports::layout_save))
+        .route("/imports/layouts/{id}", axum::routing::delete(imports::layout_remove))
+        .route("/imports", get(imports::list).post(imports::run))
+        .route("/imports/{id}", axum::routing::delete(imports::undo))
+        .route("/bank-lines", get(imports::bank_list))
+        .route("/bank-lines/accounts", get(imports::bank_accounts))
+        .route("/bank-lines/{id}/documents", get(imports::bank_documents))
+        .route("/bank-lines/{id}/match", post(imports::bank_match))
+        .route("/bank-lines/{id}/payment", post(imports::bank_pay))
+        .route("/bank-lines/{id}/expense", post(imports::bank_expense))
+        .route("/bank-lines/{id}/ignore", post(imports::bank_ignore))
+        .route("/bank-lines/{id}/restore", post(imports::bank_restore))
+        .route("/bank-lines/{id}/unmatch", post(imports::bank_unmatch))
         .route("/system/backup", get(system::status))
         .route("/system/backup/password", post(system::set_password))
         .route("/system/backup/settings", axum::routing::put(system::update_settings))

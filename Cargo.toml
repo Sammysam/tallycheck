@@ -44,6 +44,9 @@ argon2 = "0.5"
 axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"
 bcrypt = "0.17"
+calamine = { version = "0.37", features = ["dates"] }
+csv = "1"
+encoding_rs = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.2"
 http-body-util = "0.1"

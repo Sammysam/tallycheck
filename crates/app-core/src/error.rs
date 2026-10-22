@@ -108,6 +108,15 @@ impl AppError {
             AppError::Internal(_) => None,
         }
     }
+
+    /// The text a person sees for this error (an internal error's detail stays in the log).
+    pub fn user_message(&self) -> String {
+        match self.message() {
+            Some(ErrorMessage::Text(s)) => s,
+            Some(ErrorMessage::List(v)) => v.join("; "),
+            None => "Internal server error".into(),
+        }
+    }
 }
 
 impl From<sqlx::Error> for AppError {

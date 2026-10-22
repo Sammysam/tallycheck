@@ -10,14 +10,17 @@
 //! row echoes the numbers the client sent (JSON numbers) except columns with a database
 //! default (strings), while a row read back has every `numeric` column as a 2-dp string.
 
+pub mod bank_lines;
 pub mod banking;
 pub mod bills;
 pub mod credit_notes;
 pub mod expenses;
 pub mod fx;
+pub mod imports;
 pub mod invoices;
 pub mod parties;
 pub mod payments;
+pub mod sheet;
 pub mod statements;
 pub mod tax;
 

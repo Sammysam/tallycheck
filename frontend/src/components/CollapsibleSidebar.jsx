@@ -54,6 +54,9 @@ export const navigation = [
     items: [
       { label: 'Ledger', to: '/ledger', permission: 'ledger' },
       { label: 'Bank Reconciliation', to: '/reconcile', permission: 'ledger' },
+      { label: 'Bank Transactions', to: '/bank-transactions', permission: 'banking' },
+      // D37: open to anyone who may import at least one kind of record.
+      { label: 'Import from File', to: '/import', permission: ['banking', 'invoices', 'customers', 'vendors', 'ledger'] },
     ],
   },
   {
@@ -105,11 +108,16 @@ export function initialsOf(name) {
 }
 
 // ─── Permission filtering ───────────────────────────────────────────────────
+/** A nav item's permission: one key, or a list of which any one is enough (D37). */
+export function canSee(permission, hasPermission) {
+  return Array.isArray(permission) ? permission.some((p) => hasPermission(p)) : hasPermission(permission);
+}
+
 function filterNavigation(items, hasPermission) {
   return items
     .map((group) => {
       if (group.standalone) return group;
-      const visibleItems = group.items.filter((item) => hasPermission(item.permission));
+      const visibleItems = group.items.filter((item) => canSee(item.permission, hasPermission));
       return { ...group, items: visibleItems };
     })
     .filter((group) => (group.standalone ? hasPermission(group.permission) : group.items.length > 0));

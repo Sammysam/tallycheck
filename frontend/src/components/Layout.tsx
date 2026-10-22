@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
-import CollapsibleSidebar, { navigation, pageTrail } from './CollapsibleSidebar';
+import CollapsibleSidebar, { canSee, navigation, pageTrail } from './CollapsibleSidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -32,7 +32,7 @@ import ToastHost from './ToastHost';
 
 declare const __APP_VERSION__: string;
 
-interface NavItem { label: string; to: string; permission: string }
+interface NavItem { label: string; to: string; permission: string | string[] }
 interface NavGroup { id: string; label: string; standalone?: boolean; items?: NavItem[] }
 
 const SHORTCUTS: [string, string][] = [
@@ -236,7 +236,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     .map((g) => ({
       label: g.label === 'Master Data' ? 'Lists' : g.label === 'Administration' ? 'Admin' : g.label,
       items: (g.items ?? [])
-        .filter((i) => hasPermission(i.permission))
+        .filter((i) => canSee(i.permission, hasPermission))
         .map((i): MenuEntry => ({ label: i.label, onSelect: go(i.to) })),
     }))
     .filter((m) => m.items.length > 0);
@@ -248,6 +248,9 @@ export default function Layout({ children }: { children: ReactNode }) {
     'separator',
     { label: 'Print…', shortcut: 'Ctrl+P', onSelect: () => window.print() },
     { label: 'Export to Excel (CSV)…', shortcut: 'Ctrl+E', onSelect: exportTables },
+    ...(['banking', 'invoices', 'customers', 'vendors', 'ledger'].some((p) => hasPermission(p))
+      ? [{ label: 'Import from file…', onSelect: go('/import') }]
+      : []),
     'separator',
     ...(isAdmin
       ? [{ label: 'Backup and restore…', onSelect: go('/settings?tab=backup') }, 'separator' as const]

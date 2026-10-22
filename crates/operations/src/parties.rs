@@ -107,9 +107,16 @@ pub struct PartyFields {
 }
 
 pub async fn create(db: &Db, kind: PartyKind, f: PartyFields) -> AppResult<Party> {
+    let mut tx = db.begin().await?;
+    let party = create_in(&mut tx, kind, f).await?;
+    tx.commit().await?;
+    Ok(party)
+}
+
+/// The same, inside a transaction the caller commits (D37: imports).
+pub async fn create_in(tx: &mut database::Tx, kind: PartyKind, f: PartyFields) -> AppResult<Party> {
     let id = new_id();
     let now = now_iso();
-    let mut tx = db.begin().await?;
     sqlx::query(&format!(
         r#"INSERT INTO "{}" ("id","name","email","phone","address","taxId","isActive","createdAt","updatedAt")
            VALUES (?1,?2,?3,?4,?5,?6,1,?7,?7)"#,
@@ -122,11 +129,9 @@ pub async fn create(db: &Db, kind: PartyKind, f: PartyFields) -> AppResult<Party
     .bind(f.address.flatten())
     .bind(f.tax_id.flatten())
     .bind(&now)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    let party = find_one(&mut tx, kind, &id).await?;
-    tx.commit().await?;
-    Ok(party)
+    find_one(tx, kind, &id).await
 }
 
 /// `Object.assign(entity, dto)`: only sent fields change. A null name is ignored (the

@@ -68,6 +68,12 @@ Extra indexes (performance only): `journal_entries(date)`, `journal_entries(sour
 `payments(invoiceId)`, `payments(billId)`, `users(roleId)`, `accounts(parentId)`,
 `audit_logs(userId)`.
 
+Tables with no reference counterpart (D37, import from file): `imports` (one per import: kind,
+source, file, counts, ACTIVE / UNDONE), `import_items` (what each import created; `(kind,
+externalKey)` unique so an outside record comes in once), `bank_lines` (imported statement lines,
+amount in the account's currency, signed; MATCHED needs a match type and id) and `import_layouts`
+(saved column mappings, JSON).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,
