@@ -1,6 +1,7 @@
 //! Authentication and authorisation: password hashing, JWTs, TOTP, login throttling, and the
 //! users / roles services (reference `auth`, `users`, `roles` modules).
 
+pub mod api_keys;
 pub mod jwt;
 pub mod password;
 pub mod roles;

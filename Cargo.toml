@@ -13,6 +13,7 @@ members = [
     "crates/payroll",
     "crates/backup",
     "crates/integrations",
+    "crates/mcp",
     "crates/importer",
     "crates/api-server",
     "src-tauri",

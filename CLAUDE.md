@@ -541,6 +541,22 @@ recommendations without answering each one individually; revisit any of them on 
   /clearing-account]`; money accounts 1090 Shopify Clearing, 1091 PayPal, 1092 Stripe on request.
   PayHere is not connected: as far as known its API only looks up one order at a time, so its
   settlement export goes through Import from File.
+- **D41 Claude (MCP) and keys** (2026-10-22, integrations plan phase 5). `api_keys` (Settings →
+  Integrations → Claude, `settings` permission): a key `cak_` + 40 hex acts as the user who made it,
+  stored only as SHA-256, shown once, revocable; read-only unless `canWrite`. A request with a key
+  (`extract::by_key`, path taken from `OriginalUri`) is accepted only from loopback; reads only, or
+  with `canWrite` only `POST /api/invoices|bills|customers|vendors` (drafts) — never post, pay,
+  void, delete or change settings; payroll, employees, users, roles, audit logs, system,
+  integrations, imports and keys (except `/api-keys/me`) are closed even to reads. The activity log
+  names "<user> via <key name>". `crates/mcp` builds `cenango-mcp.exe`, an MCP server over stdio
+  (protocol 2025-06-18 / 2025-03-26 / 2024-11-05) that calls the app with `CENANGO_API_KEY` at
+  `CENANGO_API_URL` (default http://127.0.0.1:47800): 14 read tools (connection_status,
+  company_overview, invoices, bills, payments, expenses, customers, vendors, accounts, run_report,
+  account_activity, products, bank lines to review) and, for write keys, create_customer /
+  create_draft_invoice / create_draft_bill (names, codes, tax names and SKUs resolved to ids). The
+  installer ships it next to the app (`src-tauri/tauri.installer.json`). `claude-plugin/` is a
+  Claude Code marketplace with the plugin (the MCP server + skills: month-end-close,
+  chase-overdue-customers, prepare-vat-return, explain-a-report, review-online-sales).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

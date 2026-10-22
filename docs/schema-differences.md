@@ -83,6 +83,9 @@ D39 rebuilds `bank_lines` with `matchType` TRANSFER (a journal entry) and a sugg
 (`hintAction` EXPENSE / TRANSFER with `hintAccountId`). Connector settings are rows in `settings`
 (`integration.<shopify|woocommerce|paypal|stripe>.*`, D40); their keys are not in the database.
 
+D41 adds `api_keys` (name, the user it acts as, a display prefix, the SHA-256 of the key, whether it
+may create drafts, created / last used / revoked).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

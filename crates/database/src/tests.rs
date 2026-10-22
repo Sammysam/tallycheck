@@ -73,7 +73,8 @@ const APPROVED_EXTRA_TABLES: &[&str] = &[
     "import_layouts",
     "items",
     "stock_moves",
-]; // D21, D22, D26, D27, D37, D38
+    "api_keys",
+]; // D21, D22, D26, D27, D37, D38, D41
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =
