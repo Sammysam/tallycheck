@@ -80,12 +80,20 @@ pub async fn audit_log(State(state): State<AppState>, req: Request, next: Next) 
     if !mutating || !path_and_query.starts_with("/api/") || path_and_query.contains("/auth/") || read_only {
         return next.run(req).await;
     }
-    let claims = req
+    let bearer = req
         .headers()
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split_whitespace().nth(1))
-        .and_then(|t| state.jwt.verify(t));
+        .map(str::to_string);
+    let claims = bearer.as_deref().and_then(|t| state.jwt.verify(t));
+    // D41: a request made with a key is logged as its user, "via" the key's name.
+    let via_key = match bearer.as_deref() {
+        Some(t) if claims.is_none() && auth::api_keys::looks_like_key(t) => {
+            auth::api_keys::verify(&state.db, t).await.ok().flatten()
+        }
+        _ => None,
+    };
 
     let res = next.run(req).await;
     if res.status().as_u16() >= 400 {
@@ -104,8 +112,12 @@ pub async fn audit_log(State(state): State<AppState>, req: Request, next: Next) 
     audit::record(
         &state.db,
         audit::NewEntry {
-            user_id: claims.as_ref().map(|c| c.sub.clone()),
-            username: Some(claims.as_ref().map(|c| c.username.clone()).unwrap_or_else(|| "unknown".into())),
+            user_id: claims.as_ref().map(|c| c.sub.clone()).or_else(|| via_key.as_ref().map(|k| k.user_id.clone())),
+            username: Some(match (&claims, &via_key) {
+                (Some(c), _) => c.username.clone(),
+                (None, Some(k)) => format!("{} via {}", k.username.clone().unwrap_or_default(), k.name),
+                _ => "unknown".into(),
+            }),
             action: audit::summarize(method.as_str(), &path),
             method: Some(method.to_string()),
             path: Some(path),

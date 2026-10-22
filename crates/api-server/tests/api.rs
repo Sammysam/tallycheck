@@ -3468,3 +3468,63 @@ async fn woocommerce_orders_paid_through_stripe_and_paypal_activity() -> TestRes
     assert!(!text.contains("cs_test_secret") && !text.contains("sk_test_abc") && !text.contains("AppSecret"));
     Ok(())
 }
+
+#[tokio::test]
+async fn claude_keys_read_create_drafts_only_and_can_be_revoked() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "ABC Traders"}))).await?;
+    let mk = |name: &str, write: bool| json!({"name": name, "canWrite": write});
+    let ro = app.call(Method::POST, "/api/api-keys", Some(&admin), Some(mk("Claude reader", false))).await?;
+    assert_eq!(ro.status, StatusCode::CREATED, "{}", ro.body);
+    let ro_key = ro.body["key"].as_str().ok_or("key")?.to_string();
+    assert!(ro_key.starts_with("cak_") && ro_key.len() == 44);
+    let rw = app.call(Method::POST, "/api/api-keys", Some(&admin), Some(mk("Claude", true))).await?;
+    let rw_key = rw.body["key"].as_str().ok_or("key")?.to_string();
+    let listed = app.call(Method::GET, "/api/api-keys", Some(&admin), None).await?;
+    assert!(!listed.body.to_string().contains(&ro_key), "a key is shown only once");
+
+    // Read-only: reads, never writes; people, users and keys are closed.
+    let me = app.call(Method::GET, "/api/api-keys/me", Some(ro_key.as_str()), None).await?;
+    assert_eq!((me.body["canWrite"].clone(), me.body["user"].clone()), (json!(false), json!("admin")));
+    assert_eq!(app.call(Method::GET, "/api/invoices", Some(ro_key.as_str()), None).await?.status, StatusCode::OK);
+    let draft = json!({"customerId": cust.body["id"], "date": "2026-10-22", "lines": [{"description": "Work", "quantity": 1, "unitPrice": 100}]});
+    let no = app.call(Method::POST, "/api/invoices", Some(ro_key.as_str()), Some(draft.clone())).await?;
+    assert_eq!(no.status, StatusCode::FORBIDDEN);
+    for closed in ["/api/employees", "/api/payroll/runs", "/api/users", "/api/api-keys", "/api/audit-logs"] {
+        let r = app.call(Method::GET, closed, Some(ro_key.as_str()), None).await?;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{closed}");
+    }
+
+    // Write key: a draft yes; posting, paying and settings no.
+    let inv = app.call(Method::POST, "/api/invoices", Some(rw_key.as_str()), Some(draft)).await?;
+    assert_eq!(inv.status, StatusCode::CREATED, "{}", inv.body);
+    assert_eq!(inv.body["status"], json!("DRAFT"));
+    let inv_id = inv.body["id"].as_str().ok_or("id")?;
+    for (method, path) in [
+        (Method::POST, format!("/api/invoices/{inv_id}/post")),
+        (Method::DELETE, format!("/api/invoices/{inv_id}")),
+        (Method::PATCH, "/api/settings".to_string()),
+        (Method::POST, "/api/payments".to_string()),
+    ] {
+        let r = app.call(method.clone(), &path, Some(rw_key.as_str()), Some(json!({}))).await?;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{method} {path}");
+    }
+    let log = app.call(Method::GET, "/api/audit-logs?limit=20", Some(&admin), None).await?;
+    assert!(log.body.to_string().contains("admin via Claude"), "{}", log.body);
+
+    // Revoked: refused at once.
+    app.call(Method::DELETE, &format!("/api/api-keys/{}", id_of(&rw.body)), Some(&admin), None).await?;
+    let gone = app.call(Method::GET, "/api/invoices", Some(rw_key.as_str()), None).await?;
+    assert_eq!(gone.status, StatusCode::UNAUTHORIZED);
+    // A user without `settings` cannot make keys.
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    let denied = app.call(Method::POST, "/api/api-keys", Some(&viewer), Some(mk("x", false))).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    Ok(())
+}
+
+fn id_of(v: &Value) -> String {
+    v["id"].as_str().unwrap_or_default().to_string()
+}

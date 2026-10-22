@@ -1,6 +1,7 @@
 //! `/api` routes implemented so far (W0–W5). Routes of later waves answer 404 like any unknown path.
 
 pub mod accounts;
+pub mod api_keys;
 pub mod audit_logs;
 pub mod auth;
 pub mod books;
@@ -141,6 +142,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/imports/layouts/{id}", axum::routing::delete(imports::layout_remove))
         .route("/imports", get(imports::list).post(imports::run))
         .route("/imports/{id}", axum::routing::delete(imports::undo))
+        .route("/api-keys", get(api_keys::list).post(api_keys::create))
+        .route("/api-keys/me", get(api_keys::me))
+        .route("/api-keys/setup", get(api_keys::setup))
+        .route("/api-keys/{id}", patch(api_keys::update).delete(api_keys::revoke))
         .route("/integrations", get(integrations::list))
         .route("/integrations/{id}", get(integrations::get).put(integrations::update).delete(integrations::disconnect))
         .route("/integrations/{id}/connect", post(integrations::connect))

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, ChevronLeft, CreditCard, ExternalLink, Landmark, RefreshCw, ShoppingBag, ShoppingCart } from 'lucide-react';
+import { AlertTriangle, Bot, CheckCircle2, ChevronLeft, CreditCard, ExternalLink, Landmark, RefreshCw, ShoppingBag, ShoppingCart } from 'lucide-react';
+import ClaudePanel from './ClaudePanel';
 import api, { errMsg } from '../../api/client';
 import PasswordInput from '../PasswordInput';
 import ConfirmDialog from '../ConfirmDialog';
@@ -101,19 +102,20 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export default function IntegrationsPanel() {
   const [params, setParams] = useSearchParams();
-  const open = params.get('connector') as Id | null;
+  const open = params.get('connector') as Id | 'claude' | null;
   const [list, setList] = useState<Status[] | null>(null);
   const [error, setError] = useState('');
   const load = () => api.get('/integrations').then((r) => setList(r.data)).catch((e) => setError(errMsg(e, 'Could not load the integrations')));
   useEffect(() => { load(); }, []);
 
-  const choose = (id: Id | null) => {
+  const choose = (id: Id | 'claude' | null) => {
     const next = new URLSearchParams(params);
     if (id) next.set('connector', id); else next.delete('connector');
     setParams(next, { replace: true });
     if (!id) load();
   };
 
+  if (open === 'claude') return <ClaudePanel onBack={() => choose(null)} />;
   if (open && INFO[open]) return <Connector id={open} onBack={() => choose(null)} />;
   if (!list) return <p className="text-sm text-gray-500">{error || 'Loading…'}</p>;
   return (
@@ -137,6 +139,11 @@ export default function IntegrationsPanel() {
             </button>
           );
         })}
+        <button type="button" onClick={() => choose('claude')} data-testid="connector-claude" className="card !mb-0 text-left hover:border-orange-300 transition-colors">
+          <div className="flex items-center gap-2 font-semibold text-gray-900"><Bot size={18} className="text-orange-600" /> Claude (AI assistant)</div>
+          <p className="text-xs text-gray-600 mt-1">Ask questions about your books; with permission, Claude drafts invoices and bills for you to post.</p>
+          <div className="text-xs mt-2 text-gray-500">Keys and setup</div>
+        </button>
       </div>
       <p className="text-[11px] text-gray-500">Other banks, shops and systems: use <Link to="/import" className="btn-link">Import from File</Link> with their CSV or Excel export.</p>
     </div>

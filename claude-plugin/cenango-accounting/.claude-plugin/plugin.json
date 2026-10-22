@@ -1,0 +1,6 @@
+{
+  "name": "cenango-accounting",
+  "version": "0.1.0",
+  "description": "Cenango Accounting for Claude: read the books (invoices, bills, payments, reports, stock, bank lines) and, if the key allows, create drafts. Includes month-end, overdue-customers, VAT-return, report-explaining and online-sales skills.",
+  "author": { "name": "Cenango (Pvt) Ltd" }
+}

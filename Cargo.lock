@@ -234,12 +234,14 @@ dependencies = [
  "argon2",
  "base64 0.22.1",
  "bcrypt",
+ "chrono",
  "database",
  "image",
  "jsonwebtoken",
  "qrcode",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tempfile",
  "tokio",
@@ -2563,6 +2565,19 @@ name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
+name = "mcp"
+version = "0.1.0"
+dependencies = [
+ "api-server",
+ "app-core",
+ "chrono",
+ "reqwest 0.12.28",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
 
 [[package]]
 name = "md-5"

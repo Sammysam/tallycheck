@@ -9,6 +9,7 @@
 
 use crate::state::AppState;
 use app_core::AppError;
+use auth::api_keys::{self, ApiKey};
 use auth::{users, Claims, Stage, User};
 use axum::extract::FromRequestParts;
 use axum::http::header::AUTHORIZATION;
@@ -28,6 +29,58 @@ pub fn bearer_token(parts: &Parts) -> Option<String> {
 pub struct CurrentUser {
     pub user: User,
     pub claims: Claims,
+    /// D41: set when the request came with a key (Claude / MCP) instead of a sign-in.
+    pub via_key: Option<ApiKey>,
+}
+
+/// D41: what a key may never reach, even read-only: people's pay and records, users, settings,
+/// integrations, backups, the activity log and other keys.
+fn key_may_not_reach(path: &str) -> bool {
+    const CLOSED: &[&str] = &[
+        "/api/employees",
+        "/api/payroll",
+        "/api/users",
+        "/api/roles",
+        "/api/audit-logs",
+        "/api/system",
+        "/api/integrations",
+        "/api/api-keys",
+        "/api/imports",
+    ];
+    path != "/api/api-keys/me"
+        && CLOSED
+            .iter()
+            .any(|c| path == c.trim_end_matches('/') || path.starts_with(&format!("{}/", c.trim_end_matches('/'))))
+}
+
+/// D41: a request authenticated by a key: only from this PC; reads, or (if allowed) drafts.
+async fn by_key(parts: &Parts, state: &AppState, token: &str) -> Result<CurrentUser, AppError> {
+    let key = api_keys::verify(&state.db, token).await?.ok_or_else(AppError::unauthorized_default)?;
+    let peer = parts.extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip());
+    if peer.is_some_and(|ip| !ip.is_loopback()) {
+        return Err(AppError::Forbidden("Keys work only on the PC that runs the app".into()));
+    }
+    // Inside the nested /api router the URI has lost its prefix; the original one has it.
+    let full = parts.extensions.get::<axum::extract::OriginalUri>().map(|u| u.0.path().to_string());
+    let path = full.as_deref().unwrap_or_else(|| parts.uri.path());
+    let method = parts.method.as_str();
+    if key_may_not_reach(path) {
+        return Err(AppError::Forbidden("Claude cannot open this part of the app".into()));
+    }
+    if method != "GET" && !(key.can_write && api_keys::draft_only_allows(method, path)) {
+        return Err(AppError::Forbidden(if key.can_write {
+            "Claude may only create drafts; post, pay and change records in the app".into()
+        } else {
+            "This key may only read".into()
+        }));
+    }
+    let user = users::get_by_id(&state.db, &key.user_id).await?.ok_or_else(AppError::unauthorized_default)?;
+    if !user.is_active {
+        return Err(AppError::Forbidden("Account is inactive".into()));
+    }
+    let claims =
+        Claims { sub: user.id.clone(), username: user.username.clone(), stage: Stage::Authenticated, iat: 0, exp: 0 };
+    Ok(CurrentUser { user, claims, via_key: Some(key) })
 }
 
 impl FromRequestParts<AppState> for CurrentUser {
@@ -35,6 +88,9 @@ impl FromRequestParts<AppState> for CurrentUser {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
         let token = bearer_token(parts).ok_or_else(AppError::unauthorized_default)?;
+        if api_keys::looks_like_key(&token) {
+            return by_key(parts, state, &token).await;
+        }
         let claims = state.jwt.verify(&token).ok_or_else(AppError::unauthorized_default)?;
         if claims.stage != Stage::Authenticated {
             return Err(AppError::Unauthorized("Full authentication required".into()));
@@ -43,7 +99,7 @@ impl FromRequestParts<AppState> for CurrentUser {
         if !user.is_active {
             return Err(AppError::Forbidden("Account is inactive".into()));
         }
-        Ok(CurrentUser { user, claims })
+        Ok(CurrentUser { user, claims, via_key: None })
     }
 }
 

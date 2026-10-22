@@ -307,6 +307,15 @@ pub fn summarize(method: &str, path: &str) -> String {
         }
         .into();
     }
+    // D41: Claude keys.
+    if resource == "api-keys" {
+        return match method {
+            "POST" => "Created a Claude key",
+            "DELETE" => "Revoked a Claude key",
+            _ => "Changed a Claude key",
+        }
+        .into();
+    }
     // D39: integrations.
     if resource == "integrations" {
         let service = match at(1).unwrap_or("") {

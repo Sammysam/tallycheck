@@ -3,7 +3,7 @@
   "private": true,
   "description": "Build tooling only (Tauri CLI for the Windows installer). The app's frontend lives in frontend/.",
   "scripts": {
-    "installer": "tauri build"
+    "installer": "cargo build --release -p mcp && tauri build --config src-tauri/tauri.installer.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.3"

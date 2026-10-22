@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cenango-accounting": {
+      "command": "${CENANGO_MCP_PATH}",
+      "env": {
+        "CENANGO_API_KEY": "${CENANGO_API_KEY}",
+        "CENANGO_API_URL": "${CENANGO_API_URL:-http://127.0.0.1:47800}"
+      }
+    }
+  }
+}

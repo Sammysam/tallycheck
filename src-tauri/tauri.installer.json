@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../frontend/dist/": "frontend/",
+      "../target/release/cenango-mcp.exe": "cenango-mcp.exe"
+    }
+  }
+}

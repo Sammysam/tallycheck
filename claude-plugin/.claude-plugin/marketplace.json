@@ -1,0 +1,11 @@
+{
+  "name": "cenango",
+  "owner": { "name": "Cenango (Pvt) Ltd" },
+  "plugins": [
+    {
+      "name": "cenango-accounting",
+      "source": "./cenango-accounting",
+      "description": "Ask Claude about your Cenango Accounting books, and let it draft invoices and bills for you to post."
+    }
+  ]
+}

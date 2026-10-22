@@ -1379,6 +1379,32 @@ try {
     await shot('53-stripe');
   });
 
+  await check('Claude: a key made once, drafts allowed, and what a key may not do (D41)', async () => {
+    await settingsTab('Integrations');
+    await waitFor(`!!document.querySelector('[data-testid=connector-claude]')`, 'claude card');
+    await evaluate(`document.querySelector('[data-testid=connector-claude]').click()`);
+    await waitFor(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '+ New key')`, 'claude panel');
+    await clickText('+ New key');
+    await waitFor(`!!document.querySelector('input[aria-label="Key name"]')`, 'key dialog');
+    await type('input[aria-label="Key name"]', 'Smoke Claude');
+    await evaluate(`document.querySelector('input[aria-label="Allow drafts"]').click()`);
+    await clickText('Make key');
+    await waitFor(`document.querySelector('[data-testid=new-key]')?.value.startsWith('cak_')`, 'key shown once');
+    const key = await evaluate(`document.querySelector('[data-testid=new-key]').value`);
+    await shot('54-claude-key');
+    await clickText('I have copied it');
+    await waitFor(`document.querySelector('[data-testid=api-keys]')?.innerText.includes('Read + create drafts')`, 'key listed');
+    await shot('55-claude-keys');
+    const asKey = (method, path, body) => evaluate(`fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)},
+      headers: { authorization: 'Bearer ${key}', 'content-type': 'application/json' }, body: ${body ? JSON.stringify(JSON.stringify(body)) : 'undefined'} })
+      .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }))`);
+    const me = await asKey('GET', '/api/api-keys/me');
+    if (me.status !== 200 || me.body.canWrite !== true) throw new Error('me ' + JSON.stringify(me));
+    if ((await asKey('GET', '/api/employees')).status !== 403) throw new Error('a key reached employees');
+    const inv = (await api('GET', '/api/invoices?status=DRAFT')).body.data[0];
+    if (inv && (await asKey('POST', `/api/invoices/${inv.id}/post`, {})).status !== 403) throw new Error('a key posted an invoice');
+  });
+
   await check('An administrator turns a user off', async () => {
     const users = (await api('GET', '/api/users')).body;
     const clerk = (users.data ?? users).find((u) => u.username === 'clerk.one');
