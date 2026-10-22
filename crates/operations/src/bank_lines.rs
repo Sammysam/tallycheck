@@ -7,7 +7,13 @@
 //!   created from the line's date, amount and account, through the normal payment rules;
 //! * **record an expense** (money out) — created and posted in one step, as the Expenses screen
 //!   would, because the person has just confirmed it;
-//! * or **ignore** it (a transfer recorded elsewhere, an opening balance row…).
+//! * **record a transfer** to or from another of the company's accounts (D39: a Shopify payout
+//!   reaching the bank, cash banked) — one journal entry; the matching line on the other account's
+//!   statement is then suggested against the same entry;
+//! * or **ignore** it (an opening balance row…).
+//!
+//! An imported line may carry a hint (D39): "record as an expense on account X" or "transfer to
+//! account X", which the screen offers as a one-click suggestion (Shopify fees and payouts).
 //!
 //! Unmatching only frees the line; the payment or expense stays (void it on its own screen).
 //! The suggestions are only suggestions: nothing is matched without a click.
@@ -15,10 +21,12 @@
 use crate::expenses::{self, CreateExpense};
 use crate::payments::{self, CreatePayment};
 use crate::{bills, invoices, money_num, overflow};
+use app_core::ids::new_id;
 use app_core::money::Money;
 use app_core::time::now_iso;
 use app_core::{AppError, AppResult};
 use database::{Db, Tx};
+use ledger::{entries, NewEntry, NewLine};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
@@ -40,6 +48,9 @@ pub struct BankLine {
     pub status: String,
     pub match_type: Option<String>,
     pub match_id: Option<String>,
+    /// D39: a suggested action (EXPENSE / TRANSFER) and its account.
+    pub hint_action: Option<String>,
+    pub hint_account_id: Option<String>,
 }
 
 impl BankLine {
@@ -56,8 +67,8 @@ impl BankLine {
     }
 }
 
-const COLUMNS: &str =
-    r#""id","importId","accountId","date","description","reference","amount","status","matchType","matchId""#;
+const COLUMNS: &str = r#""id","importId","accountId","date","description","reference","amount","status","matchType","matchId",
+    "hintAction","hintAccountId""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<BankLine> {
     Ok(BankLine {
@@ -71,7 +82,45 @@ fn from_row(r: &SqliteRow) -> AppResult<BankLine> {
         status: r.try_get("status")?,
         match_type: r.try_get("matchType")?,
         match_id: r.try_get("matchId")?,
+        hint_action: r.try_get("hintAction")?,
+        hint_account_id: r.try_get("hintAccountId")?,
     })
+}
+
+/// A statement line to store (an import, or a connector such as Shopify).
+pub struct NewBankLine<'a> {
+    pub import_id: &'a str,
+    pub account_id: &'a str,
+    pub date: &'a str,
+    pub description: &'a str,
+    pub reference: Option<&'a str>,
+    pub amount: Money,
+    /// D39: (EXPENSE | TRANSFER, account id).
+    pub hint: Option<(&'a str, &'a str)>,
+}
+
+/// Stores a new UNMATCHED line; returns its id.
+pub async fn insert(tx: &mut Tx, l: NewBankLine<'_>) -> AppResult<String> {
+    let id = new_id();
+    let now = now_iso();
+    sqlx::query(
+        r#"INSERT INTO "bank_lines" ("id","importId","accountId","date","description","reference","amount","hintAction",
+             "hintAccountId","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)"#,
+    )
+    .bind(&id)
+    .bind(l.import_id)
+    .bind(l.account_id)
+    .bind(l.date)
+    .bind(l.description)
+    .bind(l.reference)
+    .bind(l.amount.cents())
+    .bind(l.hint.map(|h| h.0))
+    .bind(l.hint.map(|h| h.1))
+    .bind(&now)
+    .execute(&mut **tx)
+    .await?;
+    Ok(id)
 }
 
 pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<BankLine> {
@@ -131,15 +180,46 @@ fn payment_money_in(p: &payments::Payment) -> bool {
     p.kind == "AR"
 }
 
-async fn matched_elsewhere(conn: &mut SqliteConnection, match_type: &str, id: &str) -> AppResult<bool> {
+/// Already matched by another line. A transfer entry touches two accounts, so it is matched once
+/// per account (`account_id`); payments and expenses once in all.
+async fn matched_elsewhere(
+    conn: &mut SqliteConnection,
+    match_type: &str,
+    id: &str,
+    account_id: &str,
+) -> AppResult<bool> {
     let hit: Option<i64> = sqlx::query_scalar(
-        r#"SELECT 1 FROM "bank_lines" WHERE "status" = 'MATCHED' AND "matchType" = ?1 AND "matchId" = ?2"#,
+        r#"SELECT 1 FROM "bank_lines" WHERE "status" = 'MATCHED' AND "matchType" = ?1 AND "matchId" = ?2
+             AND (?1 <> 'TRANSFER' OR "accountId" = ?3)"#,
     )
     .bind(match_type)
     .bind(id)
+    .bind(account_id)
     .fetch_optional(conn)
     .await?;
     Ok(hit.is_some())
+}
+
+/// D39: posted transfer entries that move `size` into (money in) or out of the account.
+async fn transfers_near(
+    conn: &mut SqliteConnection,
+    line: &BankLine,
+    size: Money,
+) -> AppResult<Vec<(String, String, String)>> {
+    let side = if line.money_in() { "debit" } else { "credit" };
+    let rows: Vec<(String, String, String)> = sqlx::query_as(&format!(
+        r#"SELECT e."id", e."entryNumber", e."date" FROM "journal_entries" e
+             JOIN "journal_lines" l ON l."journalEntryId" = e."id"
+            WHERE e."sourceType" = 'BANK_TRANSFER' AND e."status" = 'POSTED' AND l."accountId" = ?1 AND l."{side}" = ?2
+              AND e."date" BETWEEN date(?3, '-{SUGGEST_DAYS} days') AND date(?3, '+{SUGGEST_DAYS} days')
+            ORDER BY abs(julianday(e."date") - julianday(?3))"#
+    ))
+    .bind(&line.account_id)
+    .bind(size.cents())
+    .bind(&line.date)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows)
 }
 
 async fn suggestions(conn: &mut SqliteConnection, line: &BankLine, currency: &Option<String>) -> AppResult<Vec<Value>> {
@@ -161,7 +241,7 @@ async fn suggestions(conn: &mut SqliteConnection, line: &BankLine, currency: &Op
         let p = payments::find_one(conn, &id).await?;
         if payment_money_in(&p) == line.money_in()
             && payment_money(&p, foreign) == size
-            && !matched_elsewhere(conn, "PAYMENT", &p.id).await?
+            && !matched_elsewhere(conn, "PAYMENT", &p.id, &line.account_id).await?
         {
             out.push(json!({ "type": "PAYMENT", "id": p.id, "number": p.payment_number, "date": p.date,
                              "amount": money_num(size), "exact": true }));
@@ -172,9 +252,18 @@ async fn suggestions(conn: &mut SqliteConnection, line: &BankLine, currency: &Op
             sqlx::query_scalar(&near("expenses")).bind(&line.account_id).bind(&line.date).fetch_all(&mut *conn).await?;
         for id in ids {
             let e = expenses::find_one(conn, &id).await?;
-            if e.amount == size && !matched_elsewhere(conn, "EXPENSE", &e.id).await? {
+            if e.amount == size && !matched_elsewhere(conn, "EXPENSE", &e.id, &line.account_id).await? {
                 out.push(json!({ "type": "EXPENSE", "id": e.id, "number": e.expense_number, "date": e.date,
                                  "party": e.description, "amount": money_num(size), "exact": true }));
+            }
+        }
+    }
+
+    if !foreign {
+        for (id, number, date) in transfers_near(conn, line, size).await? {
+            if !matched_elsewhere(conn, "TRANSFER", &id, &line.account_id).await? {
+                out.push(json!({ "type": "TRANSFER", "id": id, "number": number, "date": date,
+                                 "amount": money_num(size), "exact": true }));
             }
         }
     }
@@ -258,6 +347,7 @@ async fn match_label(conn: &mut SqliteConnection, line: &BankLine) -> AppResult<
         "PAYMENT" => {
             sqlx::query_as(r#"SELECT "paymentNumber","status","journalEntryId" FROM "payments" WHERE "id" = ?1"#)
         }
+        "TRANSFER" => sqlx::query_as(r#"SELECT "entryNumber","status","id" FROM "journal_entries" WHERE "id" = ?1"#),
         _ => sqlx::query_as(r#"SELECT "expenseNumber","status","journalEntryId" FROM "expenses" WHERE "id" = ?1"#),
     }
     .bind(id)
@@ -277,6 +367,10 @@ fn to_json(line: &BankLine) -> Value {
         "reference": line.reference,
         "amount": money_num(line.amount),
         "status": line.status,
+        "hint": match (&line.hint_action, &line.hint_account_id) {
+            (Some(a), Some(acc)) => json!({ "action": a, "accountId": acc }),
+            _ => Value::Null,
+        },
     })
 }
 
@@ -354,7 +448,20 @@ pub async fn match_record(db: &Db, id: &str, match_type: &str, record_id: &str) 
             let e = expenses::find_one(&mut tx, record_id).await?;
             (e.payment_account_id, e.amount, false, e.status, e.expense_number)
         }
-        _ => return Err(AppError::bad_request("type must be PAYMENT or EXPENSE")),
+        "TRANSFER" => {
+            let found = transfers_near(&mut tx, &line, size).await?;
+            if !found.iter().any(|(id, _, _)| id == record_id) {
+                return Err(AppError::bad_request(
+                    "That entry is not a transfer of this amount through this account within a week of the line",
+                ));
+            }
+            if matched_elsewhere(&mut tx, "TRANSFER", record_id, &line.account_id).await? {
+                return Err(AppError::bad_request("That transfer is already matched to another line on this account"));
+            }
+            set(&mut tx, id, "MATCHED", Some("TRANSFER"), Some(record_id)).await?;
+            return finish(tx, id).await;
+        }
+        _ => return Err(AppError::bad_request("type must be PAYMENT, EXPENSE or TRANSFER")),
     };
     if status != "POSTED" {
         return Err(AppError::bad_request(format!("{number} is {status}; only a posted record can be matched")));
@@ -371,7 +478,7 @@ pub async fn match_record(db: &Db, id: &str, match_type: &str, record_id: &str) 
             size.to_db_string()
         )));
     }
-    if matched_elsewhere(&mut tx, match_type, record_id).await? {
+    if matched_elsewhere(&mut tx, match_type, record_id, &line.account_id).await? {
         return Err(AppError::bad_request(format!("{number} is already matched to another bank transaction")));
     }
     set(&mut tx, id, "MATCHED", Some(match_type), Some(record_id)).await?;
@@ -466,6 +573,44 @@ pub async fn expense(
     .await?;
     expenses::post_in(&mut tx, &e.id).await?;
     set(&mut tx, id, "MATCHED", Some("EXPENSE"), Some(&e.id)).await?;
+    finish(tx, id).await
+}
+
+/// D39: records the line as a transfer between this account and `other` (money in: from it;
+/// money out: to it) — one balanced journal entry, matched to the line.
+pub async fn transfer(db: &Db, id: &str, other: &str, note: Option<String>) -> AppResult<Value> {
+    let mut tx = db.begin().await?;
+    let line = unmatched(&mut tx, id).await?;
+    let here = ledger::accounts::find_one(&mut tx, &line.account_id).await?;
+    let there = ledger::accounts::find_one(&mut tx, other).await?;
+    if here.id == there.id {
+        return Err(AppError::bad_request("Choose the other account of the transfer"));
+    }
+    if here.currency.is_some() || there.currency.is_some() {
+        return Err(AppError::bad_request(
+            "Transfers with a foreign-currency account are entered as a journal entry with its rate",
+        ));
+    }
+    let size = line.size()?;
+    let (debit, credit) = if line.money_in() { (&here, &there) } else { (&there, &here) };
+    let entry = entries::post(
+        &mut tx,
+        NewEntry {
+            date: line.date.clone(),
+            description: note
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| format!("Transfer from {} to {}: {}", credit.name, debit.name, line.description)),
+            reference: line.reference.clone(),
+            source_type: Some("BANK_TRANSFER".into()),
+            source_id: Some(line.id.clone()),
+            lines: vec![
+                NewLine { account_id: debit.id.clone(), debit: size, credit: Money::ZERO, description: None },
+                NewLine { account_id: credit.id.clone(), debit: Money::ZERO, credit: size, description: None },
+            ],
+        },
+    )
+    .await?;
+    set(&mut tx, id, "MATCHED", Some("TRANSFER"), Some(&entry.id)).await?;
     finish(tx, id).await
 }
 

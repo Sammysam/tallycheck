@@ -52,6 +52,23 @@ pub fn load_or_create(path: &Path, len: usize) -> Result<Vec<u8>, SecretError> {
     Ok(secret)
 }
 
+/// D39: the secret at `path` (an integration's access key), or None when there is none.
+pub fn load(path: &Path) -> Result<Option<Vec<u8>>, SecretError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let blob = fs::read(path)?;
+    Ok(Some(dpapi::unprotect(&blob, ENTROPY)?))
+}
+
+/// D39: forgets a stored secret (disconnecting an integration).
+pub fn remove(path: &Path) -> Result<(), SecretError> {
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
 /// Protects `secret` with DPAPI and writes it to `path`, replacing any existing file
 /// (used when an administrator restores a key from its offline recovery copy).
 pub fn store(path: &Path, secret: &[u8]) -> Result<(), SecretError> {

@@ -79,6 +79,10 @@ stock items, both never negative) and `stock_moves` (every change in stock with 
 to the inventory account), plus `invoice_lines.itemId`, `invoice_lines.discountAmount` (NOT NULL,
 default 0) and `bill_lines.itemId`.
 
+D39 rebuilds `bank_lines` with `matchType` TRANSFER (a journal entry) and a suggested action
+(`hintAction` EXPENSE / TRANSFER with `hintAccountId`). Shopify settings are rows in `settings`
+(`integration.shopify.*`); the access key is not in the database.
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

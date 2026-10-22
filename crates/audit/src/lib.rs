@@ -300,9 +300,21 @@ pub fn summarize(method: &str, path: &str) -> String {
             "match" => "Matched a bank transaction",
             "payment" => "Recorded a payment from a bank transaction",
             "expense" => "Recorded an expense from a bank transaction",
+            "transfer" => "Recorded a transfer from a bank transaction",
             "ignore" => "Ignored a bank transaction",
             "restore" => "Restored an ignored bank transaction",
             _ => "Unmatched a bank transaction",
+        }
+        .into();
+    }
+    // D39: integrations.
+    if resource == "integrations" {
+        return match (method, last) {
+            (_, "connect") => "Connected Shopify",
+            (_, "sync") => "Synced with Shopify",
+            (_, "clearing-account") => "Set up the Shopify clearing account",
+            ("DELETE", _) => "Disconnected Shopify",
+            _ => "Changed the Shopify settings",
         }
         .into();
     }
