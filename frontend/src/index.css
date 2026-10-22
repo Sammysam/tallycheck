@@ -371,6 +371,7 @@
   .inv-sheet td { border: 1px solid #444; padding: 6px 8px; vertical-align: top; }
   .inv-sheet thead th { background: #63d2e8; font-weight: bold; text-align: center; }
   .inv-sheet .c-desc { text-align: left; }
+  .inv-sheet .inv-discount { font-size: 11px; color: #555; margin-top: 2px; }
   .inv-sheet .c-num { text-align: right; white-space: nowrap; }
   .inv-sheet .c-date { white-space: nowrap; }
   .inv-sheet tfoot td { border: none; padding: 4px 8px; }

@@ -711,6 +711,8 @@ async fn invoice(
             unit_price: Some(unit_price),
             account_id,
             tax_code_id,
+            item_id: None,
+            discount: Money::ZERO,
         });
     }
     in_savepoint!(tx, {

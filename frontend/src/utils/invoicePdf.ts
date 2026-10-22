@@ -20,6 +20,8 @@ interface PdfLine {
   quantity: number | string;
   unitPrice: number | string;
   amount: number | string;
+  /** D38: taken off quantity × price; "amount" is after it. */
+  discountAmount?: number | string;
   /** D26. */
   taxCodeId?: string | null;
   taxAmount?: number | string;
@@ -106,7 +108,7 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
       (l, i) => `
         <tr>
           <td class="c-date">${i === 0 ? esc(fmtDate(invoice.date)) : ''}</td>
-          <td class="c-desc">${esc(l.description)}</td>
+          <td class="c-desc">${esc(l.description)}${Number(l.discountAmount) ? `<div style="font-size:11px;color:#555">Less discount ${num(l.discountAmount!)}</div>` : ''}</td>
           <td class="c-num">${Number(l.quantity) ? num(l.quantity) : ''}</td>
           <td class="c-num">${Number(l.unitPrice) ? num(l.unitPrice) : ''}</td>
           <td class="c-num">${Number(l.amount) ? num(l.amount) : ''}</td>

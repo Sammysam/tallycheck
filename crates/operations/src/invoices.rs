@@ -54,6 +54,10 @@ pub struct InvoiceLine {
     pub tax_amount: Money,
     /// D27: the tax split by standard code (several for a tax group).
     pub taxes: Vec<crate::tax::TaxPart>,
+    /// D38: the product or service on the line, and the discount taken off it ("amount" is
+    /// what is charged after the discount).
+    pub item_id: Option<String>,
+    pub discount_amount: Money,
 }
 
 impl InvoiceLine {
@@ -133,6 +137,8 @@ impl Invoice {
                     "accountId": opt(&l.account_id),
                     "taxCodeId": opt(&l.tax_code_id),
                     "taxAmount": if fresh { money_num(l.tax_amount) } else { money_str(l.tax_amount) },
+                    "itemId": opt(&l.item_id),
+                    "discountAmount": money_str(l.discount_amount),
                     "taxes": l.taxes.iter().map(|t| json!({
                         "taxCodeId": t.tax_code_id,
                         "taxAmount": money_str(t.amount),
@@ -228,7 +234,8 @@ async fn attach(conn: &mut SqliteConnection, invoices: &mut [Invoice]) -> AppRes
     let mut customers: HashMap<String, Option<Party>> = HashMap::new();
     for inv in invoices.iter_mut() {
         let rows = sqlx::query(
-            r#"SELECT "id","invoiceId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount"
+            r#"SELECT "id","invoiceId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount",
+                      "itemId","discountAmount"
                FROM "invoice_lines" WHERE "invoiceId" = ?1 ORDER BY rowid"#,
         )
         .bind(&inv.id)
@@ -248,6 +255,8 @@ async fn attach(conn: &mut SqliteConnection, invoices: &mut [Invoice]) -> AppRes
                     tax_code_id: r.try_get("taxCodeId")?,
                     tax_amount: Money::from_cents(r.try_get("taxAmount")?),
                     taxes: Vec::new(),
+                    item_id: r.try_get("itemId")?,
+                    discount_amount: Money::from_cents(r.try_get("discountAmount")?),
                 })
             })
             .collect::<AppResult<Vec<_>>>()?;
@@ -319,6 +328,9 @@ pub struct LineInput {
     pub account_id: Option<String>,
     /// D26: optional tax code for the line.
     pub tax_code_id: Option<String>,
+    /// D38: optional product or service, and a discount off quantity × price.
+    pub item_id: Option<String>,
+    pub discount: Money,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -364,7 +376,12 @@ async fn build_lines(
     for l in inputs {
         let quantity = l.quantity.unwrap_or(Money::from_cents(100));
         let unit_price = l.unit_price.unwrap_or(Money::ZERO);
-        let amount = Money::line_amount(quantity, unit_price).ok_or_else(overflow)?;
+        let gross = Money::line_amount(quantity, unit_price).ok_or_else(overflow)?;
+        // D38: the discount comes off before tax.
+        if l.discount < Money::ZERO || l.discount > gross {
+            return Err(AppError::bad_request(format!("The discount on \"{}\" is more than the line", l.description)));
+        }
+        let amount = gross.checked_sub(l.discount).ok_or_else(overflow)?;
         let (parts, tax) = match &l.tax_code_id {
             Some(code) => crate::tax::line_tax(conn, code, amount, prices_include_tax).await?,
             None => (Vec::new(), Money::ZERO),
@@ -384,17 +401,26 @@ async fn insert_lines(
     inputs: &[LineInput],
     prices_include_tax: bool,
 ) -> AppResult<(Money, Money)> {
-    for l in inputs {
+    let mut inputs = inputs.to_vec();
+    for l in &mut inputs {
+        // D38: a line with a product takes its income account unless one was chosen.
+        if let Some(item_id) = &l.item_id {
+            let item = crate::stock::find_one(tx, item_id).await?;
+            if l.account_id.is_none() {
+                l.account_id = item.income_account_id.clone();
+            }
+        }
         if let Some(a) = &l.account_id {
             require_account(tx, a).await?;
         }
     }
-    let (lines, total, tax_total) = build_lines(tx, inputs, prices_include_tax).await?;
+    let (lines, total, tax_total) = build_lines(tx, &inputs, prices_include_tax).await?;
     for PricedLine { input: l, quantity, unit_price, amount, tax, parts } in lines {
         let line_id = new_id();
         sqlx::query(
-            r#"INSERT INTO "invoice_lines" ("id","invoiceId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount")
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
+            r#"INSERT INTO "invoice_lines" ("id","invoiceId","description","quantity","unitPrice","amount","accountId","taxCodeId","taxAmount",
+                 "itemId","discountAmount")
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"#,
         )
         .bind(&line_id)
         .bind(invoice_id)
@@ -405,6 +431,8 @@ async fn insert_lines(
         .bind(&l.account_id)
         .bind(&l.tax_code_id)
         .bind(tax.cents())
+        .bind(&l.item_id)
+        .bind(l.discount.cents())
         .execute(&mut **tx)
         .await?;
         crate::tax::save_parts(tx, "INVOICE_LINE", &line_id, &parts).await?;
@@ -602,6 +630,8 @@ pub async fn update(db: &Db, id: &str, patch: InvoicePatch, scope: &Scope) -> Ap
                     unit_price: Some(l.unit_price),
                     account_id: l.account_id.clone(),
                     tax_code_id: l.tax_code_id.clone(),
+                    item_id: l.item_id.clone(),
+                    discount: l.discount_amount,
                 })
                 .collect(),
         ),
@@ -739,13 +769,46 @@ async fn post_in(tx: &mut Tx, id: &str, scope: &Scope) -> AppResult<Invoice> {
     let figures = booked(tx, &inv).await?;
     let mut lines = vec![NewLine { account_id: ar.id, debit: figures.total, credit: Money::ZERO, description: None }];
     // Revenue gets each line without its tax; the tax goes to the code's sales account (D26).
+    // D38: revenue is the price before the discount; the discount (without tax) is debited to
+    // 4900 Discounts Given, so both show in the profit and loss.
+    let mut discounts = Money::ZERO;
     for (l, net) in inv.lines.iter().zip(&figures.nets) {
+        let discount = discount_net(tx, l, inv.prices_include_tax, inv.exchange_rate).await?;
+        discounts = discounts.checked_add(discount).ok_or_else(overflow)?;
         lines.push(NewLine {
             account_id: l.account_id.clone().unwrap_or_default(),
             debit: Money::ZERO,
-            credit: *net,
+            credit: net.checked_add(discount).ok_or_else(overflow)?,
             description: Some(l.description.clone()),
         });
+    }
+    if discounts > Money::ZERO {
+        lines.push(NewLine {
+            account_id: discount_account(tx).await?,
+            debit: discounts,
+            credit: Money::ZERO,
+            description: Some("Discounts given".into()),
+        });
+    }
+    // D38: stock sold leaves the inventory account at average cost.
+    for l in &inv.lines {
+        let Some(item_id) = &l.item_id else { continue };
+        if let Some(cost) = crate::stock::issue(tx, item_id, l.quantity, &inv.date, &inv.id).await? {
+            if cost.value > Money::ZERO {
+                lines.push(NewLine {
+                    account_id: cost.cogs_account_id,
+                    debit: cost.value,
+                    credit: Money::ZERO,
+                    description: Some(format!("Cost of {}", cost.name)),
+                });
+                lines.push(NewLine {
+                    account_id: cost.inventory_account_id,
+                    debit: Money::ZERO,
+                    credit: cost.value,
+                    description: Some(format!("Cost of {}", cost.name)),
+                });
+            }
+        }
     }
     // D27: each part of each line's tax to its own code's account.
     lines.extend(figures.taxes.into_iter().map(|(account_id, tax)| NewLine {
@@ -766,6 +829,7 @@ async fn post_in(tx: &mut Tx, id: &str, scope: &Scope) -> AppResult<Invoice> {
         },
     )
     .await?;
+    crate::stock::link_entry(tx, "INVOICE", &inv.id, &entry.id).await?;
     let before = inv.clone();
     inv.status = POSTED.into();
     inv.base_total = figures.total;
@@ -790,7 +854,8 @@ async fn unpost_in(tx: &mut Tx, id: &str, scope: &Scope, today: &str) -> AppResu
     }
     let before = inv.clone();
     if let Some(je) = inv.journal_entry_id.take() {
-        entries::reverse(tx, &je, today).await?;
+        let reversal = entries::reverse(tx, &je, today).await?;
+        crate::stock::undo_source(tx, "INVOICE", "INVOICE_REVERSAL", id, today, &reversal.id).await?;
     }
     inv.status = DRAFT.into();
     save_header(tx, &before, &inv).await?;
@@ -813,7 +878,8 @@ async fn void_in(tx: &mut Tx, id: &str, scope: &Scope, today: &str) -> AppResult
     }
     let before = inv.clone();
     if let Some(je) = &inv.journal_entry_id {
-        entries::reverse(tx, je, today).await?;
+        let reversal = entries::reverse(tx, je, today).await?;
+        crate::stock::undo_source(tx, "INVOICE", "INVOICE_REVERSAL", id, today, &reversal.id).await?;
     }
     inv.status = VOID.into();
     save_header(tx, &before, &inv).await?;
@@ -894,6 +960,8 @@ pub async fn duplicate(db: &Db, id: &str, scope: &Scope, today: &str) -> AppResu
                 unit_price: Some(l.unit_price),
                 account_id: l.account_id.clone(),
                 tax_code_id: l.tax_code_id.clone(),
+                item_id: l.item_id.clone(),
+                discount: l.discount_amount,
             })
             .collect(),
     };
@@ -971,6 +1039,44 @@ pub(crate) async fn load_any(conn: &mut SqliteConnection, id: &str) -> AppResult
 
 /// An invoice's figures in the home currency (D30): each line's net and each tax part
 /// converted at the invoice's rate, and their sum — what the receivable is booked at.
+/// D38: a line's discount without its tax, in the home currency. With tax added on top it is
+/// the discount itself; with prices including tax, the tax inside the discount comes out:
+/// net(quantity × price) − net(amount charged).
+async fn discount_net(conn: &mut SqliteConnection, l: &InvoiceLine, inclusive: bool, rate: i64) -> AppResult<Money> {
+    if l.discount_amount == Money::ZERO {
+        return Ok(Money::ZERO);
+    }
+    let net = if inclusive {
+        let gross = l.amount.checked_add(l.discount_amount).ok_or_else(overflow)?;
+        let gross_tax = match &l.tax_code_id {
+            Some(code) => crate::tax::line_tax(conn, code, gross, true).await?.1,
+            None => Money::ZERO,
+        };
+        gross
+            .checked_sub(gross_tax)
+            .and_then(|g| g.checked_sub(l.amount.checked_sub(l.tax_amount)?))
+            .ok_or_else(overflow)?
+    } else {
+        l.discount_amount
+    };
+    crate::fx::to_base(net, rate)
+}
+
+const DISCOUNT_CODE: &str = "4900";
+
+/// D38: 4900 Discounts Given (a revenue account that carries debits), added when first needed.
+async fn discount_account(tx: &mut Tx) -> AppResult<String> {
+    if let Ok(a) = ledger::accounts::find_by_code(tx, DISCOUNT_CODE).await {
+        return Ok(a.id);
+    }
+    ledger::accounts::insert_chart(
+        tx,
+        &[(DISCOUNT_CODE, "Discounts Given", ledger::AccountType::Revenue, "discounts")],
+    )
+    .await?;
+    Ok(ledger::accounts::find_by_code(tx, DISCOUNT_CODE).await?.id)
+}
+
 pub(crate) struct Booked {
     pub total: Money,
     pub nets: Vec<Money>,

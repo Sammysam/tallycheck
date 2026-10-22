@@ -372,6 +372,11 @@ try {
     const o = [...sel.options].find((x) => x.textContent.includes(${JSON.stringify(text)}));
     if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
     sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  const pickAria = (label, text) => evaluate(`(() => {
+    const sel = document.querySelector(${JSON.stringify(`select[aria-label="${label}"]`)});
+    const o = [...sel.options].find((x) => x.textContent.includes(${JSON.stringify(text)}));
+    if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
+    sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   const api = (method, path, body) => evaluate(`(async () => {
     const r = await fetch(${JSON.stringify(path)}, { method: ${JSON.stringify(method)}, headers: { 'content-type': 'application/json',
       authorization: 'Bearer ' + localStorage.getItem('accessToken') }, body: ${body ? JSON.stringify(JSON.stringify(body)) : 'undefined'} });
@@ -479,7 +484,7 @@ try {
     await send('Input.insertText', { text: '3' });
     await evaluate(`(() => { const nums = document.querySelectorAll('form input[type=number]'); nums[1].focus(); return true; })()`);
     await send('Input.insertText', { text: '12.5' });
-    await pick(2, '6000');
+    await pickAria('Account for line 1', '6000');
     // The reference rejects an empty due date (IsDateFormat on ""), so the form needs one too.
     await fillDates('2026-04-03', true);
     await clickText('Save Bill');
@@ -1209,6 +1214,66 @@ try {
     if (!imports.length || imports[0].created !== 2) throw new Error('import history ' + JSON.stringify(imports[0]));
     const blocked = await api('DELETE', `/api/imports/${imports[0].id}`);
     if (blocked.status !== 400) throw new Error('undo of a matched import answered ' + blocked.status);
+  });
+
+  await check('Products & stock: an item, opening stock, a sale with a discount at average cost (D38)', async () => {
+    const choose = (sel, text) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)});
+      const o = [...el.options].find((x) => x.textContent.includes(${JSON.stringify(text)})); if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, o.value);
+      el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    const rowMenu = async (rowText, label) => {
+      await evaluate(`(() => { const row = [...document.querySelectorAll('[data-testid=items-table] tbody tr')].find((tr) => tr.innerText.includes(${JSON.stringify(rowText)}));
+        row.querySelector('td:last-child button').click(); return true; })()`);
+      await waitFor(`[...document.querySelectorAll('button,[role=menuitem]')].some((x) => x.textContent.trim() === ${JSON.stringify(label)})`, 'row menu');
+      await evaluate(`[...document.querySelectorAll('button,[role=menuitem]')].find((x) => x.textContent.trim() === ${JSON.stringify(label)}).click()`);
+    };
+    await go('/items');
+    await clickText('+ New product or service');
+    await waitFor(`!!document.querySelector('input[aria-label="Name"]')`, 'item dialog');
+    await type('input[aria-label="Name"]', 'Ceylon Tea 400g');
+    await type('input[aria-label="Sale price"]', '850');
+    await type('input[aria-label="Purchase cost"]', '500');
+    await type('input[aria-label="Reorder point"]', '5');
+    await clickText('Save');
+    await waitFor(`document.querySelector('[data-testid=items-table]')?.innerText.includes('Ceylon Tea 400g')`, 'item listed');
+    // Opening stock: 20 counted at 500, against Owner's Equity.
+    await rowMenu('Ceylon Tea 400g', 'Adjust stock…');
+    await waitFor(`!!document.querySelector('input[aria-label="Counted quantity"]')`, 'adjust dialog');
+    await type('input[aria-label="Counted quantity"]', '20');
+    await choose('select[aria-label="Adjustment account"]', '3000');
+    await clickText('Adjust stock');
+    await waitFor(`[...document.querySelectorAll('[data-testid=items-table] tbody tr')].some((tr) => tr.innerText.includes('Ceylon Tea') && tr.innerText.includes('10,000.00'))`, 'stock valued');
+    await shot('48-items');
+    // Sell 4 at 850 less 10%, no tax: 3,060.00; cost 4 × 500.
+    await go('/invoices');
+    await clickText('+ New Invoice');
+    await waitFor(`!!document.querySelector('select[aria-label="Product for line 1"]')`, 'product picker');
+    await type('input[placeholder="Name as it should print"]', 'Tea Buyer');
+    await choose('select[aria-label="Product for line 1"]', 'Ceylon Tea');
+    await waitFor(`document.querySelector('input[placeholder="Item description"]').value === 'Ceylon Tea 400g'`, 'line filled from the product');
+    await evaluate(`(() => { const sel = document.querySelector('select[aria-label="Tax for line 1"]');
+      if (sel) { sel.value = ''; sel.dispatchEvent(new Event('change', { bubbles: true })); } return true; })()`);
+    await evaluate(`(() => { const el = document.querySelectorAll('.inv-sheet input[type=number]')[0]; el.focus(); el.select(); return true; })()`);
+    await send('Input.insertText', { text: '4' });
+    await type('input[aria-label="Discount percent for line 1"]', '10');
+    await waitFor(`document.querySelector('.inv-discount')?.innerText.includes('340.00')`, 'discount shown on the invoice');
+    await shot('49-invoice-product');
+    await clickText('Save Invoice');
+    await waitFor(`document.body.innerText.includes('Tea Buyer')`, 'invoice listed');
+    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.billToName === 'Tea Buyer');
+    if (inv.totalAmount !== '3060.00') throw new Error('invoice total ' + inv.totalAmount);
+    const posted = await api('POST', `/api/invoices/${inv.id}/post`);
+    if (posted.status !== 201) throw new Error('post answered ' + posted.status + ' ' + JSON.stringify(posted.body));
+    const item = (await api('GET', '/api/items')).body.find((i) => i.name === 'Ceylon Tea 400g');
+    if (item.quantityOnHand !== 16 || item.stockValue !== 8000) throw new Error('stock after the sale ' + JSON.stringify(item));
+    const tb = (await api('GET', '/api/ledger/trial-balance')).body;
+    const disc = tb.find((r) => r.account.code === '4900');
+    if (!disc || disc.balance !== -340) throw new Error('discounts given ' + JSON.stringify(disc));
+    await go('/items');
+    await waitFor(`!!document.querySelector('[data-testid=items-table]')`, 'items');
+    await rowMenu('Ceylon Tea 400g', 'Stock history…');
+    await waitFor(`document.querySelectorAll('[data-testid=stock-history] tbody tr').length === 2`, 'stock history');
+    await shot('50-stock-history');
   });
 
   await check('An administrator turns a user off', async () => {

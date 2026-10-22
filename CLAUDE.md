@@ -487,6 +487,23 @@ recommendations without answering each one individually; revisit any of them on 
   (`payments::create_in`), or becomes an expense created and posted at once
   (`expenses::create_in` + `post_in`), or is ignored. Nothing is matched without a click; unmatching
   keeps the payment / expense. Reading and previewing are not written to the activity log.
+- **D38 Products, stock and discounts** (2026-10-22, integrations plan phase 2; rules chosen by the
+  user: average cost, a separate discounts account, posting blocked when stock is short). `items`
+  (INVENTORY / SERVICE / NON_INVENTORY; `/items`, Master Data → Products & Services; managing needs
+  `invoices` or `bills`). Bills: a line with a stock item always debits the item's inventory account
+  (1200 by default); posting adds stock at the line's home-currency cost without tax. Invoices:
+  posting takes stock out at average cost (value × qty ÷ on hand, half-up; the last units take the
+  remaining value) and the invoice's own entry debits COGS (5000) / credits inventory; posting is
+  refused with "Not enough stock of …" when short. Unpost / void reverse exactly what the document
+  still has moved (`stock::undo_source`); a bill whose stock has since been sold cannot be voided
+  (adjust instead). Stock adjustments (`POST /items/:id/adjust`, `ledger` permission) post against an
+  account the user chooses (source STOCK_ADJUSTMENT, not reversible from the Ledger). Every
+  `stock_moves` value equals what was posted to the inventory account. Invoice lines carry
+  `discountAmount` (before tax; `amount` = qty × price − discount, so totals and tax are unchanged);
+  posting credits revenue with the price before the discount and debits the discount without its
+  tax to 4900 Discounts Given (added when first used, like 7900). "+ Add shipping" adds a line on
+  4800 if that account exists. Not yet: stock on credit / debit notes (returns go through an
+  adjustment), foreign-currency costs other than via the bill's rate, FIFO.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

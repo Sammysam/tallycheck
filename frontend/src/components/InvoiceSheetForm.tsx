@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { openInvoicePdf, previewInvoice, printInvoice, type InvoiceSettings } from '../utils/invoicePdf';
 import { amountInWords } from '../utils/amountInWords';
-import { errMsg } from '../api/client';
+import api, { errMsg } from '../api/client';
 import { amount, currencyDigits } from '../lib/money';
 import { company, region } from '../lib/region';
 import { lineCodes, lineParts, summarize, useTaxCodes } from '../lib/taxes';
 import CurrencyPicker from './CurrencyPicker';
+import type { PickItem } from '../lib/items';
 import { moneyIn } from '../lib/money';
 
 /**
@@ -29,6 +30,9 @@ export interface SheetLine {
   accountId: string;
   /** D26: '' for no tax. */
   taxCodeId: string;
+  /** D38: the product or service ('' for none) and the discount off quantity × price. */
+  itemId: string;
+  discount: number;
 }
 
 export interface SheetPayload {
@@ -43,7 +47,7 @@ export interface SheetPayload {
   paymentOptions?: string[];
   signatoryName?: string;
   signatoryTitle?: string;
-  lines: { description: string; quantity?: number; unitPrice?: number; accountId?: string; taxCodeId?: string }[];
+  lines: { description: string; quantity?: number; unitPrice?: number; accountId?: string; taxCodeId?: string; itemId?: string; discountAmount?: number }[];
   pricesIncludeTax: boolean;
   /** D30: omitted for the home currency. */
   currency?: string;
@@ -71,7 +75,7 @@ const TERMS = [
 const TERM_DAYS: Record<string, number> = { DUE_ON_RECEIPT: 0, NET_15: 15, NET_30: 30, NET_60: 60 };
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const newLine = (accountId = '', taxCodeId = ''): SheetLine => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId, taxCodeId });
+const newLine = (accountId = '', taxCodeId = ''): SheetLine => ({ _key: uid(), description: '', quantity: 1, unitPrice: 0, accountId, taxCodeId, itemId: '', discount: 0 });
 
 /** The account new lines start on: 4000 Revenue if it exists, else the first one. */
 const defaultAccountId = (accounts: any[]) =>
@@ -121,6 +125,8 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
           unitPrice: Number(l.unitPrice),
           accountId: l.accountId,
           taxCodeId: l.taxCodeId ?? '',
+          itemId: l.itemId ?? '',
+          discount: Number(l.discountAmount) || 0,
         }))
       : [newLine(fallbackAccount, region().defaultSalesTax)],
   );
@@ -143,6 +149,11 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
   );
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  // D38: products & services to pick on the lines.
+  const [items, setItems] = useState<PickItem[]>([]);
+  useEffect(() => {
+    api.get('/items').then((r) => setItems(r.data)).catch(() => setItems([]));
+  }, []);
 
   // `accounts` arrives from the API a beat after the first render, so a line
   // created before then starts blank — fill those in once the list lands.
@@ -154,7 +165,9 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
   }, [fallbackAccount]);
 
   // Blank quantity means one of these; blank price means the line has no money on it.
-  const lineAmount = (l: SheetLine) => round2((Number(l.quantity) || 1) * (Number(l.unitPrice) || 0));
+  const grossAmount = (l: SheetLine) => round2((Number(l.quantity) || 1) * (Number(l.unitPrice) || 0));
+  /** D38: what the line charges — quantity × price less its discount (before tax). */
+  const lineAmount = (l: SheetLine) => round2(grossAmount(l) - (Number(l.discount) || 0));
 
   // D26: subtotal, tax per code and total — the same arithmetic the server uses.
   const summary = useMemo(
@@ -169,6 +182,29 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, [field]: val } : l)));
 
   const removeLine = (i: number) => setLines((ls) => (ls.length === 1 ? ls : ls.filter((_, idx) => idx !== i)));
+
+  /** D38: a product fills the line's description, price, account and tax; they stay editable. */
+  const chooseItem = (i: number, itemId: string) => {
+    const it = items.find((x) => x.id === itemId);
+    setLines((ls) => ls.map((l, idx) => {
+      if (idx !== i) return l;
+      if (!it) return { ...l, itemId: '' };
+      return {
+        ...l, itemId,
+        description: it.description || it.name,
+        unitPrice: it.salePrice ?? l.unitPrice,
+        accountId: it.incomeAccountId || l.accountId,
+        taxCodeId: it.taxCodeId ?? l.taxCodeId,
+      };
+    }));
+  };
+  /** A discount typed as a percentage of quantity × price. */
+  const setDiscountPercent = (i: number, pct: string) => {
+    const p = Number(pct);
+    setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, discount: pct.trim() === '' ? 0 : round2(grossAmount(l) * p / 100) } : l)));
+  };
+  const shippingAccount = accounts.find((a) => a.code === '4800')?.id ?? fallbackAccount;
+  const itemById = (id: string) => items.find((x) => x.id === id);
 
   /**
    * Picking a customer refills Bill To — the fields stay editable afterwards.
@@ -221,6 +257,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       amount: lineAmount(l),
+      discountAmount: Number(l.discount) || 0,
       taxCodeId: l.taxCodeId || null,
       taxAmount: summary.lineTax[i],
       taxes: lineParts(lineAmount(l), l.taxCodeId, pricesIncludeTax),
@@ -244,12 +281,14 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
         signatoryName: sigName.trim() || undefined,
         signatoryTitle: sigTitle.trim() || undefined,
         // A blank account must go over as undefined — '' fails UUID validation.
-        lines: lines.map(({ _key, accountId, quantity, unitPrice, taxCodeId, ...l }) => ({
+        lines: lines.map(({ _key, accountId, quantity, unitPrice, taxCodeId, itemId, discount, ...l }) => ({
           ...l,
           accountId: accountId || undefined,
           quantity: quantity || undefined,
           unitPrice: unitPrice || undefined,
           taxCodeId: taxCodeId || undefined,
+          itemId: itemId || undefined,
+          discountAmount: Number(discount) > 0 ? round2(Number(discount)) : undefined,
         })),
         pricesIncludeTax,
         currency: currency || undefined,
@@ -301,6 +340,24 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
             <label className="inv-side-field" key={line._key}>
               Line {i + 1}
               {line.description && <span className="inv-side-hint">{line.description}</span>}
+              {items.length > 0 && (
+                <select
+                  style={{ marginBottom: 4 }}
+                  aria-label={`Product for line ${i + 1}`}
+                  value={line.itemId}
+                  onChange={(e) => chooseItem(i, e.target.value)}
+                >
+                  <option value="">No product — type the line</option>
+                  {items.filter((it) => it.isActive || it.id === line.itemId).map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
+                </select>
+              )}
+              {itemById(line.itemId)?.type === 'INVENTORY' && (() => {
+                const onHand = Number(itemById(line.itemId)?.quantityOnHand) || 0;
+                const short = (Number(line.quantity) || 1) > onHand;
+                return <span className="inv-side-hint" style={{ color: short ? '#b45309' : undefined, whiteSpace: 'normal' }}>
+                  {onHand} in stock{short ? ' — not enough to post this invoice yet' : ''}
+                </span>;
+              })()}
               <select
                 value={line.accountId}
                 onChange={(e) => setLine(i, 'accountId', e.target.value)}
@@ -321,6 +378,23 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
                   ))}
                 </select>
               )}
+              <span className="inv-side-hint" style={{ marginTop: 4 }}>Discount — amount, or % of the line</span>
+              <span style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input
+                  type="number" min="0" step="0.01" placeholder="Discount"
+                  aria-label={`Discount for line ${i + 1}`}
+                  value={line.discount || ''}
+                  onChange={(e) => setLine(i, 'discount', Number(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <input
+                  type="number" min="0" max="100" step="any" placeholder="%"
+                  aria-label={`Discount percent for line ${i + 1}`}
+                  onChange={(e) => setDiscountPercent(i, e.target.value)}
+                  style={{ width: 56 }}
+                />
+              </span>
+              {Number(line.discount) > grossAmount(line) && <span className="inv-side-hint" style={{ color: '#b91c1c' }}>The discount is more than the line.</span>}
             </label>
           ))}
           {taxCodes.length > 0 && (
@@ -420,6 +494,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
                       value={line.description}
                       onChange={(e) => setLine(i, 'description', e.target.value)}
                     />
+                    {Number(line.discount) > 0 && <div className="inv-discount">Less discount {num(Number(line.discount))}</div>}
                   </td>
                   <td className="c-num">
                     <input
@@ -451,6 +526,8 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
               <tr>
                 <td colSpan={3} style={{ border: 'none' }}>
                   <button type="button" className="btn-link" onClick={() => setLines([...lines, newLine(fallbackAccount, region().defaultSalesTax)])}>+ Add line</button>
+                  {' '}
+                  <button type="button" className="btn-link" onClick={() => setLines([...lines, { ...newLine(shippingAccount, region().defaultSalesTax), description: 'Shipping' }])}>+ Add shipping</button>
                 </td>
                 <td className="total-label">{anyTax ? 'Subtotal' : 'Total'}</td>
                 <td className="total-val">{num(anyTax ? summary.subtotal : total)}</td>

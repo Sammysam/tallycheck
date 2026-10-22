@@ -87,6 +87,8 @@ impl Shop {
                     unit_price: Some(m(p)),
                     account_id: with_account.then(|| self.acct["4000"].clone()),
                     tax_code_id: None,
+                    item_id: None,
+                    discount: Money::ZERO,
                 })
                 .collect(),
             ..Default::default()
@@ -224,6 +226,7 @@ async fn bills_expenses_and_ap_payments_follow_the_reference() -> AppResult<()> 
         unit_price: m(p),
         account_id: exp.clone(),
         tax_code_id: None,
+        item_id: None,
     };
     let bill = bills::create(
         &s.db,
@@ -412,6 +415,7 @@ async fn voiding_a_payment_reverses_it_and_reopens_the_invoice_and_bill() -> App
                 unit_price: m("57.5"),
                 account_id: s.acct["6000"].clone(),
                 tax_code_id: None,
+                item_id: None,
             }],
         },
     )
@@ -555,6 +559,7 @@ async fn debit_notes_reduce_what_is_owed_to_the_vendor() -> AppResult<()> {
                 unit_price: m("300"),
                 account_id: expense.clone(),
                 tax_code_id: None,
+                item_id: None,
             }],
         },
     )
@@ -694,6 +699,7 @@ async fn taxes_split_every_document_and_post_to_the_tax_accounts() -> AppResult<
                 unit_price: m("57.5"),
                 account_id: s.acct["6000"].clone(),
                 tax_code_id: Some(vat.id.clone()),
+                item_id: None,
             }],
         },
     )

@@ -306,6 +306,16 @@ pub fn summarize(method: &str, path: &str) -> String {
         }
         .into();
     }
+    // D38: products & services.
+    if resource == "items" {
+        return match (method, last) {
+            (_, "adjust") => "Adjusted stock",
+            ("POST", _) => "Created a product or service",
+            ("DELETE", _) => "Deleted a product or service",
+            _ => "Updated a product or service",
+        }
+        .into();
+    }
     if resource == "books" && last == "lock" {
         return "Changed the books lock date".into();
     }

@@ -32,6 +32,7 @@ const KIND: Record<string, { label: string; list: string }> = {
   PAYMENT_AR: { label: 'Customer payment', list: '/payments' },
   PAYMENT_AP: { label: 'Vendor payment', list: '/payments' },
   PAYMENT_LIABILITY: { label: 'Payable account payment', list: '/payments' },
+  STOCK_ADJUSTMENT: { label: 'Stock adjustment', list: '/items' },
   CREDIT_NOTE: { label: 'Credit note', list: '/credit-notes' },
   DEBIT_NOTE: { label: 'Debit note', list: '/debit-notes' },
   PAYROLL: { label: 'Payroll run', list: '/payroll' },
