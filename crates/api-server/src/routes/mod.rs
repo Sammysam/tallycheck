@@ -6,6 +6,7 @@ pub mod auth;
 pub mod books;
 pub mod employees;
 pub mod imports;
+pub mod integrations;
 pub mod items;
 pub mod ledger;
 pub mod operations;
@@ -140,6 +141,13 @@ pub fn api_router() -> Router<AppState> {
         .route("/imports/layouts/{id}", axum::routing::delete(imports::layout_remove))
         .route("/imports", get(imports::list).post(imports::run))
         .route("/imports/{id}", axum::routing::delete(imports::undo))
+        .route(
+            "/integrations/shopify",
+            get(integrations::get).put(integrations::update).delete(integrations::disconnect),
+        )
+        .route("/integrations/shopify/connect", post(integrations::connect))
+        .route("/integrations/shopify/clearing-account", post(integrations::clearing_account))
+        .route("/integrations/shopify/sync", post(integrations::sync))
         .route("/items", get(items::list).post(items::create))
         .route("/items/{id}", get(items::get).patch(items::update).delete(items::remove))
         .route("/items/{id}/moves", get(items::moves))
@@ -150,6 +158,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/bank-lines/{id}/match", post(imports::bank_match))
         .route("/bank-lines/{id}/payment", post(imports::bank_pay))
         .route("/bank-lines/{id}/expense", post(imports::bank_expense))
+        .route("/bank-lines/{id}/transfer", post(imports::bank_transfer))
         .route("/bank-lines/{id}/ignore", post(imports::bank_ignore))
         .route("/bank-lines/{id}/restore", post(imports::bank_restore))
         .route("/bank-lines/{id}/unmatch", post(imports::bank_unmatch))

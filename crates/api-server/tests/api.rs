@@ -2895,3 +2895,282 @@ async fn products_stock_at_average_cost_and_invoice_discounts() -> TestResult {
     assert_eq!(denied.status, StatusCode::FORBIDDEN);
     Ok(())
 }
+
+/// A stand-in for the Shopify Admin API: a shop, two pages of orders and Shopify Payments.
+async fn fake_shopify() -> Result<String, Box<dyn std::error::Error>> {
+    use axum::extract::{Query, Request};
+    use axum::response::IntoResponse;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let base = format!("http://{}", listener.local_addr()?);
+    let authorised = |req: &Request| {
+        req.headers().get("X-Shopify-Access-Token").and_then(|v| v.to_str().ok()) == Some("shpat_test_1234567890")
+    };
+    let page_base = base.clone();
+    let app = Router::new()
+        .route(
+            "/admin/api/{version}/shop.json",
+            axum::routing::get(move |req: Request| async move {
+                if !authorised(&req) {
+                    return (StatusCode::UNAUTHORIZED, "no").into_response();
+                }
+                axum::Json(json!({"shop": {"name": "Hill Tea Store", "currency": "LKR"}})).into_response()
+            }),
+        )
+        .route(
+            "/admin/api/{version}/orders.json",
+            axum::routing::get(move |Query(q): Query<std::collections::HashMap<String, String>>, req: Request| {
+                let page_base = page_base.clone();
+                async move {
+                    if !authorised(&req) {
+                        return (StatusCode::UNAUTHORIZED, "no").into_response();
+                    }
+                    if q.contains_key("page_info") {
+                        // Page 2: an order with a tax the app does not know yet.
+                        return axum::Json(json!({"orders": [{
+                            "id": 5003, "name": "#1003", "processed_at": "2026-10-11T09:00:00+05:30", "currency": "LKR",
+                            "financial_status": "paid", "cancelled_at": null, "taxes_included": false, "total_price": "1025.00",
+                            "customer": {"first_name": "Kamal", "last_name": "Silva", "email": "kamal@example.lk"},
+                            "line_items": [{"title": "Green Tea", "sku": "", "quantity": 1, "price": "1000.00",
+                                "discount_allocations": [], "tax_lines": [{"title": "SSCL", "rate": 0.025, "price": "25.00"}]}],
+                            "shipping_lines": []
+                        }]}))
+                        .into_response();
+                    }
+                    let next = format!("<{page_base}/admin/api/2026-07/orders.json?page_info=p2&limit=250>; rel=\"next\"");
+                    (
+                        [("Link", next)],
+                        axum::Json(json!({"orders": [
+                            {"id": 5001, "name": "#1001", "processed_at": "2026-10-10T10:00:00+05:30", "currency": "LKR",
+                             "financial_status": "paid", "cancelled_at": null, "taxes_included": false, "total_price": "2155.40",
+                             "customer": {"first_name": "Jane", "last_name": "Perera", "email": "jane@example.lk"},
+                             "line_items": [{"title": "Ceylon Tea", "variant_title": "400g", "sku": "T400", "quantity": 2, "price": "850.00",
+                                 "discount_allocations": [{"amount": "170.00"}],
+                                 "tax_lines": [{"title": "VAT", "rate": 0.18, "price": "275.40"}]}],
+                             "shipping_lines": [{"title": "Standard", "price": "350.00", "discounted_price": "350.00", "tax_lines": []}]},
+                            {"id": 5002, "name": "#1002", "processed_at": "2026-10-10T11:00:00+05:30", "currency": "LKR",
+                             "financial_status": "voided", "cancelled_at": "2026-10-10T12:00:00+05:30", "total_price": "100.00",
+                             "line_items": [{"title": "X", "quantity": 1, "price": "100.00"}], "shipping_lines": []}
+                        ]})),
+                    )
+                        .into_response()
+                }
+            }),
+        )
+        .route(
+            "/admin/api/{version}/shopify_payments/balance/transactions.json",
+            axum::routing::get(move |req: Request| async move {
+                if !authorised(&req) {
+                    return (StatusCode::UNAUTHORIZED, "no").into_response();
+                }
+                axum::Json(json!({"transactions": [
+                    {"id": 9001, "type": "charge", "test": false, "amount": "2155.40", "fee": "64.66", "source_order_id": 5001,
+                     "processed_at": "2026-10-10T10:05:00+05:30", "currency": "LKR"},
+                    {"id": 9002, "type": "payout", "test": false, "amount": "-2090.74", "fee": "0.00", "source_order_id": null,
+                     "processed_at": "2026-10-12T08:00:00+05:30", "currency": "LKR"},
+                    {"id": 9003, "type": "charge", "test": true, "amount": "1.00", "fee": "0.00", "processed_at": "2026-10-12T08:00:00+05:30"}
+                ]}))
+                .into_response()
+            }),
+        );
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    Ok(base)
+}
+
+#[tokio::test]
+async fn shopify_orders_become_drafts_and_payments_bank_lines() -> TestResult {
+    let base = fake_shopify().await?;
+    std::env::set_var("ACCOUNTING_SHOPIFY_BASE_URL", &base);
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"region.currency": "LKR"}))).await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let code_id = |code: &str| -> String {
+        accounts
+            .body
+            .as_array()
+            .and_then(|a| a.iter().find(|x| x["code"] == code))
+            .and_then(|x| x["id"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (cash, revenue, opex) = (code_id("1000"), code_id("4000"), code_id("6000"));
+    let id = |v: &Value| v["id"].as_str().unwrap_or_default().to_string();
+
+    // A wrong key is refused; the right one connects and is never shown again.
+    let bad = app
+        .call(
+            Method::POST,
+            "/api/integrations/shopify/connect",
+            Some(&admin),
+            Some(json!({"shop": "hilltea", "token": "shpat_wrong_000000"})),
+        )
+        .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.body);
+    let ok = app
+        .call(
+            Method::POST,
+            "/api/integrations/shopify/connect",
+            Some(&admin),
+            Some(json!({"shop": "https://HillTea.myshopify.com/admin", "token": "shpat_test_1234567890"})),
+        )
+        .await?;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
+    assert_eq!((ok.body["connected"].clone(), ok.body["shop"].clone()), (json!(true), json!("hilltea.myshopify.com")));
+    assert_eq!(ok.body["shopName"], json!("Hill Tea Store"));
+    assert!(!ok.body.to_string().contains("shpat_"), "the key never comes back");
+
+    // The matching: a clearing account, payouts to Cash, fees to 6000, VAT 18% to a tax code.
+    let clearing = app.call(Method::POST, "/api/integrations/shopify/clearing-account", Some(&admin), None).await?;
+    let clearing_id = clearing.body["clearingAccountId"].as_str().ok_or("clearing")?.to_string();
+    let vat_acct = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "2300", "name": "VAT", "type": "LIABILITY"})),
+        )
+        .await?;
+    let vat = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "VAT 18%", "rate": 18, "salesAccountId": id(&vat_acct.body), "purchaseAccountId": id(&vat_acct.body)})),
+        )
+        .await?;
+    let item = app
+        .call(
+            Method::POST,
+            "/api/items",
+            Some(&admin),
+            Some(json!({"name": "Ceylon Tea 400g", "sku": "t400", "type": "SERVICE"})),
+        )
+        .await?;
+    let set = app
+        .call(
+            Method::PUT,
+            "/api/integrations/shopify",
+            Some(&admin),
+            Some(json!({"startDate": "2026-10-01", "payoutAccountId": cash, "feeAccountId": opex, "incomeAccountId": revenue,
+                "taxMap": {"VAT|0.18": id(&vat.body)}})),
+        )
+        .await?;
+    assert_eq!(set.status, StatusCode::OK, "{}", set.body);
+    let wrong = app
+        .call(Method::PUT, "/api/integrations/shopify", Some(&admin), Some(json!({"feeAccountId": revenue})))
+        .await?;
+    assert_eq!(wrong.status, StatusCode::BAD_REQUEST, "fees go to an expense account");
+
+    // First sync: #1001 comes in (two pages read), #1002 is cancelled, #1003's tax is not matched yet.
+    let sync = app.call(Method::POST, "/api/integrations/shopify/sync", Some(&admin), None).await?;
+    assert_eq!(sync.status, StatusCode::OK, "{}", sync.body);
+    assert_eq!(sync.body["orders"], json!({"created": 1, "skipped": 1, "errors": 1}), "{}", sync.body);
+    assert_eq!(sync.body["unmappedTaxes"], json!(["SSCL|0.025"]));
+    assert_eq!(sync.body["lines"]["created"], json!(3), "payment, fee and payout; the test charge is left out");
+    let invs = app.call(Method::GET, "/api/invoices?status=DRAFT", Some(&admin), None).await?;
+    let inv = invs.body["data"].as_array().and_then(|d| d.first()).cloned().ok_or("draft")?;
+    assert_eq!((inv["poNumber"].as_str(), inv["totalAmount"].as_str()), (Some("#1001"), Some("2155.40")), "{inv}");
+    let full = app.call(Method::GET, &format!("/api/invoices/{}", id(&inv)), Some(&admin), None).await?;
+    let lines = full.body["lines"].as_array().cloned().unwrap_or_default();
+    assert_eq!(lines[0]["description"], json!("Ceylon Tea — 400g"));
+    assert_eq!(lines[0]["itemId"], json!(id(&item.body)), "matched by SKU, whatever the case");
+    assert_eq!(lines[0]["discountAmount"], json!("170.00"));
+    assert_eq!(lines[1]["description"], json!("Shipping: Standard"));
+    assert_eq!(full.body["customer"]["name"], json!("Jane Perera"));
+
+    // Second sync, with SSCL matched: only #1003 is new; nothing comes in twice.
+    let sscl = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "SSCL 2.5%", "rate": 2.5, "salesAccountId": id(&vat_acct.body), "purchaseAccountId": id(&vat_acct.body)})),
+        )
+        .await?;
+    app.call(
+        Method::PUT,
+        "/api/integrations/shopify",
+        Some(&admin),
+        Some(json!({"taxMap": {"VAT|0.18": id(&vat.body), "SSCL|0.025": id(&sscl.body)}})),
+    )
+    .await?;
+    let again = app.call(Method::POST, "/api/integrations/shopify/sync", Some(&admin), None).await?;
+    assert_eq!(again.body["orders"], json!({"created": 1, "skipped": 2, "errors": 0}), "{}", again.body);
+    assert_eq!(again.body["lines"], json!({"created": 0, "skipped": 3}));
+
+    // Post #1001, then work the clearing account: the payment pays it, the fee is an expense,
+    // the payout is a transfer to Cash.
+    let post = app.call(Method::POST, &format!("/api/invoices/{}/post", id(&inv)), Some(&admin), None).await?;
+    assert_eq!(post.status, StatusCode::CREATED, "{}", post.body);
+    let bl = app
+        .call(Method::GET, &format!("/api/bank-lines?accountId={clearing_id}&status=UNMATCHED"), Some(&admin), None)
+        .await?;
+    let data = bl.body["data"].as_array().cloned().unwrap_or_default();
+    let find = |d: &str| data.iter().find(|l| l["description"].as_str().is_some_and(|x| x.starts_with(d))).cloned();
+    let payment = find("Shopify payment #1001").ok_or("payment line")?;
+    let fee = find("Shopify fee #1001").ok_or("fee line")?;
+    let payout = find("Shopify payout").ok_or("payout line")?;
+    assert_eq!(payment["suggestions"][0]["id"], json!(id(&inv)), "{payment}");
+    assert_eq!(fee["hint"], json!({"action": "EXPENSE", "accountId": opex}));
+    assert_eq!(payout["hint"], json!({"action": "TRANSFER", "accountId": cash}));
+    for (line, path, body) in [
+        (&payment, "payment", json!({"invoiceId": id(&inv)})),
+        (&fee, "expense", json!({"expenseAccountId": opex})),
+        (&payout, "transfer", json!({"accountId": cash})),
+    ] {
+        let r =
+            app.call(Method::POST, &format!("/api/bank-lines/{}/{path}", id(line)), Some(&admin), Some(body)).await?;
+        assert_eq!(r.status, StatusCode::OK, "{path}: {}", r.body);
+    }
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    let bal = |code: &str| {
+        tb.body
+            .as_array()
+            .and_then(|r| r.iter().find(|x| x["account"]["code"] == code))
+            .and_then(|r| r["balance"].as_f64())
+            .unwrap_or(0.0)
+    };
+    assert_eq!((bal("1090"), bal("1000"), bal("6000")), (0.0, 2090.74, 64.66), "{}", tb.body);
+
+    // Cash's own statement later shows the payout: it is suggested against the same transfer.
+    let stmt = app
+        .call(
+            Method::POST,
+            "/api/imports",
+            Some(&admin),
+            Some(json!({"kind": "BANK", "source": "Bank", "accountId": cash, "dateOrder": "YMD",
+                "rows": [{"date": "2026-10-12", "description": "SHOPIFY PAYOUT", "amount": "2090.74"}]})),
+        )
+        .await?;
+    assert_eq!(stmt.body["created"], json!(1));
+    let cl = app
+        .call(Method::GET, &format!("/api/bank-lines?accountId={cash}&status=UNMATCHED"), Some(&admin), None)
+        .await?;
+    let line = cl.body["data"][0].clone();
+    assert_eq!(line["suggestions"][0]["type"], json!("TRANSFER"), "{line}");
+    let m = app
+        .call(
+            Method::POST,
+            &format!("/api/bank-lines/{}/match", id(&line)),
+            Some(&admin),
+            Some(json!({"type": "TRANSFER", "id": line["suggestions"][0]["id"]})),
+        )
+        .await?;
+    assert_eq!(m.body["status"], json!("MATCHED"), "{}", m.body);
+
+    // Disconnecting forgets the key; a sync then asks to connect first.
+    let off = app.call(Method::DELETE, "/api/integrations/shopify", Some(&admin), None).await?;
+    assert_eq!(off.body["connected"], json!(false));
+    let no = app.call(Method::POST, "/api/integrations/shopify/sync", Some(&admin), None).await?;
+    assert_eq!(no.status, StatusCode::BAD_REQUEST);
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    let denied = app.call(Method::GET, "/api/integrations/shopify", Some(&viewer), None).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    let log = app.call(Method::GET, "/api/audit-logs?limit=100", Some(&admin), None).await?;
+    let text = log.body.to_string();
+    assert!(text.contains("Connected Shopify") && text.contains("Synced with Shopify") && !text.contains("shpat_"));
+    Ok(())
+}

@@ -19,11 +19,13 @@ import { lineCodes, useTaxCodes } from '../lib/taxes';
  */
 
 type Status = 'UNMATCHED' | 'MATCHED' | 'IGNORED';
-interface Suggestion { type: 'PAYMENT' | 'EXPENSE' | 'INVOICE' | 'BILL'; id: string; number: string; date: string; party?: string; amount: number; exact: boolean }
-interface Match { type: 'PAYMENT' | 'EXPENSE'; id: string; number?: string | null; status?: string | null; journalEntryId?: string | null }
+interface Suggestion { type: 'PAYMENT' | 'EXPENSE' | 'INVOICE' | 'BILL' | 'TRANSFER'; id: string; number: string; date: string; party?: string; amount: number; exact: boolean }
+interface Match { type: 'PAYMENT' | 'EXPENSE' | 'TRANSFER'; id: string; number?: string | null; status?: string | null; journalEntryId?: string | null }
 interface Line {
   id: string; date: string; description: string; reference?: string | null; amount: number; status: Status;
   suggestions?: Suggestion[]; match?: Match | null;
+  /** D39: a connector's suggested action, e.g. a Shopify fee or payout. */
+  hint?: { action: 'EXPENSE' | 'TRANSFER'; accountId: string } | null;
 }
 interface Account { id: string; code: string; name: string; type: string; currency?: string | null; isActive: boolean }
 interface Doc { id: string; number: string; party: string; date: string; owed: number; currency?: string | null }
@@ -44,6 +46,7 @@ export default function BankTransactions() {
   const [loadedFor, setLoadedFor] = useState('');
   const [paying, setPaying] = useState<Line | null>(null);
   const [expensing, setExpensing] = useState<Line | null>(null);
+  const [transferring, setTransferring] = useState<Line | null>(null);
   const [busyId, setBusyId] = useState('');
 
   useEffect(() => {
@@ -88,10 +91,22 @@ export default function BankTransactions() {
   };
 
   const takeSuggestion = (line: Line, s: Suggestion) => {
-    if (s.type === 'PAYMENT' || s.type === 'EXPENSE') return act(line, 'match', { type: s.type, id: s.id }, `Matched to ${s.number}.`);
+    if (s.type === 'PAYMENT' || s.type === 'EXPENSE' || s.type === 'TRANSFER') return act(line, 'match', { type: s.type, id: s.id }, `Matched to ${s.number}.`);
     if (!hasPermission('payments')) { toast('Recording a payment needs the Payments permission.', 'error'); return; }
     return act(line, 'payment', s.type === 'INVOICE' ? { invoiceId: s.id } : { billId: s.id }, `Payment recorded for ${s.number}.`);
   };
+
+  const accountName = (id: string) => {
+    const a = accounts.find((x) => x.id === id);
+    return a ? `${a.code} ${a.name}` : 'the chosen account';
+  };
+  const takeHint = (line: Line) => {
+    if (!line.hint) return;
+    if (line.hint.action === 'EXPENSE') return act(line, 'expense', { expenseAccountId: line.hint.accountId }, 'Expense recorded and posted.');
+    return act(line, 'transfer', { accountId: line.hint.accountId }, 'Transfer recorded.');
+  };
+  const canHint = (line: Line) =>
+    !!line.hint && (line.hint.action === 'EXPENSE' ? hasPermission('expenses') && line.amount < 0 && !currency : hasPermission('ledger') && !currency);
 
   const loading = loadedFor !== `${accountId}|${status}`;
   const fmt = (v: number) => moneyIn(v, currency);
@@ -104,6 +119,7 @@ export default function BankTransactions() {
       case 'EXPENSE': return `Already recorded: ${s.number} ${s.party ?? ''}`;
       case 'INVOICE': return `${s.exact ? 'Pays' : 'Part-pays'} ${s.number} · ${s.party ?? ''} (owed ${fmt(s.amount)})`;
       case 'BILL': return `${s.exact ? 'Pays' : 'Part-pays'} ${s.number} · ${s.party ?? ''} (owed ${fmt(s.amount)})`;
+      case 'TRANSFER': return `Same transfer as ${s.number} (${fmtDate(s.date)})`;
     }
     return line.id;
   };
@@ -176,6 +192,12 @@ export default function BankTransactions() {
                   <td className="px-3 py-2 text-right tabular-nums text-green-700">{l.amount > 0 ? fmt(l.amount) : ''}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{l.amount < 0 ? fmt(-l.amount) : ''}</td>
                   <td className="px-3 py-2">
+                    {l.status === 'UNMATCHED' && canHint(l) && (
+                      <button type="button" disabled={!!busyId} onClick={() => takeHint(l)} data-testid="hint"
+                        className="text-left text-xs px-2 py-1 mb-1 rounded border inline-flex items-center gap-1.5 border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100">
+                        <Sparkles size={12} /> {l.hint!.action === 'EXPENSE' ? `Record as expense on ${accountName(l.hint!.accountId)}` : `Transfer ${l.amount < 0 ? 'to' : 'from'} ${accountName(l.hint!.accountId)}`}
+                      </button>
+                    )}
                     {l.status === 'UNMATCHED' && (l.suggestions?.length ? (
                       <div className="flex flex-col gap-1 items-start">
                         {l.suggestions.map((s) => (
@@ -185,11 +207,11 @@ export default function BankTransactions() {
                           </button>
                         ))}
                       </div>
-                    ) : <span className="text-xs text-gray-400">No suggestion — use the ⋮ menu</span>)}
+                    ) : !canHint(l) && <span className="text-xs text-gray-400">No suggestion — use the ⋮ menu</span>)}
                     {l.status === 'MATCHED' && l.match && (
                       <span className="text-sm">
                         <TxnLink entryId={l.match.journalEntryId}>{l.match.number ?? l.match.type}</TxnLink>
-                        <span className="text-xs text-gray-500"> · {l.match.type === 'PAYMENT' ? 'payment' : 'expense'}{l.match.status === 'VOID' ? ' (voided)' : ''}</span>
+                        <span className="text-xs text-gray-500"> · {l.match.type === 'PAYMENT' ? 'payment' : l.match.type === 'TRANSFER' ? 'transfer' : 'expense'}{l.match.status === 'VOID' ? ' (voided)' : ''}</span>
                       </span>
                     )}
                   </td>
@@ -199,6 +221,7 @@ export default function BankTransactions() {
                         ...(l.amount > 0 && hasPermission('payments') ? [{ label: 'Payment for an invoice…', onSelect: () => setPaying(l) }] : []),
                         ...(l.amount < 0 && hasPermission('payments') ? [{ label: 'Payment for a bill…', onSelect: () => setPaying(l) }] : []),
                         ...(l.amount < 0 && !currency && hasPermission('expenses') ? [{ label: 'Record as an expense…', onSelect: () => setExpensing(l) }] : []),
+                        ...(!currency && hasPermission('ledger') ? [{ label: l.amount < 0 ? 'Transfer to another account…' : 'Transfer from another account…', onSelect: () => setTransferring(l) }] : []),
                         { label: 'Ignore', onSelect: () => act(l, 'ignore', undefined, 'Ignored. Find it under Ignored if you need it back.') },
                       ]} />
                     )}
@@ -224,6 +247,11 @@ export default function BankTransactions() {
         onSave={async (body) => {
           const ok = await act(expensing, 'expense', body, 'Expense recorded and posted.');
           if (ok) setExpensing(null);
+        }} />}
+      {transferring && <TransferDialog line={transferring} accounts={accounts.filter((a) => a.id !== accountId)} fmt={fmt} onClose={() => setTransferring(null)}
+        onSave={async (body) => {
+          const ok = await act(transferring, 'transfer', body, 'Transfer recorded.');
+          if (ok) setTransferring(null);
         }} />}
     </div>
   );
@@ -305,6 +333,35 @@ function ExpenseDialog({ line, accounts, fmt, onClose, onSave }: {
           {codes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
+    </Dialog>
+  );
+}
+
+function TransferDialog({ line, accounts, fmt, onClose, onSave }: {
+  line: Line; accounts: Account[]; fmt: (v: number) => string; onClose: () => void;
+  onSave: (body: { accountId: string; note?: string }) => void;
+}) {
+  const out = line.amount < 0;
+  const usable = accounts.filter((a) => a.isActive && !a.currency && (a.type === 'ASSET' || a.type === 'LIABILITY' || a.type === 'EQUITY'));
+  const [accountId, setAccountId] = useState('');
+  const [note, setNote] = useState('');
+  return (
+    <Dialog title={out ? 'Transfer to another account' : 'Transfer from another account'} width={480} onClose={onClose}
+      buttons={<>
+        <button className="btn btn-primary" disabled={!accountId} onClick={() => onSave({ accountId, note: note || undefined })}>Record transfer</button>
+        <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+      </>}>
+      <p className="text-sm text-gray-700 mb-3">{fmtDate(line.date)} · {line.description} · <b>{fmt(Math.abs(line.amount))}</b></p>
+      <label className="text-xs font-medium text-gray-600 block mb-2">{out ? 'Money went to' : 'Money came from'}
+        <select className="mt-1 w-full" value={accountId} onChange={(e) => setAccountId(e.target.value)} aria-label="Other account">
+          <option value="">Choose…</option>
+          {usable.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+        </select>
+      </label>
+      <label className="text-xs font-medium text-gray-600 block">Note
+        <input className="mt-1 w-full" value={note} onChange={(e) => setNote(e.target.value)} placeholder="optional" aria-label="Note" />
+      </label>
+      <p className="text-xs text-gray-500 mt-3">One journal entry moves the money between the two accounts. When the other account's statement shows it, that line is suggested against the same transfer.</p>
     </Dialog>
   );
 }

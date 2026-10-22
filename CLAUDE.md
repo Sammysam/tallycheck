@@ -504,6 +504,25 @@ recommendations without answering each one individually; revisit any of them on 
   tax to 4900 Discounts Given (added when first used, like 7900). "+ Add shipping" adds a line on
   4800 if that account exists. Not yet: stock on credit / debit notes (returns go through an
   adjustment), foreign-currency costs other than via the bill's rate, FIFO.
+- **D39 Shopify connector** (2026-10-22, integrations plan phase 3; built against Shopify's published
+  Admin REST API and a stand-in server in the tests — not yet tried against a real store). Settings →
+  Integrations (`settings`): store address + Admin API access key (custom app; read_orders,
+  read_shopify_payments_payouts). The key is DPAPI-encrypted in `<data>/secrets/shopify-token.dpapi`,
+  never in the database or a response; settings live under `integration.shopify.*`. The app goes
+  online only to sync (`crates/integrations`, reqwest + rustls; 429 retried; pages followed by the
+  Link header; `ACCOUNTING_SHOPIFY_BASE_URL` may point at a local stand-in only). A sync (`invoices` +
+  `banking`; or hourly when switched on) fetches first, then writes in one transaction with a
+  savepoint per order: orders → DRAFT invoices (order number as PO number; product lines with
+  their discounts and tax; shipping lines; products matched by SKU; customer by name or created;
+  cancelled skipped; an unmatched Shopify tax leaves the order out and is listed for matching; a
+  different total is reported). Shopify Payments balance transactions → bank lines on a clearing
+  account (1090 Shopify Clearing on request): payments, fees (hint: expense on the fee account),
+  refunds, payouts (hint: transfer to the payout account); test transactions skipped. Every order
+  and line is keyed (`shopify:<shop>:order|bt|fee:<id>`) so it comes in once, and each sync is an
+  import that Import from File can undo. Bank lines gained `TRANSFER` matches (a BANK_TRANSFER
+  journal entry, matched once per account, suggested on the other account's statement) and hints
+  (`bank_lines` rebuilt; it was new in D37). Refunds still need a credit note by hand (the report
+  says so); orders in a currency other than the home currency are not brought in yet.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

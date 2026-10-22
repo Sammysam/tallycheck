@@ -492,23 +492,20 @@ async fn bank(tx: &mut Tx, import_id: &str, account_id: &str, req: &Request) -> 
             out.push(RowResult { row: n, status: "DUPLICATE", label, message: Some("Already imported".into()) });
             continue;
         }
-        let line_id = new_id();
-        let now = now_iso();
         let saved: AppResult<()> = in_savepoint!(tx, {
             async {
-                sqlx::query(
-                    r#"INSERT INTO "bank_lines" ("id","importId","accountId","date","description","reference","amount","createdAt","updatedAt")
-                       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)"#,
+                let line_id = crate::bank_lines::insert(
+                    tx,
+                    crate::bank_lines::NewBankLine {
+                        import_id,
+                        account_id,
+                        date: &date,
+                        description,
+                        reference: (!reference.is_empty()).then_some(reference),
+                        amount,
+                        hint: None,
+                    },
                 )
-                .bind(&line_id)
-                .bind(import_id)
-                .bind(account_id)
-                .bind(&date)
-                .bind(description)
-                .bind((!reference.is_empty()).then_some(reference))
-                .bind(amount.cents())
-                .bind(&now)
-                .execute(&mut **tx)
                 .await?;
                 remember(tx, import_id, Kind::Bank, &key, "BANK_LINE", &line_id).await
             }
@@ -761,6 +758,67 @@ async fn invoice(
         }
         .await
     })
+}
+
+// ─── For connectors (D39) ───────────────────────────────────────────────────
+
+/// Starts an import made by a connector (Shopify…), inside the caller's transaction.
+pub async fn open_import(
+    tx: &mut Tx,
+    kind: Kind,
+    source: &str,
+    file_name: Option<&str>,
+    account_id: Option<&str>,
+    created_by: Option<&str>,
+) -> AppResult<String> {
+    let id = new_id();
+    sqlx::query(
+        r#"INSERT INTO "imports" ("id","kind","source","fileName","accountId","createdById","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?7)"#,
+    )
+    .bind(&id)
+    .bind(kind.as_str())
+    .bind(source)
+    .bind(file_name)
+    .bind(account_id)
+    .bind(created_by)
+    .bind(now_iso())
+    .execute(&mut **tx)
+    .await?;
+    Ok(id)
+}
+
+/// Records the counts; an import that brought nothing in is not kept.
+pub async fn close_import(tx: &mut Tx, id: &str, created: i64, skipped: i64) -> AppResult<()> {
+    if created == 0 {
+        sqlx::query(r#"DELETE FROM "imports" WHERE "id" = ?1"#).bind(id).execute(&mut **tx).await?;
+        return Ok(());
+    }
+    sqlx::query(r#"UPDATE "imports" SET "created" = ?1, "skipped" = ?2, "updatedAt" = ?3 WHERE "id" = ?4"#)
+        .bind(created)
+        .bind(skipped)
+        .bind(now_iso())
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// The record an outside key was imported as, if it still exists.
+pub async fn imported_as(conn: &mut SqliteConnection, kind: Kind, key: &str) -> AppResult<Option<String>> {
+    already_imported(conn, kind, key).await
+}
+
+/// Remembers what an outside record became (so it comes in once, and the import can be undone).
+pub async fn remember_item(
+    tx: &mut Tx,
+    import_id: &str,
+    kind: Kind,
+    key: &str,
+    record_type: &str,
+    record_id: &str,
+) -> AppResult<()> {
+    remember(tx, import_id, kind, key, record_type, record_id).await
 }
 
 // ─── History and undo ───────────────────────────────────────────────────────

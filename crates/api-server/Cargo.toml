@@ -19,6 +19,7 @@ axum.workspace = true
 database.workspace = true
 ledger.workspace = true
 operations.workspace = true
+integrations.workspace = true
 employees.workspace = true
 payroll.workspace = true
 backup.workspace = true

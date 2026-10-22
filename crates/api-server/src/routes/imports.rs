@@ -260,6 +260,23 @@ pub async fn bank_expense(
     Ok(Json(bank_lines::expense(&state.db, &id, account, tax, text(&m, "description")).await?))
 }
 
+/// D39: the line is a transfer to / from another of the company's accounts.
+pub async fn bank_transfer(
+    State(state): State<AppState>,
+    auth: Authorized<perm::Banking>,
+    Path(id): Path<String>,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    if !auth.user().has_permission("ledger") {
+        return Err(forbidden());
+    }
+    parse_uuid(&id)?;
+    let m = body.object();
+    let account = text(&m, "accountId").ok_or_else(|| AppError::bad_request("Choose the other account"))?;
+    parse_uuid(&account)?;
+    Ok(Json(bank_lines::transfer(&state.db, &id, &account, text(&m, "note")).await?))
+}
+
 async fn change(state: AppState, id: String, action: &str) -> AppResult<Json<Value>> {
     parse_uuid(&id)?;
     Ok(Json(bank_lines::change(&state.db, &id, action).await?))

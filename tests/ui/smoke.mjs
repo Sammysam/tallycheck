@@ -5,8 +5,12 @@
 //
 // The server must have a fresh, empty database (no ADMIN_USERNAME / ADMIN_PASSWORD): the test
 // creates admin / admin12345 through the first-run screen (D17).
+//
+// D39: the Shopify step talks to a stand-in Shopify that this script serves on port 47950; start
+// the server with ACCOUNTING_SHOPIFY_BASE_URL=http://127.0.0.1:47950 (otherwise that step fails).
 
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { createHmac } from 'node:crypto';
 import { mkdirSync, writeFileSync, mkdtempSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,6 +36,23 @@ function totp(secret) {
   const o = h[h.length - 1] & 0xf;
   return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
 }
+
+// D39: a stand-in Shopify Admin API (one order, its payment, fee and payout).
+const fakeShopify = createServer((req, res) => {
+  if (req.headers['x-shopify-access-token'] !== 'shpat_smoke_1234567890') { res.writeHead(401); res.end('{}'); return; }
+  const body = req.url.includes('/shop.json') ? { shop: { name: 'Smoke Tea Shop', currency: 'LKR' } }
+    : req.url.includes('/orders.json') ? { orders: [{
+        id: 7001, name: '#2001', processed_at: '2026-10-20T10:00:00+05:30', currency: 'LKR', financial_status: 'paid', cancelled_at: null,
+        taxes_included: false, total_price: '1500.00', customer: { first_name: 'Nimali', last_name: 'Fernando', email: 'nimali@example.lk' },
+        line_items: [{ title: 'Tea gift box', sku: 'GIFT-1', quantity: 1, price: '1500.00', discount_allocations: [], tax_lines: [] }],
+        shipping_lines: [] }] }
+    : req.url.includes('/balance/transactions.json') ? { transactions: [
+        { id: 8001, type: 'charge', test: false, amount: '1500.00', fee: '45.00', source_order_id: 7001, processed_at: '2026-10-20T10:01:00+05:30' },
+        { id: 8002, type: 'payout', test: false, amount: '-1455.00', fee: '0.00', source_order_id: null, processed_at: '2026-10-21T08:00:00+05:30' }] }
+    : null;
+  res.writeHead(body ? 200 : 404, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(body ?? {}));
+}).listen(47950, '127.0.0.1');
 
 const profile = mkdtempSync(join(tmpdir(), 'edge-smoke-'));
 const edge = spawn(EDGE, [
@@ -1274,6 +1295,50 @@ try {
     await rowMenu('Ceylon Tea 400g', 'Stock history…');
     await waitFor(`document.querySelectorAll('[data-testid=stock-history] tbody tr').length === 2`, 'stock history');
     await shot('50-stock-history');
+  });
+
+  await check('Shopify: connect, match accounts, sync, and a fee recorded in one click (D39)', async () => {
+    const choose = (sel, text) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)});
+      const o = [...el.options].find((x) => x.textContent.includes(${JSON.stringify(text)})); if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, o.value);
+      el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await settingsTab('Integrations');
+    await waitFor(`!!document.querySelector('input[aria-label="Store address"]')`, 'connect form');
+    await type('input[aria-label="Store address"]', 'smoke-tea');
+    await type('input[aria-label="Access key"]', 'shpat_smoke_1234567890');
+    await clickText('Connect');
+    await waitFor(`document.body.innerText.includes('Connected to Smoke Tea Shop')`, 'connected');
+    await clickText('+ Add “1090 Shopify Clearing”');
+    await waitFor(`document.querySelector('select[aria-label="Shopify clearing account"]')?.selectedOptions[0]?.textContent.includes('1090')`, 'clearing account');
+    await choose('select[aria-label="Sales account"]', '4000');
+    await choose('select[aria-label="Payouts reach"]', '1000');
+    await choose('select[aria-label="Shopify fees"]', '6000');
+    await clickText('Save');
+    await waitFor(`[...document.querySelectorAll('[data-testid=toast]')].some((t) => t.innerText.includes('Shopify settings saved'))`, 'saved');
+    await clickText('Sync now');
+    await waitFor(`document.querySelector('[data-testid=shopify-report]')?.innerText.includes('1 new order') && document.querySelector('[data-testid=shopify-report]')?.innerText.includes('3 payment lines')`, 'sync report', 30000);
+    await shot('51-shopify');
+    const draft = (await api('GET', '/api/invoices?status=DRAFT')).body.data.find((i) => i.poNumber === '#2001');
+    if (!draft || draft.totalAmount !== '1500.00') throw new Error('Shopify order as a draft: ' + JSON.stringify(draft));
+    // The clearing account: the fee is one click (its hint), the payout a transfer to Cash.
+    const st = (await api('GET', '/api/integrations/shopify')).body;
+    await go('/bank-transactions');
+    await waitFor(`[...(document.querySelector('select[aria-label="Account"]')?.options ?? [])].some((o) => o.textContent.includes('1090'))`, 'account list');
+    await choose('select[aria-label="Account"]', '1090');
+    await waitFor(`document.querySelectorAll('[data-testid=bank-lines] tbody tr').length === 3`, 'clearing lines');
+    await evaluate(`(() => { const row = [...document.querySelectorAll('[data-testid=bank-lines] tbody tr')].find((tr) => tr.innerText.includes('Shopify fee'));
+      row.querySelector('[data-testid=hint]').click(); return true; })()`);
+    await waitFor(`document.querySelectorAll('[data-testid=bank-lines] tbody tr').length === 2`, 'fee recorded');
+    await evaluate(`(() => { const row = [...document.querySelectorAll('[data-testid=bank-lines] tbody tr')].find((tr) => tr.innerText.includes('payout'));
+      row.querySelector('[data-testid=hint]').click(); return true; })()`);
+    await waitFor(`document.querySelectorAll('[data-testid=bank-lines] tbody tr').length === 1`, 'payout recorded');
+    await shot('52-shopify-clearing');
+    const tb = (await api('GET', '/api/ledger/trial-balance')).body;
+    // Fee and payout are booked; the payment waits for its invoice to be posted, so until then
+    // the clearing account shows what left it (45 + 1,455).
+    const clearing = tb.find((r) => r.account.code === '1090');
+    if (!clearing || clearing.balance !== -1500) throw new Error('clearing account: ' + JSON.stringify(clearing));
+    if (st.lastError) throw new Error('last error ' + st.lastError);
   });
 
   await check('An administrator turns a user off', async () => {
