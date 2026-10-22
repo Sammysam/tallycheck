@@ -39,6 +39,19 @@ function totp(secret) {
 
 // D39: a stand-in Shopify Admin API (one order, its payment, fee and payout).
 const fakeShopify = createServer((req, res) => {
+  // D40: Stripe on the same stand-in (start the server with ACCOUNTING_STRIPE_BASE_URL too).
+  if (req.url.startsWith('/v1/')) {
+    if (req.headers.authorization !== 'Bearer sk_test_smoke_1234567890abcd') { res.writeHead(401); res.end('{}'); return; }
+    const at = Math.floor(Date.UTC(2026, 9, 20, 6) / 1000);
+    const body = req.url.startsWith('/v1/balance_transactions') ? { has_more: false, data: [
+        { id: 'txn_s1', type: 'charge', amount: 300000, fee: 9000, currency: 'lkr', created: at, description: 'Order 3001',
+          source: { id: 'ch_s1', billing_details: { name: 'Dilini Silva' } } }] }
+      : req.url.startsWith('/v1/balance') ? { available: [{ currency: 'lkr', amount: 0 }] }
+      : req.url.startsWith('/v1/account') ? { id: 'acct_smoke', settings: { dashboard: { display_name: 'Smoke Tea' } } } : null;
+    res.writeHead(body ? 200 : 404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body ?? {}));
+    return;
+  }
   if (req.headers['x-shopify-access-token'] !== 'shpat_smoke_1234567890') { res.writeHead(401); res.end('{}'); return; }
   const body = req.url.includes('/shop.json') ? { shop: { name: 'Smoke Tea Shop', currency: 'LKR' } }
     : req.url.includes('/orders.json') ? { orders: [{
@@ -1303,20 +1316,23 @@ try {
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, o.value);
       el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await settingsTab('Integrations');
+    await waitFor(`!!document.querySelector('[data-testid=connector-shopify]')`, 'integration cards');
+    await shot('51a-integrations');
+    await evaluate(`document.querySelector('[data-testid=connector-shopify]').click()`);
     await waitFor(`!!document.querySelector('input[aria-label="Store address"]')`, 'connect form');
     await type('input[aria-label="Store address"]', 'smoke-tea');
-    await type('input[aria-label="Access key"]', 'shpat_smoke_1234567890');
+    await type('input[aria-label="Admin API access key"]', 'shpat_smoke_1234567890');
     await clickText('Connect');
     await waitFor(`document.body.innerText.includes('Connected to Smoke Tea Shop')`, 'connected');
-    await clickText('+ Add “1090 Shopify Clearing”');
-    await waitFor(`document.querySelector('select[aria-label="Shopify clearing account"]')?.selectedOptions[0]?.textContent.includes('1090')`, 'clearing account');
+    await clickText('+ Add a “Shopify Clearing” account');
+    await waitFor(`document.querySelector('select[aria-label="Shopify Payments money account"]')?.selectedOptions[0]?.textContent.includes('1090')`, 'clearing account');
     await choose('select[aria-label="Sales account"]', '4000');
     await choose('select[aria-label="Payouts reach"]', '1000');
     await choose('select[aria-label="Shopify fees"]', '6000');
     await clickText('Save');
     await waitFor(`[...document.querySelectorAll('[data-testid=toast]')].some((t) => t.innerText.includes('Shopify settings saved'))`, 'saved');
     await clickText('Sync now');
-    await waitFor(`document.querySelector('[data-testid=shopify-report]')?.innerText.includes('1 new order') && document.querySelector('[data-testid=shopify-report]')?.innerText.includes('3 payment lines')`, 'sync report', 30000);
+    await waitFor(`document.querySelector('[data-testid=sync-report]')?.innerText.includes('1 new order') && document.querySelector('[data-testid=sync-report]')?.innerText.includes('3 money lines')`, 'sync report', 30000);
     await shot('51-shopify');
     const draft = (await api('GET', '/api/invoices?status=DRAFT')).body.data.find((i) => i.poNumber === '#2001');
     if (!draft || draft.totalAmount !== '1500.00') throw new Error('Shopify order as a draft: ' + JSON.stringify(draft));
@@ -1339,6 +1355,28 @@ try {
     const clearing = tb.find((r) => r.account.code === '1090');
     if (!clearing || clearing.balance !== -1500) throw new Error('clearing account: ' + JSON.stringify(clearing));
     if (st.lastError) throw new Error('last error ' + st.lastError);
+  });
+
+  await check('Stripe: connect, money account, sync a payment and its fee (D40)', async () => {
+    const choose = (sel, text) => evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)});
+      const o = [...el.options].find((x) => x.textContent.includes(${JSON.stringify(text)})); if (!o) throw new Error('no option ' + ${JSON.stringify(text)});
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, o.value);
+      el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await settingsTab('Integrations');
+    await waitFor(`!!document.querySelector('[data-testid=connector-stripe]')`, 'integration cards');
+    await evaluate(`document.querySelector('[data-testid=connector-stripe]').click()`);
+    await waitFor(`!!document.querySelector('input[aria-label="Restricted or secret key"]')`, 'stripe form');
+    await type('input[aria-label="Restricted or secret key"]', 'sk_test_smoke_1234567890abcd');
+    await clickText('Connect');
+    await waitFor(`document.body.innerText.includes('Connected to Smoke Tea (test mode)')`, 'stripe connected');
+    await clickText('+ Add a “Stripe” account');
+    await waitFor(`document.querySelector('select[aria-label="Stripe money account"]')?.selectedOptions[0]?.textContent.includes('1092')`, 'stripe account');
+    await choose('select[aria-label="Stripe fees"]', '6000');
+    await clickText('Save');
+    await waitFor(`[...document.querySelectorAll('[data-testid=toast]')].some((t) => t.innerText.includes('Stripe settings saved'))`, 'saved');
+    await clickText('Sync now');
+    await waitFor(`document.querySelector('[data-testid=sync-report]')?.innerText.includes('2 money lines')`, 'stripe report', 30000);
+    await shot('53-stripe');
   });
 
   await check('An administrator turns a user off', async () => {

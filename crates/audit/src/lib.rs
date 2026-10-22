@@ -309,14 +309,19 @@ pub fn summarize(method: &str, path: &str) -> String {
     }
     // D39: integrations.
     if resource == "integrations" {
+        let service = match at(1).unwrap_or("") {
+            "woocommerce" => "WooCommerce",
+            "paypal" => "PayPal",
+            "stripe" => "Stripe",
+            _ => "Shopify",
+        };
         return match (method, last) {
-            (_, "connect") => "Connected Shopify",
-            (_, "sync") => "Synced with Shopify",
-            (_, "clearing-account") => "Set up the Shopify clearing account",
-            ("DELETE", _) => "Disconnected Shopify",
-            _ => "Changed the Shopify settings",
-        }
-        .into();
+            (_, "connect") => format!("Connected {service}"),
+            (_, "sync") => format!("Synced with {service}"),
+            (_, "clearing-account") => format!("Set up the {service} money account"),
+            ("DELETE", _) => format!("Disconnected {service}"),
+            _ => format!("Changed the {service} settings"),
+        };
     }
     // D38: products & services.
     if resource == "items" {

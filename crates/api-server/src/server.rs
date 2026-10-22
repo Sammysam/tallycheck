@@ -156,7 +156,7 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
     });
     let scheduler = backup::schedule::spawn(db.clone(), config.data_dir.clone());
     // D39: automatic Shopify sync, when it is switched on.
-    let shopify_sync = integrations::shopify::spawn(db.clone(), config.data_dir.clone());
+    let shopify_sync = integrations::spawn(db.clone(), config.data_dir.clone());
     tracing::info!(%addr, lan = config.lan_enabled, "accounting server listening");
     Ok(ServerHandle { addr, db, shutdown: Some(tx), join, scheduler, shopify_sync, _lock: lock })
 }
