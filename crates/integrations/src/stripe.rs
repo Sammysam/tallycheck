@@ -34,11 +34,11 @@ fn base() -> String {
 
 pub async fn connect(body: &Map<String, Value>) -> AppResult<Connected> {
     let key = body.get("secretKey").and_then(Value::as_str).unwrap_or("").trim().to_string();
-    if !(key.starts_with("sk_") || key.starts_with("rk_")) || key.len() < 20 {
-        return Err(AppError::bad_request("Paste a secret key (sk_…) or restricted key (rk_…) from Stripe"));
-    }
     if key.starts_with("pk_") {
         return Err(AppError::bad_request("That is a publishable key; use a secret or restricted key"));
+    }
+    if !(key.starts_with("sk_") || key.starts_with("rk_")) || key.len() < 20 {
+        return Err(AppError::bad_request("Paste a secret key (sk_…) or restricted key (rk_…) from Stripe"));
     }
     let http = common::http()?;
     let (status, _, balance) =
