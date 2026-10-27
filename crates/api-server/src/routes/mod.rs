@@ -28,7 +28,7 @@ use crate::errors::unknown_route;
 use crate::state::AppState;
 use crate::upload::UPLOAD_BODY_LIMIT;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch, post, put};
 use axum::Router;
 use operations as op;
 
@@ -130,6 +130,19 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/employees/{id}/us-tax", get(us::tax_get).put(us::tax_put))
         .route("/payroll/us/settings", get(us::settings_get).patch(us::settings_update))
         .route("/payroll/us/preview", post(us::preview))
+        .route("/payroll/us/runs", get(us::runs).post(us::run_create))
+        .route("/payroll/us/runs/{id}", get(us::run_get).delete(us::run_remove))
+        .route("/payroll/us/runs/{id}/lines", post(us::line_add))
+        .route("/payroll/us/runs/{id}/lines/{line_id}", patch(us::line_update).delete(us::line_remove))
+        .route("/payroll/us/runs/{id}/post", post(us::run_post))
+        .route("/payroll/us/runs/{id}/pay", post(us::run_pay))
+        .route("/payroll/us/runs/{id}/remit", post(us::run_remit))
+        .route("/payroll/us/runs/{id}/void", post(us::run_void))
+        .route("/payroll/us/reports/941", get(us::report_941))
+        .route("/payroll/us/reports/940", get(us::report_940))
+        .route("/payroll/us/reports/w2", get(us::report_w2))
+        .route("/payroll/us/state-taxes", get(us::state_taxes))
+        .route("/payroll/us/state-taxes/{state}", put(us::state_tax_put).delete(us::state_tax_delete))
         .route("/payroll/rates", get(pr::rates_get).patch(pr::rates_update))
         .route("/payroll/company", get(pr::company_get).patch(pr::company_update))
         .route("/payroll/runs", get(pr::list).post(pr::create))

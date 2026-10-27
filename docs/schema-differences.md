@@ -91,6 +91,12 @@ older Form W-4, exemption, 401(k) and section 125 per period). It is the web edi
 004 with `~` regex checks as `GLOB`, booleans as 0/1 and timestamps written by Rust. US company
 settings are rows in `settings` (`payroll.country`, `payroll.us.*`).
 
+D43 adds `us_payroll_runs` (with `accountsSnapshot`, the accounts a posted run used — desktop only),
+`us_payroll_lines`, `us_payroll_remittances` and `us_state_tax_rules`, and the state certificate
+columns on `employee_us_tax` (the web edition's migrations 005 + 006 in one). JSONB columns are TEXT
+with `json_valid`, the line order column `seq` is the SQLite rowid, and the remittance type check
+includes STATE_INCOME_TAX from the start. Account choices are settings (`payroll.us.account.*`).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

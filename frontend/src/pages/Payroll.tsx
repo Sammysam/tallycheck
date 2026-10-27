@@ -7,6 +7,7 @@ import StatusBadge from '../components/StatusBadge';
 import { rs } from '../lib/employees';
 import { amt, periodLabel, type CompanyDetails, type PayeSlab, type PayrollRates, type PayrollRun } from '../lib/payroll';
 import { region } from '../lib/region';
+import { usePayrollCountry } from '../lib/usPayroll';
 
 const COMPANY_FIELDS: { key: keyof CompanyDetails; label: string; hint?: string }[] = [
   { key: 'companyName', label: 'Company name (as printed)' },
@@ -39,6 +40,12 @@ export default function Payroll() {
   const [companyForm, setCompanyForm] = useState<Record<string, string>>({});
   const [companyError, setCompanyError] = useState('');
   const [companySaved, setCompanySaved] = useState(false);
+
+  // A company on US payroll works on the US screens.
+  const country = usePayrollCountry();
+  useEffect(() => {
+    if (country === 'US') navigate('/payroll/us', { replace: true });
+  }, [country, navigate]);
 
   const load = useCallback(
     () =>
@@ -136,9 +143,12 @@ export default function Payroll() {
       <PageHeader
         title="Payroll"
         action={
-          <button onClick={showRates ? () => setShowRates(false) : openRates} className="btn btn-secondary">
-            {showRates ? 'Hide rates' : 'Rates & PAYE slabs'}
-          </button>
+          <>
+            <button onClick={() => navigate('/payroll/us')} className="btn btn-secondary">US payroll</button>
+            <button onClick={showRates ? () => setShowRates(false) : openRates} className="btn btn-secondary">
+              {showRates ? 'Hide rates' : 'Rates & PAYE slabs'}
+            </button>
+          </>
         }
       />
 

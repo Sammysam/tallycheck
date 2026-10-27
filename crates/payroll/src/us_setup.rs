@@ -6,6 +6,7 @@
 //! decimals), `sutaWageBase` (cents, empty = no limit), `ein`, `stateAccountNo`.
 
 use crate::us::{self, FilingStatus, UsInputs, YearToDate, W4};
+use crate::us_state::{load_rule, StateEmployee};
 use app_core::money::Money;
 use app_core::time::{now_iso, today_local};
 use app_core::{AppError, AppResult};
@@ -34,6 +35,20 @@ pub fn periods_per_year(frequency: &str) -> i64 {
         "BIWEEKLY" => 26,
         "SEMIMONTHLY" => 24,
         _ => 12,
+    }
+}
+
+// ─── JSON columns (TEXT with json_valid checks) ─────────────────────────────
+
+pub(crate) fn json_col(r: &SqliteRow, key: &str) -> AppResult<Value> {
+    let text: String = r.try_get(key)?;
+    serde_json::from_str(&text).map_err(|e| AppError::internal(format!("{key}: {e}")))
+}
+
+pub(crate) fn json_opt(r: &SqliteRow, key: &str) -> AppResult<Option<Value>> {
+    match r.try_get::<Option<String>, _>(key)? {
+        Some(text) => serde_json::from_str(&text).map(Some).map_err(|e| AppError::internal(format!("{key}: {e}"))),
+        None => Ok(None),
     }
 }
 
@@ -81,6 +96,8 @@ pub struct UsSettingsPatch {
     pub futa_credit_reduction: Option<i64>,
     pub ein: Option<Option<String>>,
     pub state_account_no: Option<Option<String>>,
+    /// (role key, account id or None for the default), D43.
+    pub accounts: Vec<(String, Option<String>)>,
 }
 
 async fn settings_rows(conn: &mut SqliteConnection) -> AppResult<BTreeMap<String, String>> {
@@ -129,9 +146,59 @@ pub async fn load_settings(conn: &mut SqliteConnection) -> AppResult<UsSettings>
     Ok(settings_from(&settings_rows(conn).await?))
 }
 
+/// US payroll is worked out in dollars, so the company's books must be kept in USD (D43).
+pub async fn check_currency(conn: &mut SqliteConnection) -> AppResult<()> {
+    let currency: Option<String> =
+        sqlx::query_scalar(r#"SELECT "value" FROM "settings" WHERE "key" = 'region.currency'"#)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if currency.as_deref().map(str::trim) != Some("USD") {
+        return Err(AppError::bad_request(
+            "US payroll needs the company's currency to be US dollars (USD) — set it under Settings → Region & currency first",
+        ));
+    }
+    Ok(())
+}
+
+/// The account each US payroll role posts to: the chosen one, or the default code (D43).
+async fn accounts_json(conn: &mut SqliteConnection) -> AppResult<Value> {
+    let mut out = Vec::new();
+    for r in crate::us_runs::ROLES {
+        let chosen: Option<String> = sqlx::query_scalar(r#"SELECT "value" FROM "settings" WHERE "key" = ?1"#)
+            .bind(crate::us_runs::setting_key(r.key))
+            .fetch_optional(&mut *conn)
+            .await?
+            .filter(|v: &String| !v.trim().is_empty());
+        let account = match &chosen {
+            Some(id) => ledger::accounts::get(conn, id).await?,
+            None => None,
+        };
+        out.push(json!({
+            "role": r.key,
+            "label": r.label,
+            "type": r.kind.as_str(),
+            "defaultCode": r.code,
+            "defaultName": r.name,
+            "accountId": account.as_ref().map(|a| a.id.clone()),
+            "code": account.as_ref().map(|a| a.code.clone()),
+            "name": account.as_ref().map(|a| a.name.clone()),
+        }));
+    }
+    Ok(Value::Array(out))
+}
+
+async fn settings_json(conn: &mut SqliteConnection) -> AppResult<Value> {
+    let mut out = load_settings(conn).await?.to_json();
+    let accounts = accounts_json(conn).await?;
+    if let Some(o) = out.as_object_mut() {
+        o.insert("accounts".into(), accounts);
+    }
+    Ok(out)
+}
+
 pub async fn get_settings(db: &Db) -> AppResult<Value> {
     let mut c = db.read().acquire().await?;
-    Ok(load_settings(&mut c).await?.to_json())
+    settings_json(&mut c).await
 }
 
 pub async fn update_settings(db: &Db, p: UsSettingsPatch) -> AppResult<Value> {
@@ -165,7 +232,24 @@ pub async fn update_settings(db: &Db, p: UsSettingsPatch) -> AppResult<Value> {
     for (k, v) in &put {
         database::settings::upsert(&mut tx, k, v).await?;
     }
-    let out = load_settings(&mut tx).await?.to_json();
+    for (role, id) in &p.accounts {
+        let r = crate::us_runs::ROLES
+            .iter()
+            .find(|r| r.key == role)
+            .ok_or_else(|| AppError::bad_request(format!("{role} is not a US payroll account")))?;
+        if let Some(id) = id {
+            let a = ledger::accounts::find_one(&mut tx, id).await?;
+            if let Some(why) = crate::us_runs::unfit(r, &a) {
+                return Err(AppError::bad_request(why));
+            }
+        }
+        database::settings::upsert(&mut tx, &crate::us_runs::setting_key(r.key), id.as_deref().unwrap_or("")).await?;
+    }
+    if load_settings(&mut tx).await?.country == "US" {
+        check_currency(&mut tx).await?;
+        crate::us_runs::ensure_accounts(&mut tx).await?;
+    }
+    let out = settings_json(&mut tx).await?;
     tx.commit().await?;
     Ok(out)
 }
@@ -189,9 +273,24 @@ pub struct UsTax {
     pub exempt_from_withholding: bool,
     pub pretax_401k: Money,
     pub pretax_section125: Money,
+    /// The state withholding certificate: SINGLE or MARRIED, allowances, extra, exempt.
+    pub state_filing_status: String,
+    pub state_allowances: i64,
+    pub state_extra_withholding: Money,
+    pub state_exempt: bool,
 }
 
 impl UsTax {
+    /// The state certificate as the state engine reads it.
+    pub fn state_employee(&self) -> StateEmployee {
+        StateEmployee {
+            married: self.state_filing_status == "MARRIED",
+            allowances: self.state_allowances,
+            extra: self.state_extra_withholding,
+            exempt: self.state_exempt,
+        }
+    }
+
     /// The Form W-4 as the tax engine reads it.
     pub fn w4(&self) -> W4 {
         let married = self.filing_status == "MARRIED_JOINTLY";
@@ -229,6 +328,10 @@ impl UsTax {
             exempt_from_withholding: false,
             pretax_401k: Money::ZERO,
             pretax_section125: Money::ZERO,
+            state_filing_status: "SINGLE".into(),
+            state_allowances: 0,
+            state_extra_withholding: Money::ZERO,
+            state_exempt: false,
         }
     }
 }
@@ -251,6 +354,10 @@ fn from_row(r: &SqliteRow) -> AppResult<UsTax> {
         exempt_from_withholding: r.try_get("exemptFromWithholding")?,
         pretax_401k: m("pretax401k")?,
         pretax_section125: m("pretaxSection125")?,
+        state_filing_status: r.try_get("stateFilingStatus")?,
+        state_allowances: r.try_get("stateAllowances")?,
+        state_extra_withholding: m("stateExtraWithholding")?,
+        state_exempt: r.try_get("stateExempt")?,
     })
 }
 
@@ -285,6 +392,10 @@ fn tax_json(employee_id: &str, t: &UsTax, updated_at: Option<String>) -> Value {
         "exemptFromWithholding": t.exempt_from_withholding,
         "pretax401k": t.pretax_401k.to_json_number(),
         "pretaxSection125": t.pretax_section125.to_json_number(),
+        "stateFilingStatus": t.state_filing_status,
+        "stateAllowances": t.state_allowances,
+        "stateExtraWithholding": t.state_extra_withholding.to_json_number(),
+        "stateExempt": t.state_exempt,
         "updatedAt": updated_at,
     })
 }
@@ -312,8 +423,9 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
     sqlx::query(
         r#"INSERT INTO "employee_us_tax" ("employeeId","workState","payType","annualSalary","hourlyRate","w4Version",
              "filingStatus","multipleJobs","dependentsCredit","otherIncome","deductions","extraWithholding","allowances",
-             "exemptFromWithholding","pretax401k","pretaxSection125","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17)
+             "exemptFromWithholding","pretax401k","pretaxSection125","stateFilingStatus","stateAllowances",
+             "stateExtraWithholding","stateExempt","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?21)
            ON CONFLICT ("employeeId") DO UPDATE SET
              "workState" = excluded."workState", "payType" = excluded."payType",
              "annualSalary" = excluded."annualSalary", "hourlyRate" = excluded."hourlyRate",
@@ -322,7 +434,9 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
              "otherIncome" = excluded."otherIncome", "deductions" = excluded."deductions",
              "extraWithholding" = excluded."extraWithholding", "allowances" = excluded."allowances",
              "exemptFromWithholding" = excluded."exemptFromWithholding", "pretax401k" = excluded."pretax401k",
-             "pretaxSection125" = excluded."pretaxSection125", "updatedAt" = excluded."updatedAt""#,
+             "pretaxSection125" = excluded."pretaxSection125", "stateFilingStatus" = excluded."stateFilingStatus",
+             "stateAllowances" = excluded."stateAllowances", "stateExtraWithholding" = excluded."stateExtraWithholding",
+             "stateExempt" = excluded."stateExempt", "updatedAt" = excluded."updatedAt""#,
     )
     .bind(employee_id)
     .bind(&t.work_state)
@@ -340,6 +454,10 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
     .bind(t.exempt_from_withholding)
     .bind(t.pretax_401k.cents())
     .bind(t.pretax_section125.cents())
+    .bind(&t.state_filing_status)
+    .bind(t.state_allowances)
+    .bind(t.state_extra_withholding.cents())
+    .bind(t.state_exempt)
     .bind(now_iso())
     .execute(&mut *tx)
     .await?;
@@ -426,8 +544,26 @@ pub async fn preview(db: &Db, employee_id: &str, req: PreviewRequest) -> AppResu
         suta_wage_base: s.suta_wage_base,
         futa_credit_reduction: s.futa_credit_reduction,
     };
-    let figures = us::compute(&inputs)?;
-    let mut notes = vec!["State and local income tax are not included yet.".to_string()];
+    let mut figures = us::compute(&inputs)?;
+    let rule = load_rule(&mut c, &t.work_state).await?;
+    let state_wages = match &rule {
+        Some(r) => crate::us_state::state_wages(gross, t.pretax_401k, t.pretax_section125, r),
+        None => Money::ZERO,
+    };
+    let state_tax = match &rule {
+        Some(r) => crate::us_state::withholding(state_wages, periods, r, &t.state_employee())?,
+        None => Money::ZERO,
+    };
+    let too_large = || AppError::bad_request("Amount is too large");
+    figures.employee_taxes = figures.employee_taxes.checked_add(state_tax).ok_or_else(too_large)?;
+    figures.net_pay = figures.net_pay.checked_sub(state_tax).ok_or_else(too_large)?;
+    let mut notes = vec!["Local (city / county) income tax is not included.".to_string()];
+    if rule.is_none() {
+        notes.push(format!(
+            "No state income tax rules for {} yet — add them under US payroll settings. State tax is left out here.",
+            t.work_state
+        ));
+    }
     if s.state.as_deref().is_some_and(|st| st != t.work_state) {
         notes.push(format!(
             "{} works in {}, but state unemployment uses the company's {} rate.",
@@ -446,6 +582,12 @@ pub async fn preview(db: &Db, employee_id: &str, req: PreviewRequest) -> AppResu
         "pretax401k": t.pretax_401k.to_json_number(),
         "pretaxSection125": t.pretax_section125.to_json_number(),
         "taxes": figures_json(&figures),
+        "stateTax": {
+            "state": t.work_state,
+            "configured": rule.is_some(),
+            "wages": state_wages.to_json_number(),
+            "tax": state_tax.to_json_number(),
+        },
         "notes": notes,
     }))
 }
