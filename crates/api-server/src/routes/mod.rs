@@ -18,10 +18,12 @@ pub mod roles;
 pub mod settings;
 pub mod system;
 pub mod taxes;
+pub mod us_payroll;
 pub mod users;
 
 use self::employees as hr;
 use self::payroll as pr;
+use self::us_payroll as us;
 use crate::errors::unknown_route;
 use crate::state::AppState;
 use crate::upload::UPLOAD_BODY_LIMIT;
@@ -125,6 +127,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/employees/{id}/bank", patch(hr::payroll_bank))
         .route("/payroll/employees/{id}/salaries", post(hr::salary_add))
         .route("/payroll/employees/{id}/salaries/{salary_id}", patch(hr::salary_update).delete(hr::salary_remove))
+        .route("/payroll/employees/{id}/us-tax", get(us::tax_get).put(us::tax_put))
+        .route("/payroll/us/settings", get(us::settings_get).patch(us::settings_update))
+        .route("/payroll/us/preview", post(us::preview))
         .route("/payroll/rates", get(pr::rates_get).patch(pr::rates_update))
         .route("/payroll/company", get(pr::company_get).patch(pr::company_update))
         .route("/payroll/runs", get(pr::list).post(pr::create))

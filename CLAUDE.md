@@ -558,6 +558,23 @@ recommendations without answering each one individually; revisit any of them on 
   Claude Code marketplace with the plugin (the MCP server + skills: month-end-close,
   chase-overdue-customers, prepare-vat-return, explain-a-report, review-online-sales).
 
+- **D42 US payroll taxes** (2026-10-27, ported from the web Rust edition's waves U1 + U2, commits
+  `b78e032` and `082082a`; the user asked for the same here). `payroll::us` works out one pay period:
+  federal income tax withholding by IRS Pub 15-T (2026) Worksheet 1A with the annual percentage
+  tables (2020+ Form W-4 and older W-4s with allowances; no whole-dollar rounding), social security
+  6.2% each to $184,500, Medicare 1.45% each, Additional Medicare 0.9% employee-only over $200,000,
+  FUTA 0.6% on $7,000 plus a manual credit reduction, and the employer's SUTA rate and wage base.
+  Integer cents, rates in ppm, each tax rounded half-up once; checked against all 4,794 values of the
+  IRS 2026 wage bracket tables (`crates/payroll/tests/fixtures/us_2026_wage_brackets.json`). Only
+  2026 tables. `payroll::us_setup`: settings `payroll.country` (LK default | US) and `payroll.us.*`
+  (pay frequency, state, SUTA rate / wage base, FUTA credit reduction, EIN, state account no.),
+  table `employee_us_tax` (one current W-4 / pay record per employee, no SSN). Routes (`payroll`):
+  GET|PATCH `/payroll/us/settings`, GET|PUT `/payroll/employees/:id/us-tax`, POST
+  `/payroll/us/preview` (201, saves nothing). Not built: US pay runs and ledger posting, screens,
+  state / local income tax, overtime, employee-paid SUTA, 941 / 940 / W-2. Sri Lankan payroll is
+  unchanged. Choices made by the web agent without a spec (company-level state and pay frequency, no
+  W-4 history, no dollar rounding) are kept so both editions agree.
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
