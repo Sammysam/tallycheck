@@ -15,6 +15,7 @@ pub mod email;
 pub mod hr;
 pub mod ops;
 pub mod payroll;
+pub mod us_payroll;
 
 use app_core::ids::is_uuid;
 use app_core::permissions;

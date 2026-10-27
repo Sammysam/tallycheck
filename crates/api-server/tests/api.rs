@@ -3528,3 +3528,188 @@ async fn claude_keys_read_create_drafts_only_and_can_be_revoked() -> TestResult 
 fn id_of(v: &Value) -> String {
     v["id"].as_str().unwrap_or_default().to_string()
 }
+
+/// `base` with `extra`'s keys merged over it.
+fn merged(base: &Value, extra: Value) -> Value {
+    let mut b = base.clone();
+    if let (Some(o), Some(e)) = (b.as_object_mut(), extra.as_object()) {
+        o.extend(e.clone());
+    }
+    b
+}
+
+/// D42 US payroll (ported from the web edition's `tests/api/us-payroll.test.ts`). 2026, biweekly,
+/// Texas, SUTA 2.7% on the first $9,000:
+///   A salary $52,000, single → gross 2,000.00; federal 52,000 − 8,600 = 43,400 →
+///     1,240 + 12% × 23,500 = 4,060 / 26 = 156.15; net 1,690.85; cost 2,219.00
+///   B hourly $25.50 × 80 h = 2,040.00, married jointly, Step 2 box → 4,184.80 / 26 = 160.95
+#[tokio::test]
+async fn us_payroll_settings_w4_and_preview_through_the_api() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let mut emp = Vec::new();
+    for code in ["US-001", "US-002", "US-003"] {
+        let body = json!({"employeeId": code, "name": format!("Employee {code}")});
+        emp.push(id_of(&app.call(Method::POST, "/api/employees", Some(&admin), Some(body)).await?.body));
+    }
+    let tax_url = |i: usize| format!("/api/payroll/employees/{}/us-tax", emp[i]);
+    let salaried = json!({"workState": "TX", "payType": "SALARY", "annualSalary": 52000});
+    let settings = "/api/payroll/us/settings";
+
+    // Settings: defaults, saving, null clears, refusals.
+    let r = app.call(Method::GET, settings, Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        r.body,
+        json!({"country": "LK", "payFrequency": "BIWEEKLY", "periodsPerYear": 26, "state": null, "sutaRate": 0,
+               "sutaWageBase": null, "futaCreditReduction": 0, "ein": null, "stateAccountNo": null, "taxYears": [2026]})
+    );
+    let body = json!({"country": "US", "state": "tx", "sutaRate": 2.7, "sutaWageBase": 9000,
+                      "ein": "12-3456789", "stateAccountNo": " 99-123 "});
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    for (k, v) in [
+        ("country", json!("US")),
+        ("state", json!("TX")),
+        ("sutaRate", json!(2.7)),
+        ("sutaWageBase", json!(9000)),
+        ("ein", json!("12-3456789")),
+        ("stateAccountNo", json!("99-123")),
+    ] {
+        assert_eq!(r.body[k], v, "{k}");
+    }
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(json!({"stateAccountNo": null}))).await?;
+    assert_eq!(r.body["stateAccountNo"], Value::Null);
+    assert_eq!(r.body["sutaRate"], json!(2.7));
+    for (body, message) in [
+        (json!({"country": "UK"}), "country must be one of the following values: LK, US"),
+        (json!({"state": "ZZ"}), "state must be a two-letter US state code"),
+        (json!({"ein": "123456789"}), "ein must look like 12-3456789"),
+        (json!({"sutaRate": 2.12345}), "sutaRate must have at most 4 decimal places"),
+        (json!({"sutaRate": 101}), "sutaRate must not be greater than 100"),
+        (json!({"futaCreditReduction": 6}), "futaCreditReduction must not be greater than 5.4"),
+        (json!({"payFrequency": "DAILY"}), "payFrequency must be one of the following values"),
+    ] {
+        let r = app.call(Method::PATCH, settings, Some(&admin), Some(body.clone())).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(r.body["message"].to_string().contains(message), "{} lacks {message}", r.body["message"]);
+    }
+
+    // Employee pay and Form W-4.
+    let r = app.call(Method::GET, &tax_url(0), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body["configured"], json!(false));
+    assert_eq!(r.body["workState"], json!("TX"));
+    assert_eq!(r.body["w4Version"], json!("2020"));
+    assert_eq!(r.body["filingStatus"], json!("SINGLE"));
+    let r = app.call(Method::PUT, &tax_url(0), Some(&admin), Some(salaried.clone())).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["configured"], json!(true));
+    assert_eq!(r.body["annualSalary"], json!(52000));
+    assert_eq!(r.body["pretax401k"], json!(0));
+    let body = json!({"workState": "tx", "payType": "HOURLY", "hourlyRate": 25.5,
+                      "filingStatus": "MARRIED_JOINTLY", "multipleJobs": true});
+    let r = app.call(Method::PUT, &tax_url(1), Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["workState"], json!("TX"));
+    assert_eq!(r.body["hourlyRate"], json!(25.5));
+    assert_eq!(r.body["multipleJobs"], json!(true));
+
+    let bad = [
+        (merged(&salaried, json!({"workState": "XX"})), None),
+        (json!({"workState": "TX", "payType": "SALARY"}), Some("annualSalary is required for a salaried employee")),
+        (json!({"workState": "TX", "payType": "HOURLY"}), Some("hourlyRate is required for an hourly employee")),
+        (
+            merged(&salaried, json!({"w4Version": "LEGACY", "filingStatus": "HEAD_OF_HOUSEHOLD"})),
+            Some("Head of household is only on the 2020 and later Form W-4"),
+        ),
+        (merged(&salaried, json!({"allowances": 100})), None),
+        (merged(&salaried, json!({"annualSalary": -1})), None),
+    ];
+    for (body, message) in bad {
+        let r = app.call(Method::PUT, &tax_url(2), Some(&admin), Some(body.clone())).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}");
+        if let Some(message) = message {
+            assert_eq!(r.body["message"], json!(message));
+        }
+    }
+    assert_eq!(app.call(Method::GET, &tax_url(2), Some(&admin), None).await?.body["configured"], json!(false));
+    let missing = "/api/payroll/employees/00000000-0000-4000-8000-000000000000/us-tax";
+    assert_eq!(app.call(Method::GET, missing, Some(&admin), None).await?.status, StatusCode::NOT_FOUND);
+
+    // Guards: 401 without a token, 403 without the payroll permission.
+    assert_eq!(app.call(Method::GET, &tax_url(0), None, None).await?.status, StatusCode::UNAUTHORIZED);
+    let role = json!({"name": "HR", "permissions": ["employees"]});
+    app.call(Method::POST, "/api/roles", Some(&admin), Some(role)).await?;
+    let hr = app.signed_in("hr1", "HR").await?;
+    assert_eq!(app.call(Method::GET, &tax_url(0), Some(&hr), None).await?.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.call(Method::GET, settings, Some(&hr), None).await?.status, StatusCode::FORBIDDEN);
+    let body = json!({"employeeId": emp[0]});
+    let r = app.call(Method::POST, "/api/payroll/us/preview", Some(&hr), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+
+    // Paycheck preview.
+    let base = json!({"payDate": "2026-11-06"});
+    let preview =
+        |extra: Value| app.call(Method::POST, "/api/payroll/us/preview", Some(&admin), Some(merged(&base, extra)));
+    let r = preview(json!({"employeeId": emp[0]})).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(r.body["gross"], json!(2000));
+    assert_eq!(r.body["periodsPerYear"], json!(26));
+    assert_eq!(
+        r.body["taxes"],
+        json!({"incomeTaxWages": 2000, "federalIncomeTax": 156.15,
+               "socialSecurityWages": 2000, "socialSecurityEmployee": 124, "socialSecurityEmployer": 124,
+               "medicareWages": 2000, "medicareEmployee": 29, "additionalMedicare": 0, "medicareEmployer": 29,
+               "futaWages": 2000, "futa": 12, "sutaWages": 2000, "suta": 54,
+               "employeeTaxes": 309.15, "netPay": 1690.85, "employerTaxes": 219, "costToEmployer": 2219})
+    );
+    assert_eq!(r.body["notes"], json!(["State and local income tax are not included yet."]));
+
+    let r = preview(json!({"employeeId": emp[1]})).await?;
+    assert_eq!(r.body["message"], json!("hours is required for an hourly employee"));
+    let r = preview(json!({"employeeId": emp[1], "hours": 80})).await?;
+    assert_eq!(r.body["gross"], json!(2040));
+    assert_eq!(r.body["taxes"]["federalIncomeTax"], json!(160.95));
+
+    // 401(k) is still FICA wages, section 125 is not. Income tax wages 1,850 → 138.15.
+    let body = merged(&salaried, json!({"pretax401k": 100, "pretaxSection125": 50}));
+    app.call(Method::PUT, &tax_url(0), Some(&admin), Some(body)).await?;
+    let t = preview(json!({"employeeId": emp[0]})).await?.body["taxes"].clone();
+    for (k, v) in [
+        ("incomeTaxWages", json!(1850)),
+        ("federalIncomeTax", json!(138.15)),
+        ("socialSecurityWages", json!(1950)),
+        ("socialSecurityEmployee", json!(120.9)),
+        ("medicareEmployee", json!(28.28)), // 28.275 half-up
+        ("netPay", json!(1562.67)),
+    ] {
+        assert_eq!(t[k], v, "{k}");
+    }
+    app.call(Method::PUT, &tax_url(0), Some(&admin), Some(salaried.clone())).await?;
+
+    // Year-to-date wages stop the capped taxes.
+    let ytd = json!({"employeeId": emp[0], "ytdSocialSecurityWages": 184000, "ytdMedicareWages": 199000,
+                     "ytdFutaWages": 7000, "ytdSutaWages": 8000});
+    let t = preview(ytd).await?.body["taxes"].clone();
+    for (k, v) in [
+        ("socialSecurityWages", json!(500)),
+        ("socialSecurityEmployee", json!(31)),
+        ("additionalMedicare", json!(9)), // 0.9% of the 1,000 over 200,000
+        ("futa", json!(0)),
+        ("sutaWages", json!(1000)),
+        ("suta", json!(27)),
+    ] {
+        assert_eq!(t[k], v, "{k}");
+    }
+
+    // Refusals.
+    let r = preview(json!({"employeeId": emp[2]})).await?;
+    assert_eq!(r.body["message"], json!("Add the US pay and Form W-4 details for Employee US-003 first"));
+    let r = preview(json!({"employeeId": emp[0], "payDate": "2025-12-31"})).await?;
+    assert_eq!(r.body["message"], json!("US payroll tax tables for 2025 are not set up yet"));
+    assert_eq!(preview(json!({"employeeId": "nope"})).await?.status, StatusCode::BAD_REQUEST);
+    assert_eq!(preview(json!({"employeeId": emp[0], "gross": -5})).await?.status, StatusCode::BAD_REQUEST);
+    assert_eq!(preview(json!({"employeeId": emp[0], "gross": 1500})).await?.body["gross"], json!(1500));
+    Ok(())
+}

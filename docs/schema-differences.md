@@ -86,6 +86,11 @@ D39 rebuilds `bank_lines` with `matchType` TRANSFER (a journal entry) and a sugg
 D41 adds `api_keys` (name, the user it acts as, a display prefix, the SHA-256 of the key, whether it
 may create drafts, created / last used / revoked).
 
+D42 adds `employee_us_tax` (one row per employee: work state, salary or hourly rate, the 2020+ or
+older Form W-4, exemption, 401(k) and section 125 per period). It is the web edition's migration
+004 with `~` regex checks as `GLOB`, booleans as 0/1 and timestamps written by Rust. US company
+settings are rows in `settings` (`payroll.country`, `payroll.us.*`).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,
