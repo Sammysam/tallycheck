@@ -3385,6 +3385,7 @@ async fn woocommerce_orders_paid_through_stripe_and_paypal_activity() -> TestRes
         )
         .await?;
     assert_eq!(pk.status, StatusCode::BAD_REQUEST);
+    assert_eq!(pk.body["message"], json!("That is a publishable key; use a secret or restricted key"));
     let st = app
         .call(
             Method::POST,
@@ -3538,6 +3539,13 @@ fn merged(base: &Value, extra: Value) -> Value {
     b
 }
 
+/// Keeps the books in US dollars, which US payroll needs (D43).
+async fn use_usd(app: &App, admin: &str) -> TestResult {
+    let r = app.call(Method::PATCH, "/api/settings", Some(admin), Some(json!({"region.currency": "USD"}))).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    Ok(())
+}
+
 /// D42 US payroll (ported from the web edition's `tests/api/us-payroll.test.ts`). 2026, biweekly,
 /// Texas, SUTA 2.7% on the first $9,000:
 ///   A salary $52,000, single → gross 2,000.00; federal 52,000 − 8,600 = 43,400 →
@@ -3557,8 +3565,10 @@ async fn us_payroll_settings_w4_and_preview_through_the_api() -> TestResult {
     let settings = "/api/payroll/us/settings";
 
     // Settings: defaults, saving, null clears, refusals.
-    let r = app.call(Method::GET, settings, Some(&admin), None).await?;
+    let mut r = app.call(Method::GET, settings, Some(&admin), None).await?;
     assert_eq!(r.status, StatusCode::OK);
+    let accounts = r.body.as_object_mut().and_then(|o| o.remove("accounts")).ok_or("accounts")?;
+    assert_eq!(accounts.as_array().map(Vec::len), Some(11)); // D43: one per role
     assert_eq!(
         r.body,
         json!({"country": "LK", "payFrequency": "BIWEEKLY", "periodsPerYear": 26, "state": null, "sutaRate": 0,
@@ -3566,6 +3576,11 @@ async fn us_payroll_settings_w4_and_preview_through_the_api() -> TestResult {
     );
     let body = json!({"country": "US", "state": "tx", "sutaRate": 2.7, "sutaWageBase": 9000,
                       "ein": "12-3456789", "stateAccountNo": " 99-123 "});
+    // D43: US payroll is in dollars, so the books must be in USD first.
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(body.clone())).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert!(r.body["message"].to_string().contains("US dollars (USD)"), "{}", r.body);
+    use_usd(&app, &admin).await?;
     let r = app.call(Method::PATCH, settings, Some(&admin), Some(body)).await?;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     for (k, v) in [
@@ -3664,7 +3679,8 @@ async fn us_payroll_settings_w4_and_preview_through_the_api() -> TestResult {
                "futaWages": 2000, "futa": 12, "sutaWages": 2000, "suta": 54,
                "employeeTaxes": 309.15, "netPay": 1690.85, "employerTaxes": 219, "costToEmployer": 2219})
     );
-    assert_eq!(r.body["notes"], json!(["State and local income tax are not included yet."]));
+    assert_eq!(r.body["notes"], json!(["Local (city / county) income tax is not included."]));
+    assert_eq!(r.body["stateTax"], json!({"state": "TX", "configured": true, "wages": 2000, "tax": 0}));
 
     let r = preview(json!({"employeeId": emp[1]})).await?;
     assert_eq!(r.body["message"], json!("hours is required for an hourly employee"));
@@ -3711,5 +3727,668 @@ async fn us_payroll_settings_w4_and_preview_through_the_api() -> TestResult {
     assert_eq!(preview(json!({"employeeId": "nope"})).await?.status, StatusCode::BAD_REQUEST);
     assert_eq!(preview(json!({"employeeId": emp[0], "gross": -5})).await?.status, StatusCode::BAD_REQUEST);
     assert_eq!(preview(json!({"employeeId": emp[0], "gross": 1500})).await?.body["gross"], json!(1500));
+    Ok(())
+}
+
+/// `App::call` with an owned URL, so closures can build the URL and return the future.
+async fn us_send(
+    app: &App,
+    method: Method,
+    url: String,
+    token: &str,
+    body: Option<Value>,
+) -> Result<Resp, Box<dyn std::error::Error>> {
+    app.call(method, &url, Some(token), body).await
+}
+
+/// Trial balance of `code` (0 when the account has no lines or does not exist).
+async fn us_balance(app: &App, token: &str, code: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(token), None).await?;
+    let rows = tb.body.as_array().ok_or("trial balance")?;
+    Ok(rows.iter().find(|r| r["account"]["code"] == code).map(|r| r["balance"].clone()).unwrap_or(json!(0)))
+}
+
+fn us_line<'a>(run: &'a Value, code: &str) -> &'a Value {
+    run["lines"].as_array().and_then(|ls| ls.iter().find(|l| l["employeeCode"] == code)).unwrap_or(&Value::Null)
+}
+
+fn us_owed(run: &Value, kind: &str) -> Value {
+    run["taxes"].as_array().and_then(|ts| ts.iter().find(|t| t["type"] == kind)).cloned().unwrap_or(Value::Null)
+}
+
+/// A company switched to US payroll (USD books, Texas, biweekly, SUTA 2.7% on $9,000) with the
+/// default chart seeded. Returns the id of 1000 Cash.
+async fn us_company(app: &App, admin: &str, extra: Value) -> Result<String, Box<dyn std::error::Error>> {
+    app.call(Method::POST, "/api/accounts/seed", Some(admin), None).await?;
+    use_usd(app, admin).await?;
+    let body = merged(
+        &json!({"country": "US", "state": "TX", "sutaRate": 2.7, "sutaWageBase": 9000, "payFrequency": "BIWEEKLY"}),
+        extra,
+    );
+    let r = app.call(Method::PATCH, "/api/payroll/us/settings", Some(admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let accounts = app.call(Method::GET, "/api/accounts", Some(admin), None).await?;
+    let cash = accounts.body.as_array().and_then(|a| a.iter().find(|a| a["code"] == "1000")).ok_or("1000")?;
+    Ok(id_of(cash))
+}
+
+async fn us_employee(
+    app: &App,
+    admin: &str,
+    code: &str,
+    extra: Value,
+    tax: Value,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let body = merged(&json!({"employeeId": code, "name": format!("Employee {code}")}), extra);
+    let id = id_of(&app.call(Method::POST, "/api/employees", Some(admin), Some(body)).await?.body);
+    if !tax.is_null() {
+        let r = app.call(Method::PUT, &format!("/api/payroll/employees/{id}/us-tax"), Some(admin), Some(tax)).await?;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    }
+    Ok(id)
+}
+
+/// D43 US pay runs (ported from the web edition's `tests/api/us-payroll-runs.test.ts`).
+/// Texas, biweekly, SUTA 2.7% on the first $9,000. Pay date 2026-11-06.
+///   A US-101 salary $52,000, single → gross 2,000.00; federal 156.15; net 1,690.85
+///   B US-102 hourly $25.50, married jointly with the Step 2 box: 80 h, then 5 h overtime
+///     5 × 25.50 × 1.5 = 191.25 → gross 2,231.25; federal 183.90; SS 138.34; Medicare 32.35;
+///     FUTA 13.39; SUTA 60.24; net 1,876.66
+///   C US-103 no US details → skipped;  D US-104 marked LEFT → skipped
+/// Totals: gross 4,231.25; federal 340.05; SS 262.34 ×2; Medicare 61.35 ×2; FUTA 25.39;
+///   SUTA 114.24; net 3,567.51; employer taxes 463.32
+#[tokio::test]
+async fn us_pay_runs_post_pay_deposit_and_void() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let runs = "/api/payroll/us/runs";
+    let period = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+
+    let a = us_employee(&app, &admin, "US-101", json!({}), Value::Null).await?;
+    let b = us_employee(&app, &admin, "US-102", json!({}), Value::Null).await?;
+    us_employee(&app, &admin, "US-103", json!({}), Value::Null).await?;
+    let d = us_employee(&app, &admin, "US-104", json!({"status": "LEFT"}), Value::Null).await?;
+
+    let r = app.call(Method::POST, runs, Some(&admin), Some(period.clone())).await?;
+    assert_eq!(r.body["message"], json!("Switch payroll to the United States in the US payroll settings first"));
+
+    let cash = us_company(&app, &admin, json!({})).await?;
+    for code in ["2200", "2300", "2310", "2320", "2330", "2340", "2350", "2360", "2370", "6100", "6130"] {
+        let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+        assert!(accounts.body.as_array().is_some_and(|a| a.iter().any(|a| a["code"] == code)), "{code}");
+    }
+    for (id, tax) in [
+        (&a, json!({"workState": "TX", "payType": "SALARY", "annualSalary": 52000})),
+        (
+            &b,
+            json!({"workState": "TX", "payType": "HOURLY", "hourlyRate": 25.5, "filingStatus": "MARRIED_JOINTLY", "multipleJobs": true}),
+        ),
+        (&d, json!({"workState": "TX", "payType": "SALARY", "annualSalary": 40000})),
+    ] {
+        app.call(Method::PUT, &format!("/api/payroll/employees/{id}/us-tax"), Some(&admin), Some(tax)).await?;
+    }
+
+    // A new run picks up everyone with US details.
+    let r = app.call(Method::POST, runs, Some(&admin), Some(period.clone())).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_id = id_of(&r.body);
+    let run_url = format!("{runs}/{run_id}");
+    assert_eq!(r.body["runNumber"], json!("USPR-0001"));
+    assert_eq!(r.body["status"], json!("DRAFT"));
+    assert_eq!(r.body["employeeCount"], json!(2));
+    let skipped: Vec<(Value, Value)> = r.body["skipped"]
+        .as_array()
+        .ok_or("skipped")?
+        .iter()
+        .map(|s| (s["employeeCode"].clone(), s["reason"].clone()))
+        .collect();
+    assert_eq!(
+        skipped,
+        vec![(json!("US-103"), json!("No US pay and Form W-4 details")), (json!("US-104"), json!("Marked as left"))]
+    );
+    assert_eq!(us_line(&r.body, "US-101")["gross"], json!(2000));
+    assert_eq!(us_line(&r.body, "US-101")["federalIncomeTax"], json!(156.15));
+    assert_eq!(us_line(&r.body, "US-101")["netPay"], json!(1690.85));
+    assert_eq!(us_line(&r.body, "US-102")["hours"], json!(80));
+    assert_eq!(us_line(&r.body, "US-102")["gross"], json!(2040));
+    assert_eq!(us_line(&r.body, "US-102")["federalIncomeTax"], json!(160.95));
+
+    // Overtime at time and a half.
+    let a_line = id_of(us_line(&r.body, "US-101"));
+    let b_line = id_of(us_line(&r.body, "US-102"));
+    let patch =
+        |line: &str, body: Value| us_send(&app, Method::PATCH, format!("{run_url}/lines/{line}"), &admin, Some(body));
+    let r = patch(&b_line, json!({"overtimeHours": 5, "notes": " Late orders "})).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let l = us_line(&r.body, "US-102");
+    for (k, v) in [
+        ("overtimePay", json!(191.25)),
+        ("gross", json!(2231.25)),
+        ("federalIncomeTax", json!(183.9)),
+        ("socialSecurityEmployee", json!(138.34)),
+        ("medicareEmployee", json!(32.35)),
+        ("futa", json!(13.39)),
+        ("suta", json!(60.24)),
+        ("netPay", json!(1876.66)),
+        ("notes", json!("Late orders")),
+    ] {
+        assert_eq!(l[k], v, "{k}");
+    }
+    assert_eq!(r.body["grossTotal"], json!(4231.25));
+    assert_eq!(r.body["netPayTotal"], json!(3567.51));
+    assert_eq!(r.body["employerTaxesTotal"], json!(463.32));
+    assert_eq!(
+        patch(&a_line, json!({"hours": 10})).await?.body["message"],
+        json!("hours only apply to an hourly employee")
+    );
+    assert_eq!(
+        patch(&b_line, json!({"regularPay": 10})).await?.body["message"],
+        json!("An hourly employee's regular pay is rate × hours")
+    );
+    assert_eq!(patch(&b_line, json!({"hours": -1})).await?.status, StatusCode::BAD_REQUEST);
+
+    // Pay periods may not overlap; the tables must exist for the year.
+    for (body, message) in [
+        (
+            json!({"periodStart": "2026-10-26", "periodEnd": "2026-11-08", "payDate": "2026-11-13"}),
+            "This pay period overlaps USPR-0001 (DRAFT)",
+        ),
+        (
+            json!({"periodStart": "2026-11-08", "periodEnd": "2026-11-01", "payDate": "2026-11-13"}),
+            "periodStart must be on or before periodEnd",
+        ),
+        (
+            json!({"periodStart": "2027-01-01", "periodEnd": "2027-01-14", "payDate": "2027-01-15"}),
+            "US payroll tax tables for 2027 are not set up yet",
+        ),
+    ] {
+        assert_eq!(app.call(Method::POST, runs, Some(&admin), Some(body)).await?.body["message"], json!(message));
+    }
+
+    // Posting books wages, employer taxes and every payable in one balanced entry.
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(r.body["status"], json!("POSTED"));
+    let entry = r.body["journalEntryId"].as_str().ok_or("entry")?.to_string();
+    for (code, v) in [
+        ("6100", json!(4231.25)),
+        ("6130", json!(463.32)),
+        ("2200", json!(3567.51)),
+        ("2300", json!(340.05)),
+        ("2310", json!(524.68)),
+        ("2320", json!(122.7)),
+        ("2330", json!(25.39)),
+        ("2340", json!(114.24)),
+    ] {
+        assert_eq!(us_balance(&app, &admin, code).await?, v, "{code}");
+    }
+    assert_eq!(us_owed(&r.body, "SOCIAL_SECURITY")["outstanding"], json!(524.68));
+    assert_eq!(
+        patch(&b_line, json!({"bonus": 1})).await?.body["message"],
+        json!("Only a DRAFT run can be changed — this one is POSTED")
+    );
+    assert_eq!(
+        app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?.status,
+        StatusCode::BAD_REQUEST
+    );
+    // D18/D43: the entry is undone from the run, not from the Ledger.
+    let r = app.call(Method::POST, &format!("/api/ledger/entries/{entry}/reverse"), Some(&admin), None).await?;
+    assert_eq!(
+        r.body["message"],
+        json!("This entry was posted by a US payroll run. Void or unpost it from that screen instead.")
+    );
+
+    // Paying net wages and depositing the taxes.
+    let p = app
+        .call(Method::POST, &format!("{run_url}/pay"), Some(&admin), Some(json!({"paymentAccountId": cash})))
+        .await?;
+    assert_eq!(p.status, StatusCode::CREATED, "{}", p.body);
+    assert_eq!(p.body["status"], json!("PAID"));
+    assert_eq!(p.body["paidDate"], json!("2026-11-06"));
+    assert_eq!(us_balance(&app, &admin, "2200").await?, json!(0));
+    let remit = |body: Value| us_send(&app, Method::POST, format!("{run_url}/remit"), &admin, Some(body));
+    let dep =
+        remit(json!({"type": "FORM_941", "paymentAccountId": cash, "date": "2026-11-13", "reference": "EFTPS 1"}))
+            .await?;
+    assert_eq!(dep.status, StatusCode::CREATED, "{}", dep.body);
+    let parts = dep.body["remittances"].as_array().ok_or("remittances")?;
+    assert_eq!(parts.len(), 3);
+    assert!(parts.iter().all(|x| x["journalEntryId"] == parts[0]["journalEntryId"]));
+    for code in ["2300", "2310", "2320"] {
+        assert_eq!(us_balance(&app, &admin, code).await?, json!(0), "{code}");
+    }
+    assert_eq!(us_balance(&app, &admin, "1000").await?, json!(-4554.94)); // 3,567.51 + 340.05 + 524.68 + 122.70
+    let again = remit(json!({"type": "FORM_941", "paymentAccountId": cash, "date": "2026-11-13"})).await?;
+    assert_eq!(again.body["message"], json!("Nothing outstanding for Form 941 deposit on this run"));
+    let s = remit(json!({"type": "SUTA", "paymentAccountId": cash, "date": "2026-12-31", "amount": 100})).await?;
+    assert_eq!(us_owed(&s.body, "SUTA")["outstanding"], json!(14.24));
+    let over = remit(json!({"type": "SUTA", "paymentAccountId": cash, "date": "2026-12-31", "amount": 20})).await?;
+    assert_eq!(over.body["message"], json!("State unemployment payment exceeds the outstanding 14.24"));
+    assert_eq!(us_balance(&app, &admin, "2340").await?, json!(14.24));
+
+    // The next run counts this one in year-to-date wages.
+    let body = json!({"periodStart": "2026-11-02", "periodEnd": "2026-11-15", "payDate": "2026-11-20"});
+    let r = app.call(Method::POST, runs, Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_line(&r.body, "US-101")["ytdSocialSecurityWages"], json!(2000));
+    assert_eq!(us_line(&r.body, "US-101")["ytdSutaWages"], json!(2000));
+    assert_eq!(us_line(&r.body, "US-102")["ytdMedicareWages"], json!(2231.25));
+    let gone = app.call(Method::DELETE, &format!("{runs}/{}", id_of(&r.body)), Some(&admin), None).await?;
+    assert_eq!(gone.status, StatusCode::NO_CONTENT);
+
+    // Voiding reverses every entry and frees the period.
+    let v = app.call(Method::POST, &format!("{run_url}/void"), Some(&admin), None).await?;
+    assert_eq!(v.status, StatusCode::CREATED, "{}", v.body);
+    assert_eq!(v.body["status"], json!("VOID"));
+    for code in ["6100", "6130", "2200", "2300", "2310", "2320", "2330", "2340", "1000"] {
+        assert_eq!(us_balance(&app, &admin, code).await?, json!(0), "{code}");
+    }
+    let r = app.call(Method::POST, &format!("{run_url}/void"), Some(&admin), None).await?;
+    assert_eq!(r.body["message"], json!("Run is already void"));
+    let r = app.call(Method::POST, runs, Some(&admin), Some(period)).await?;
+    assert_eq!(r.status, StatusCode::CREATED);
+    assert_eq!(r.body["runNumber"], json!("USPR-0003"));
+    assert_eq!(app.call(Method::GET, runs, Some(&admin), None).await?.body.as_array().map(Vec::len), Some(2));
+
+    // Bad requests.
+    assert_eq!(
+        app.call(Method::POST, runs, Some(&admin), Some(json!({"periodStart": "soon"}))).await?.status,
+        StatusCode::BAD_REQUEST
+    );
+    let r = remit(json!({"type": "EPF", "paymentAccountId": cash, "date": "2026-11-13"})).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let missing = format!("{runs}/00000000-0000-4000-8000-000000000000");
+    assert_eq!(app.call(Method::GET, &missing, Some(&admin), None).await?.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        app.call(Method::GET, &format!("{runs}/not-a-uuid"), Some(&admin), None).await?.status,
+        StatusCode::BAD_REQUEST
+    );
+    Ok(())
+}
+
+/// D43 option (b): a code US payroll would use that is already some other account is never
+/// used quietly; the company chooses the account, and posting follows the choice.
+#[tokio::test]
+async fn us_payroll_accounts_are_chosen_not_taken_over() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    use_usd(&app, &admin).await?;
+    let new_account = |code: &str, name: &str, t: &str| json!({"code": code, "name": name, "type": t});
+    let sales_tax = app
+        .call(Method::POST, "/api/accounts", Some(&admin), Some(new_account("2300", "Sales Tax Payable", "LIABILITY")))
+        .await?;
+    let mine = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(new_account("2305", "Federal Withholding", "LIABILITY")),
+        )
+        .await?;
+    let rent =
+        app.call(Method::POST, "/api/accounts", Some(&admin), Some(new_account("6200", "Rent", "EXPENSE"))).await?;
+    let settings = "/api/payroll/us/settings";
+
+    // 2300 is the company's own sales tax account: switching is refused and nothing is saved.
+    let switch = json!({"country": "US", "state": "TX"});
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(switch.clone())).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        r.body["message"],
+        json!("Account 2300 is already \"Sales Tax Payable\". Choose the account for Federal income tax withheld under US payroll settings")
+    );
+    assert_eq!(app.call(Method::GET, settings, Some(&admin), None).await?.body["country"], json!("LK"));
+
+    // An expense account can't hold a payable; an unknown id is a 404.
+    let wrong = merged(&switch, json!({"accounts": {"federalIncomeTax": id_of(&rent.body)}}));
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(wrong)).await?;
+    assert_eq!(
+        r.body["message"],
+        json!("Federal income tax withheld must go to a liability account; 6200 Rent is not one")
+    );
+    let unknown = merged(&switch, json!({"accounts": {"federalIncomeTax": "00000000-0000-4000-8000-000000000000"}}));
+    assert_eq!(app.call(Method::PATCH, settings, Some(&admin), Some(unknown)).await?.status, StatusCode::NOT_FOUND);
+    let bad = merged(&switch, json!({"accounts": {"nope": id_of(&mine.body)}}));
+    assert_eq!(
+        app.call(Method::PATCH, settings, Some(&admin), Some(bad)).await?.body["message"],
+        json!("nope is not a US payroll account")
+    );
+
+    // Choosing 2305 lets the switch through; the other roles take (or add) their defaults.
+    let ok = merged(&switch, json!({"accounts": {"federalIncomeTax": id_of(&mine.body)}}));
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(ok)).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let roles = r.body["accounts"].as_array().ok_or("accounts")?;
+    let role = |k: &str| roles.iter().find(|x| x["role"] == k).cloned().unwrap_or(Value::Null);
+    assert_eq!(role("federalIncomeTax")["code"], json!("2305"));
+    assert_eq!(role("socialSecurity")["code"], json!("2310"));
+    assert_eq!(role("salariesPayable")["code"], json!("2200"));
+
+    us_employee(
+        &app,
+        &admin,
+        "US-1",
+        json!({}),
+        json!({"workState": "TX", "payType": "SALARY", "annualSalary": 52000}),
+    )
+    .await?;
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let run = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&run.body));
+    let posted = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(posted.status, StatusCode::CREATED, "{}", posted.body);
+    assert_eq!(posted.body["accounts"]["federalIncomeTax"], json!(id_of(&mine.body)));
+    assert_eq!(us_balance(&app, &admin, "2305").await?, json!(156.15));
+    assert_eq!(us_balance(&app, &admin, "2300").await?, json!(0));
+
+    // A later change of choice doesn't move what this run owes: its deposit clears 2305.
+    let later = json!({"accounts": {"federalIncomeTax": null}});
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(later)).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "back to the default 2300 is refused again");
+    let cash = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let cash = cash.body.as_array().and_then(|a| a.iter().find(|a| a["code"] == "1000")).map(id_of).ok_or("1000")?;
+    let dep = json!({"type": "FEDERAL_INCOME_TAX", "paymentAccountId": cash, "date": "2026-11-13"});
+    let r = app.call(Method::POST, &format!("{run_url}/remit"), Some(&admin), Some(dep)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2305").await?, json!(0));
+    assert!(!id_of(&sales_tax.body).is_empty());
+    Ok(())
+}
+
+/// D43 Form 941, 940 and W-2 figures (ported from the web edition's
+/// `tests/api/us-payroll-forms.test.ts`). Two Q4 2026 runs, biweekly, Texas:
+///   run 1 Oct 5–18, paid Oct 23; run 2 Nov 30–Dec 13 (includes Dec 12), paid Dec 18
+///   A salary $52,000 with 401(k) $100 and section 125 $50 a paycheck → 2,000 each run
+///   B hourly $25.50, 80 h (run 1 also 5 h overtime) → 2,231.25 then 2,040.00
+///   C salary $520,000 plus a $195,000 bonus in run 1 → 215,000 then 20,000;
+///     Additional Medicare wages 15,000 + 20,000 = 35,000 → 315.00
+/// Form 940: line 4 = 100.00 (section 125); line 5 = 228,000; line 7 = 15,171.25; line 8 = 91.03
+#[tokio::test]
+async fn us_payroll_form_941_940_and_w2_figures() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let cash = us_company(&app, &admin, json!({"ein": "12-3456789"})).await?;
+    us_employee(&app, &admin, "US-A", json!({}), json!({"workState": "TX", "payType": "SALARY", "annualSalary": 52000, "pretax401k": 100, "pretaxSection125": 50})).await?;
+    us_employee(&app, &admin, "US-B", json!({}), json!({"workState": "TX", "payType": "HOURLY", "hourlyRate": 25.5, "filingStatus": "MARRIED_JOINTLY", "multipleJobs": true})).await?;
+    us_employee(
+        &app,
+        &admin,
+        "US-C",
+        json!({}),
+        json!({"workState": "TX", "payType": "SALARY", "annualSalary": 520000}),
+    )
+    .await?;
+
+    let make = |start: &'static str, end: &'static str, pay: &'static str| {
+        let body = json!({"periodStart": start, "periodEnd": end, "payDate": pay});
+        app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body))
+    };
+    let first = make("2026-10-05", "2026-10-18", "2026-10-23").await?.body;
+    let url1 = format!("/api/payroll/us/runs/{}", id_of(&first));
+    for (code, body) in [("US-B", json!({"overtimeHours": 5})), ("US-C", json!({"bonus": 195000}))] {
+        let line = id_of(us_line(&first, code));
+        app.call(Method::PATCH, &format!("{url1}/lines/{line}"), Some(&admin), Some(body)).await?;
+    }
+    let run1 = app.call(Method::POST, &format!("{url1}/post"), Some(&admin), None).await?.body;
+    assert_eq!(run1["status"], json!("POSTED"), "{run1}");
+    let second = make("2026-11-30", "2026-12-13", "2026-12-18").await?.body;
+    let url2 = format!("/api/payroll/us/runs/{}", id_of(&second));
+    let run2 = app.call(Method::POST, &format!("{url2}/post"), Some(&admin), None).await?.body;
+    assert_eq!(run2["status"], json!("POSTED"), "{run2}");
+    let dep = json!({"type": "FORM_941", "paymentAccountId": cash, "date": "2026-11-13"});
+    app.call(Method::POST, &format!("{url1}/remit"), Some(&admin), Some(dep)).await?;
+    let futa = json!({"type": "FUTA", "paymentAccountId": cash, "date": "2026-11-13", "amount": 20});
+    app.call(Method::POST, &format!("{url1}/remit"), Some(&admin), Some(futa)).await?;
+    make("2026-12-14", "2026-12-27", "2026-12-31").await?; // a draft counts nowhere
+
+    let cents = |v: &Value| (v.as_f64().unwrap_or(0.0) * 100.0).round() as i64;
+    let total = |key: &str| {
+        [&run1, &run2]
+            .iter()
+            .flat_map(|r| r["lines"].as_array().cloned().unwrap_or_default())
+            .map(|l| cents(&l[key]))
+            .sum::<i64>()
+    };
+    let liability = |r: &Value| {
+        [
+            "federalIncomeTaxTotal",
+            "socialSecurityEmployeeTotal",
+            "socialSecurityEmployerTotal",
+            "medicareEmployeeTotal",
+            "additionalMedicareTotal",
+            "medicareEmployerTotal",
+        ]
+        .iter()
+        .map(|k| cents(&r[*k]))
+        .sum::<i64>()
+    };
+
+    // Form 941, fourth quarter.
+    let r = app.call(Method::GET, "/api/payroll/us/reports/941?year=2026&quarter=4", Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let f = &r.body;
+    assert_eq!((&f["from"], &f["to"]), (&json!("2026-10-01"), &json!("2026-12-31")));
+    assert_eq!(f["employer"], json!({"name": null, "ein": "12-3456789", "state": "TX"}));
+    assert_eq!(f["payRuns"], json!(2));
+    assert_eq!(f["line1"], json!(3));
+    assert_eq!(cents(&f["line2"]), total("incomeTaxWages"));
+    assert_eq!(cents(&f["line3"]), total("federalIncomeTax"));
+    assert_eq!(cents(&f["line5a"]["wages"]), total("socialSecurityWages"));
+    assert_eq!(cents(&f["line5c"]["wages"]), total("medicareWages"));
+    assert_eq!(f["line5d"]["wages"], json!(35000));
+    assert_eq!(f["line5d"]["tax"], json!(315));
+    let actual = liability(&run1) + liability(&run2);
+    assert_eq!(cents(&f["line10"]), actual);
+    assert_eq!(cents(&f["line6"]) + cents(&f["line7"]), cents(&f["line10"]));
+    assert!(cents(&f["line7"]).abs() < 100, "line 7 is {}", f["line7"]);
+    assert_eq!(f["line12"], f["line10"]);
+    assert_eq!(cents(&f["line13"]), liability(&run1));
+    assert_eq!(cents(&f["line14"]), cents(&f["line12"]) - cents(&f["line13"]));
+    let months: Vec<Value> = f["line16"].as_array().ok_or("line16")?.iter().map(|m| m["month"].clone()).collect();
+    assert_eq!(months, vec![json!("2026-10"), json!("2026-11"), json!("2026-12")]);
+    assert_eq!(cents(&f["line16"][0]["liability"]), liability(&run1));
+    assert_eq!(f["line16"][1]["liability"], json!(0));
+    assert_eq!(cents(&f["line16"][2]["liability"]), liability(&run2));
+    assert_eq!(f["line16Total"], f["line10"]);
+
+    let q1 = app.call(Method::GET, "/api/payroll/us/reports/941?year=2026&quarter=1", Some(&admin), None).await?.body;
+    assert_eq!((&q1["line1"], &q1["line2"], &q1["line10"]), (&json!(0), &json!(0), &json!(0)));
+    let r = app.call(Method::GET, "/api/payroll/us/reports/941?year=2026&quarter=5", Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.body["message"], json!(["quarter must be 1, 2, 3 or 4"]));
+    let r = app.call(Method::GET, "/api/payroll/us/reports/941?year=x", Some(&admin), None).await?;
+    assert_eq!(r.body["message"], json!(["year must be a year like 2026", "quarter must be 1, 2, 3 or 4"]));
+
+    // Form 940.
+    let f = app.call(Method::GET, "/api/payroll/us/reports/940?year=2026", Some(&admin), None).await?.body;
+    assert_eq!(cents(&f["line3"]), total("gross"));
+    assert_eq!(f["line4"], json!(100));
+    assert_eq!(f["line5"], json!(228000));
+    assert_eq!(cents(&f["line6"]), cents(&f["line4"]) + cents(&f["line5"]));
+    assert_eq!(f["line7"], json!(15171.25));
+    assert_eq!(cents(&f["line7"]), total("futaWages"));
+    for (k, v) in [
+        ("line8", json!(91.03)),
+        ("line11", json!(0)),
+        ("line12", json!(91.03)),
+        ("line13", json!(20)),
+        ("line14", json!(71.03)),
+    ] {
+        assert_eq!(f[k], v, "{k}");
+    }
+    let quarters: Vec<Value> = f["line16"].as_array().ok_or("line16")?.iter().map(|q| q["liability"].clone()).collect();
+    assert_eq!(quarters, vec![json!(0), json!(0), json!(0), json!(91.03)]);
+    assert_eq!(cents(&f["recordedFuta"]), total("futa"));
+
+    // W-2.
+    let w2 = app.call(Method::GET, "/api/payroll/us/reports/w2?year=2026", Some(&admin), None).await?.body;
+    let codes: Vec<Value> =
+        w2["employees"].as_array().ok_or("employees")?.iter().map(|e| e["employeeCode"].clone()).collect();
+    assert_eq!(codes, vec![json!("US-A"), json!("US-B"), json!("US-C")]);
+    let a = &w2["employees"][0];
+    for (k, v) in [
+        ("paychecks", json!(2)),
+        ("box1", json!(3700)),
+        ("box3", json!(3900)),
+        ("box5", json!(3900)),
+        ("box12D", json!(200)),
+    ] {
+        assert_eq!(a[k], v, "{k}");
+    }
+    let c = &w2["employees"][2];
+    assert_eq!((&c["box3"], &c["box4"], &c["box5"]), (&json!(184500), &json!(11439), &json!(235000)));
+    assert_eq!(c["box6"], json!(3722.5)); // 235,000 × 1.45% + 315
+    assert_eq!(cents(&w2["totals"]["box2"]), total("federalIncomeTax"));
+
+    // A void run drops out.
+    app.call(Method::POST, &format!("{url2}/void"), Some(&admin), None).await?;
+    let w2 = app.call(Method::GET, "/api/payroll/us/reports/w2?year=2026", Some(&admin), None).await?.body;
+    assert_eq!(w2["employees"][0]["paychecks"], json!(1));
+    let f = app.call(Method::GET, "/api/payroll/us/reports/941?year=2026&quarter=4", Some(&admin), None).await?.body;
+    assert_eq!(f["line1"], json!(0));
+    Ok(())
+}
+
+/// D43 state income tax from rules the company enters (ported from the web edition's
+/// `tests/api/us-payroll-state.test.ts`). The rules are EXAMPLE numbers, not real rates.
+///   A US-CO salary $52,000, 2 state allowances; example rule flat 4%, standard deduction 5,000,
+///     1,000 per allowance → 45,000 × 4% = 1,800 / 26 = 69.23
+///   B US-GA hourly $25.50 × 80 h = 2,040; example rule 1% to 10,000, 3% to 50,000, 6% above →
+///     53,040 → 1,482.40 / 26 = 57.02
+///   C US-TX salary $40,000, no state income tax
+#[tokio::test]
+async fn us_payroll_state_income_tax_rules() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let cash = us_company(&app, &admin, json!({})).await?;
+    let co = us_employee(
+        &app,
+        &admin,
+        "US-CO",
+        json!({}),
+        json!({"workState": "CO", "payType": "SALARY", "annualSalary": 52000, "stateAllowances": 2}),
+    )
+    .await?;
+    let ga = us_employee(
+        &app,
+        &admin,
+        "US-GA",
+        json!({}),
+        json!({"workState": "GA", "payType": "HOURLY", "hourlyRate": 25.5}),
+    )
+    .await?;
+    us_employee(
+        &app,
+        &admin,
+        "US-TX",
+        json!({}),
+        json!({"workState": "TX", "payType": "SALARY", "annualSalary": 40000}),
+    )
+    .await?;
+    let co_rule = json!({"method": "FLAT", "flatRate": 4, "standardDeductionSingle": 5000, "allowanceDeduction": 1000, "notes": "Example rule for tests"});
+    let ga_rule = json!({"method": "BRACKETS", "brackets": [[10000, 1], [50000, 3], [null, 6]]});
+    let rules = "/api/payroll/us/state-taxes";
+
+    let r = app.call(Method::GET, rules, Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::OK);
+    let list = r.body.as_array().ok_or("list")?;
+    let tx = list.iter().find(|s| s["state"] == "TX").ok_or("TX")?;
+    assert_eq!((&tx["builtIn"], &tx["method"]), (&json!(true), &json!("NONE")));
+    assert_eq!(list.iter().filter(|s| s["builtIn"] == true).count(), 9);
+    let open: Vec<Value> = list.iter().filter(|s| s["method"].is_null()).map(|s| s["state"].clone()).collect();
+    assert_eq!(open, vec![json!("CO"), json!("GA")]);
+
+    let put = |state: &str, body: Value| us_send(&app, Method::PUT, format!("{rules}/{state}"), &admin, Some(body));
+    assert_eq!(put("TX", co_rule.clone()).await?.body["message"], json!("TX has no state income tax on wages"));
+    assert_eq!(
+        put("ZZ", co_rule.clone()).await?.body["message"],
+        json!("state must be a two-letter US state code, like CA")
+    );
+    assert_eq!(
+        put("CO", json!({"method": "FLAT"})).await?.body["message"],
+        json!("flatRate is required for a flat-rate state")
+    );
+    assert_eq!(
+        put("CO", json!({"method": "BRACKETS", "brackets": [[null, 1], [100, 2]]})).await?.status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        put("CO", json!({"method": "BRACKETS", "brackets": [[100, 101]]})).await?.status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        put("CO", json!({"method": "FLAT", "flatRate": 4.12345})).await?.body["message"],
+        json!(["flatRate must have at most 4 decimal places"])
+    );
+    let r = put("co", co_rule).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    for (k, v) in [
+        ("state", json!("CO")),
+        ("flatRate", json!(4)),
+        ("standardDeductionSingle", json!(5000)),
+        ("excludes401k", json!(true)),
+        ("notes", json!("Example rule for tests")),
+    ] {
+        assert_eq!(r.body[k], v, "{k}");
+    }
+
+    let preview = |body: Value| app.call(Method::POST, "/api/payroll/us/preview", Some(&admin), Some(body));
+    let p = preview(json!({"employeeId": co, "payDate": "2026-11-06"})).await?.body;
+    assert_eq!(p["stateTax"], json!({"state": "CO", "configured": true, "wages": 2000, "tax": 69.23}));
+    assert_eq!(p["taxes"]["netPay"], json!(1621.62));
+    let p = preview(json!({"employeeId": ga, "hours": 80, "payDate": "2026-11-06"})).await?.body;
+    assert_eq!(p["stateTax"]["configured"], json!(false));
+    assert!(p["notes"].as_array().is_some_and(|n| n
+        .iter()
+        .any(|n| n.as_str().is_some_and(|n| n.starts_with("No state income tax rules for GA yet")))));
+
+    // A state without rules stops posting; once entered, posting picks it up.
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    assert_eq!(us_line(&r.body, "US-GA")["stateTaxConfigured"], json!(false));
+    assert_eq!(us_line(&r.body, "US-GA")["stateIncomeTax"], json!(0));
+    let p = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(p.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        p.body["message"],
+        json!("Add the state income tax rules for GA under US payroll settings before posting")
+    );
+    put("GA", ga_rule).await?;
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_line(&r.body, "US-CO")["stateIncomeTax"], json!(69.23));
+    assert_eq!(us_line(&r.body, "US-GA")["stateIncomeTax"], json!(57.02));
+    assert_eq!(us_line(&r.body, "US-GA")["stateTaxConfigured"], json!(true));
+    assert_eq!(us_line(&r.body, "US-TX")["stateIncomeTax"], json!(0));
+    assert_eq!(r.body["stateIncomeTaxTotal"], json!(126.25));
+    assert_eq!(us_line(&r.body, "US-CO")["netPay"], json!(1621.62));
+    assert_eq!(us_balance(&app, &admin, "2370").await?, json!(126.25));
+
+    let dep = json!({"type": "STATE_INCOME_TAX", "paymentAccountId": cash, "date": "2026-11-15"});
+    let r = app.call(Method::POST, &format!("{run_url}/remit"), Some(&admin), Some(dep)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_owed(&r.body, "STATE_INCOME_TAX")["outstanding"], json!(0));
+    assert_eq!(us_balance(&app, &admin, "2370").await?, json!(0));
+
+    // W-2 boxes 15 to 17; state tax is not part of Form 941.
+    let w2 = app.call(Method::GET, "/api/payroll/us/reports/w2?year=2026", Some(&admin), None).await?.body;
+    let e = w2["employees"].as_array().and_then(|es| es.iter().find(|e| e["employeeCode"] == "US-CO")).ok_or("CO")?;
+    assert_eq!((&e["box15"], &e["box16"], &e["box17"]), (&json!("CO"), &json!(2000), &json!(69.23)));
+    assert_eq!(w2["totals"]["box17"], json!(126.25));
+    let f941 = app.call(Method::GET, "/api/payroll/us/reports/941?year=2026&quarter=4", Some(&admin), None).await?.body;
+    let run = app.call(Method::GET, &run_url, Some(&admin), None).await?.body;
+    assert_eq!(f941["line3"], run["federalIncomeTaxTotal"]);
+
+    assert_eq!(
+        app.call(Method::DELETE, &format!("{rules}/CO"), Some(&admin), None).await?.status,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.call(Method::DELETE, &format!("{rules}/CO"), Some(&admin), None).await?.status,
+        StatusCode::NOT_FOUND
+    );
     Ok(())
 }

@@ -16,6 +16,9 @@ import Employees from './pages/Employees';
 import EmployeeProfile from './pages/EmployeeProfile';
 import Payroll from './pages/Payroll';
 import PayrollRun from './pages/PayrollRun';
+import UsPayroll from './pages/UsPayroll';
+import UsPayrollRun from './pages/UsPayrollRun';
+import UsPayrollForms from './pages/UsPayrollForms';
 import Invoices from './pages/Invoices';
 import Bills from './pages/Bills';
 import Expenses from './pages/Expenses';
@@ -72,6 +75,15 @@ export default function App() {
                   } />
                   <Route path="/payroll" element={
                     <ProtectedRoute permission="payroll"><Payroll /></ProtectedRoute>
+                  } />
+                  <Route path="/payroll/us" element={
+                    <ProtectedRoute permission="payroll"><UsPayroll /></ProtectedRoute>
+                  } />
+                  <Route path="/payroll/us/forms" element={
+                    <ProtectedRoute permission="payroll"><UsPayrollForms /></ProtectedRoute>
+                  } />
+                  <Route path="/payroll/us/:id" element={
+                    <ProtectedRoute permission="payroll"><UsPayrollRun /></ProtectedRoute>
                   } />
                   <Route path="/payroll/:id" element={
                     <ProtectedRoute permission="payroll"><PayrollRun /></ProtectedRoute>

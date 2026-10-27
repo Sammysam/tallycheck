@@ -38,6 +38,9 @@ const KIND: Record<string, { label: string; list: string }> = {
   PAYROLL: { label: 'Payroll run', list: '/payroll' },
   PAYROLL_PAYMENT: { label: 'Salary payment', list: '/payroll' },
   PAYROLL_REMITTANCE: { label: 'Statutory remittance', list: '/payroll' },
+  US_PAYROLL: { label: 'US payroll run', list: '/payroll/us' },
+  US_PAYROLL_PAYMENT: { label: 'US net pay', list: '/payroll/us' },
+  US_PAYROLL_REMITTANCE: { label: 'US payroll tax deposit', list: '/payroll/us' },
   REVALUATION: { label: 'Currency revaluation', list: '/accounts' },
 };
 
@@ -188,6 +191,7 @@ export default function TransactionDetail() {
   const debits = entry?.lines.reduce((s, l) => s + Number(l.debit), 0) ?? 0;
   const credits = entry?.lines.reduce((s, l) => s + Number(l.credit), 0) ?? 0;
   const payrollRun = entry?.sourceType?.startsWith('PAYROLL') ? entry.sourceId : null;
+  const usPayrollRun = entry?.sourceType?.startsWith('US_PAYROLL') ? entry.sourceId : null;
 
   return (
     <div>
@@ -214,7 +218,7 @@ export default function TransactionDetail() {
               {entry.reversalOfId && (
                 <Link className="btn-link text-xs" to={`/ledger/entries/${entry.reversalOfId}`}>Reverses an earlier entry →</Link>
               )}
-              {kind && <Link className="btn-link text-xs ml-auto no-print" to={payrollRun ? `/payroll/${payrollRun}` : kind.list}>Open {kind.label.toLowerCase()} screen →</Link>}
+              {kind && <Link className="btn-link text-xs ml-auto no-print" to={payrollRun ? `/payroll/${payrollRun}` : usPayrollRun ? `/payroll/us/${usPayrollRun}` : kind.list}>Open {kind.label.toLowerCase()} screen →</Link>}
             </div>
             {doc ? <><DocSummary entry={entry} doc={doc} /><DocLines doc={doc} /></>
               : <p className="text-sm text-gray-500">{entry.sourceType ? 'Posted by the screen above.' : 'Entered by hand on the Ledger screen.'}</p>}

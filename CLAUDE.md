@@ -575,6 +575,44 @@ recommendations without answering each one individually; revisit any of them on 
   unchanged. Choices made by the web agent without a spec (company-level state and pay frequency, no
   W-4 history, no dollar rounding) are kept so both editions agree.
 
+- **D43 US pay runs, state income tax and form figures** (2026-10-27, ported from the web Rust
+  edition's waves U3 `e1f403d`, U4 `450e073`, U5a `d62293d` and U5b `fa0c09c`; the user asked for
+  the same here). `payroll::us_runs`: runs (`USPR-0001`, DRAFT → POSTED → PAID, VOID), one line per
+  employee (salary / periods, or hourly hours × rate with 1.5× overtime; bonus, other earnings), W-4
+  and state certificate snapshotted on the line, year-to-date wages from other POSTED / PAID runs of
+  the pay-date year (worked out again at posting). Each step is one transaction with its entry:
+  post (dated the period end, source `US_PAYROLL`) Dr gross wages + employer taxes, Cr net pay owed,
+  federal income tax, social security (both shares), Medicare (both + Additional), FUTA, SUTA,
+  401(k), section 125, state income tax; pay (`US_PAYROLL_PAYMENT`) Dr net pay owed / Cr the bank;
+  remit (`US_PAYROLL_REMITTANCE`) one tax, or a Form 941 deposit clearing federal income tax + social
+  security + Medicare in one entry, never more than outstanding; void reverses every entry dated
+  today. These entries can't be reversed from the Ledger (D18 message "…a US payroll run…");
+  Transaction details link to the run. `payroll::us_state`: each company enters its states' rules
+  (FLAT or BRACKETS, standard deductions, per-allowance deduction / credit, 401(k) excluded or not);
+  the 9 states without income tax on wages are built in; **no state rates ship**; posting is refused
+  while a work state has no rule. `payroll::us_reports`: Form 941 / 940 / W-2 (+ W-3 totals, boxes
+  15–17) figures from POSTED / PAID runs by pay date, read-only. Routes (`payroll`): `/payroll/us/runs`
+  (+ `/:id`, `/lines`, `/post`, `/pay`, `/remit`, `/void`), `/payroll/us/reports/941|940|w2`,
+  `/payroll/us/state-taxes[/:state]`. Screens: Payroll → US payroll (settings, state rules, runs),
+  run page, tax forms page, US tax section on the employee profile (instead of the Sri Lankan salary
+  section when `payroll.country` = US). Desktop-only, beyond the web edition:
+  * **Accounts are chosen, never taken over** (user's choice, option b): each of the 11 roles
+    (`us_runs::ROLES`, defaults 6100, 6130, 2200, 2300–2370) is a setting `payroll.us.account.<role>`
+    (account id; PATCH `/payroll/us/settings` `accounts: {role: id | null}`). An unset role takes the
+    account with its default code if it has the default name and type, or adds it if the code is
+    free; when the code is some other account (e.g. a company's own 2300 Sales Tax Payable) switching
+    to US is refused: `Account 2300 is already "Sales Tax Payable". Choose the account for Federal
+    income tax withheld under US payroll settings`. A chosen account must be active, of the right
+    type (liability / expense) and in the home currency. A posted run keeps the accounts it used
+    (`accountsSnapshot`), so paying it and its deposits clear those even after the settings change.
+  * US payroll needs the company currency to be USD (switching and new runs are refused otherwise).
+  The web agent's own choices are kept: one company SUTA state and pay frequency, 2,080 standard
+  hours, overtime 1.5× for hourly only, one line per employee per run, no W-4 / state rule history
+  (runs keep snapshots), only 2026 federal tables, local taxes not covered.
+- Stripe: a publishable key (`pk_…`) is now refused with "That is a publishable key; use a secret or
+  restricted key" (the general key check ran first and made that message unreachable; fixed in the
+  web editions).
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`

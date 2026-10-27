@@ -8,6 +8,8 @@ import ActionMenu from '../components/ActionMenu';
 import ProtectedImage from '../components/ProtectedImage';
 import EmployeeFields from '../components/EmployeeFields';
 import SalarySection from '../components/SalarySection';
+import UsTaxSection from '../components/UsTaxSection';
+import { usePayrollCountry } from '../lib/usPayroll';
 import { useAuth } from '../contexts/AuthContext';
 import {
   CATEGORY_LABEL,
@@ -54,6 +56,7 @@ export default function EmployeeProfile() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
+  const payrollCountry = usePayrollCountry(hasPermission('payroll'));
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -356,7 +359,8 @@ export default function EmployeeProfile() {
       </div>
 
       {/* ── Salary (payroll permission only) ── */}
-      {hasPermission('payroll') && (
+      {hasPermission('payroll') && payrollCountry === 'US' && <UsTaxSection employeeId={id} />}
+      {hasPermission('payroll') && payrollCountry === 'LK' && (
         <SalarySection employeeId={id} isContract={profile.employmentType === 'CONTRACT'} />
       )}
 
