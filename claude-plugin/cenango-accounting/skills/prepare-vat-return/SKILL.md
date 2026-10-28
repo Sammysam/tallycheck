@@ -1,6 +1,6 @@
 ---
 name: prepare-vat-return
-description: Prepare the figures for a VAT / GST / sales tax return from Cenango Accounting for a period, with checks. Use when the user asks for the tax return, VAT payable, or tax for a quarter or month.
+description: Prepare the figures for a VAT / GST / sales tax return from TallyCheck for a period, with checks. Use when the user asks for the tax return, VAT payable, or tax for a quarter or month.
 ---
 
 # Prepare the VAT return

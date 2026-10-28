@@ -14,6 +14,13 @@ A fully offline Windows desktop port of the Cenango accounting web app.
 - **This repo:** `C:\dev\accounting-desktop` — deliberately outside OneDrive. OneDrive sync
   corrupts live SQLite WAL databases and thrashes `target/`.
 
+**License** (decided by the user 2026-10-28): dual — GNU AGPL v3 (`AGPL-3.0-only`, `LICENSE`) or a
+commercial license from Cenango (Pvt) Ltd (`COMMERCIAL-LICENSE.md`). Every new dependency must be
+AGPL-compatible (no GPL-2.0-only, SSPL, BUSL or other proprietary licenses);
+`python tools/third_party_notices.py` rewrites `THIRD-PARTY-NOTICES.txt` and runs before every
+installer build. The installer shows `LICENSE` and installs all three files; Help → About states the
+license and the right to the source code (AGPL §13 covers LAN users).
+
 If the reference and this file disagree about *behaviour*, the reference wins unless the
 deviation is listed in §9 (Approved deviations).
 
@@ -368,7 +375,7 @@ recommendations without answering each one individually; revisit any of them on 
     CSV export follow it. The Sri Lankan EPF/ETF statutory forms keep "Rs.".
   * "Today" is the main PC's own local date (`chrono::Local`), replacing the fixed +05:30 of D5.
   * Report defaults (P&L, cash flow, dashboard, statements) start at the financial year start.
-  * "Cenango Accounting" remains the product's own name (window title, installer, data folder).
+  * The product's own name is **TallyCheck** (D44; it was "Cenango Accounting").
 - **D26 Taxes for any country** (requested by the user 2026-10-20). No country's tax law is
   built in; each company defines its own **tax codes** (`tax_codes`: name, rate in ten-thousandths
   of a percent — 18% = 180000 — sales account (liability) for output tax, purchase account
@@ -612,6 +619,16 @@ recommendations without answering each one individually; revisit any of them on 
 - Stripe: a publishable key (`pk_…`) is now refused with "That is a publishable key; use a secret or
   restricted key" (the general key check ran first and made that message unreachable; fixed in the
   web editions).
+
+- **D44 Renamed to TallyCheck** (requested by the user 2026-10-28). Window title, installer and
+  Windows app name (`productName`), About, sign-in, messages, MCP texts, plugin descriptions, docs
+  and the logo (`frontend/public` icons, `Logo_tallycheck.png` wordmark, `src-tauri/icons/icon.ico`
+  from the user's design). Kept on purpose so existing installations keep working: the data folder
+  `%LOCALAPPDATA%\CenangoAccounting`, the identifier `lk.cenango.accounting`, `cenango-mcp.exe`,
+  `CENANGO_API_KEY` and the plugin id `cenango-accounting`. The publisher and copyright holder stay
+  Cenango (Pvt) Ltd. Risk raised with the user: "Tally" is Tally Solutions' trademark (TallyPrime);
+  the user chose to go ahead. The installer installs to `%LOCALAPPDATA%\TallyCheck`, so a PC with
+  the old "Cenango Accounting" uninstalls that first (its data is kept).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

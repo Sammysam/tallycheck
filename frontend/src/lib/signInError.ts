@@ -8,7 +8,7 @@ import axios from 'axios';
  */
 export function signInError(err: unknown, step: 'password' | 'code'): string {
   if (!axios.isAxiosError(err) || !err.response) {
-    return 'Cannot reach the accounting server. Check that Cenango Accounting is open on the main PC, then try again.';
+    return 'Cannot reach the accounting server. Check that TallyCheck is open on the main PC, then try again.';
   }
   const { status, data } = err.response;
   const message = typeof data?.message === 'string' ? data.message : '';

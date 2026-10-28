@@ -46,7 +46,7 @@ export default function Login() {
     <AuthShell>
           <div className="mb-5">
             <h1 className="text-lg font-semibold text-gray-900">Welcome back</h1>
-            <p className="text-sm text-gray-500 mt-1">Sign in to Cenango Accounting</p>
+            <p className="text-sm text-gray-500 mt-1">Sign in to TallyCheck</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">

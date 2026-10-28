@@ -168,7 +168,7 @@ pub fn lock_data_dir(dir: &Path) -> anyhow::Result<std::fs::File> {
     match file.try_lock() {
         Ok(()) => Ok(file),
         Err(std::fs::TryLockError::WouldBlock) => {
-            anyhow::bail!("Cenango Accounting is already running with the data folder {}", dir.display())
+            anyhow::bail!("TallyCheck is already running with the data folder {}", dir.display())
         }
         Err(std::fs::TryLockError::Error(e)) => Err(e.into()),
     }

@@ -1,6 +1,6 @@
 ---
 name: chase-overdue-customers
-description: Find customers with overdue invoices in Cenango Accounting and draft polite payment reminders. Use when the user asks who owes money, who is late, or to chase or remind customers.
+description: Find customers with overdue invoices in TallyCheck and draft polite payment reminders. Use when the user asks who owes money, who is late, or to chase or remind customers.
 ---
 
 # Chase overdue customers

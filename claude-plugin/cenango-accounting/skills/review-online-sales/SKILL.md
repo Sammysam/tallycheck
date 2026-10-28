@@ -1,6 +1,6 @@
 ---
 name: review-online-sales
-description: Review sales brought in from Shopify or WooCommerce and payments from Shopify Payments, Stripe or PayPal in Cenango Accounting — draft invoices to post, payments to match, fees and payouts. Use when the user asks about online orders, the shop, Shopify, WooCommerce, Stripe or PayPal.
+description: Review sales brought in from Shopify or WooCommerce and payments from Shopify Payments, Stripe or PayPal in TallyCheck — draft invoices to post, payments to match, fees and payouts. Use when the user asks about online orders, the shop, Shopify, WooCommerce, Stripe or PayPal.
 ---
 
 # Review online sales

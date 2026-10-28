@@ -194,7 +194,7 @@ export default function CollapsibleSidebar() {
         })}
       </nav>
       <div className="px-3 py-2 border-t border-[#e0e0e0] shrink-0">
-        <img src="/Logo_black.png" alt="Cenango" className="h-4 w-auto opacity-70" />
+        <img src="/Logo_tallycheck.png" alt="TallyCheck" className="h-4 w-auto opacity-70" />
       </div>
     </aside>
   );

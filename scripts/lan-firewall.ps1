@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Opens Cenango Accounting's port to the office network only (run as Administrator on the main PC).
+  Opens TallyCheck's port to the office network only (run as Administrator on the main PC).
 
 .DESCRIPTION
   Adds one inbound Windows Firewall rule for the app's TCP port that applies to the Private
@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$name = "Cenango Accounting (office LAN, TCP $Port)"
+$name = "TallyCheck (office LAN, TCP $Port)"
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
   [Security.Principal.WindowsBuiltInRole]::Administrator)

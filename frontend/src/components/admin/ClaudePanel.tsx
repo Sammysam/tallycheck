@@ -73,7 +73,7 @@ export default function ClaudePanel({ onBack }: { onBack: () => void }) {
     setRevoking(null);
   };
 
-  const exe = setup?.mcpPath ?? 'C:\\Users\\<you>\\AppData\\Local\\Cenango Accounting\\cenango-mcp.exe';
+  const exe = setup?.mcpPath ?? 'C:\\Users\\<you>\\AppData\\Local\\TallyCheck\\cenango-mcp.exe';
   const desktopConfig = (key: string) => JSON.stringify({
     mcpServers: { 'cenango-accounting': { command: exe, env: { CENANGO_API_KEY: key, CENANGO_API_URL: setup?.apiUrl ?? 'http://127.0.0.1:47800' } } },
   }, null, 2);

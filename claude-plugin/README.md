@@ -1,6 +1,6 @@
-# Cenango Accounting for Claude
+# TallyCheck for Claude
 
-Lets Claude answer questions from the books of Cenango Accounting running on this PC — and, if you
+Lets Claude answer questions from the books of TallyCheck running on this PC — and, if you
 allow it, create **draft** invoices, bills, customers and vendors for a person to check and post.
 
 What Claude can never do with it: post, pay, void or delete anything; open payroll, employees,
@@ -17,7 +17,7 @@ questions only. Copy the key (`cak_…`) — it is shown once. The window also s
 for Claude Desktop and Claude Code with the right paths.
 
 The connector program, `cenango-mcp.exe`, is installed next to the app
-(usually `%LOCALAPPDATA%\Cenango Accounting\cenango-mcp.exe`). The app must be open while Claude
+(usually `%LOCALAPPDATA%\TallyCheck\cenango-mcp.exe`). The app must be open while Claude
 uses it.
 
 ## 2a. Claude Desktop
@@ -28,7 +28,7 @@ Settings → Developer → Edit Config, and add (with your key and path):
 {
   "mcpServers": {
     "cenango-accounting": {
-      "command": "C:\\Users\\<you>\\AppData\\Local\\Cenango Accounting\\cenango-mcp.exe",
+      "command": "C:\\Users\\<you>\\AppData\\Local\\TallyCheck\\cenango-mcp.exe",
       "env": { "CENANGO_API_KEY": "cak_…", "CENANGO_API_URL": "http://127.0.0.1:47800" }
     }
   }

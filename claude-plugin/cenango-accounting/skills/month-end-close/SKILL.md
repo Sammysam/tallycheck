@@ -1,6 +1,6 @@
 ---
 name: month-end-close
-description: Walk through closing a month in Cenango Accounting — unmatched bank lines, draft documents, overdue items, foreign-currency revaluation, the reports to review, and locking the month. Use when the user asks to close, finish or review a month.
+description: Walk through closing a month in TallyCheck — unmatched bank lines, draft documents, overdue items, foreign-currency revaluation, the reports to review, and locking the month. Use when the user asks to close, finish or review a month.
 ---
 
 # Month-end close

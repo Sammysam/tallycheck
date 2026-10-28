@@ -288,7 +288,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       items: [
         { label: 'Keyboard shortcuts', shortcut: 'F1', onSelect: () => setDialog('shortcuts') },
         'separator',
-        { label: 'About Cenango Accounting', onSelect: () => setDialog('about') },
+        { label: 'About TallyCheck', onSelect: () => setDialog('about') },
       ],
     },
   ];
@@ -365,17 +365,29 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       {dialog === 'about' && (
         <Dialog
-          title="About Cenango Accounting"
+          title="About TallyCheck"
           onClose={closeDialog}
           buttons={<button type="button" className="btn btn-primary" onClick={closeDialog}>OK</button>}
         >
           <div className="flex items-center gap-4">
             <img src="/favicon-96x96.png" alt="" className="w-12 h-12" />
             <div className="text-sm">
-              <p className="font-semibold text-gray-900">Cenango Accounting</p>
+              <p className="font-semibold text-gray-900">TallyCheck</p>
               <p className="text-gray-600">Version {__APP_VERSION__}</p>
               <p className="text-gray-500 mt-1">Offline accounting, employees and payroll.</p>
             </div>
+          </div>
+          <div className="text-xs text-gray-600 mt-4 space-y-1.5">
+            <p>Copyright © 2026 Cenango (Pvt) Ltd.</p>
+            <p>
+              This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
+              General Public License, version 3, as published by the Free Software Foundation. It comes with
+              ABSOLUTELY NO WARRANTY. A commercial license is also available from Cenango (Pvt) Ltd.
+            </p>
+            <p>
+              The license (LICENSE.txt), the commercial license notice and the third-party notices are in the program
+              folder. You are entitled to the source code of this program, including when you use it over a network.
+            </p>
           </div>
         </Dialog>
       )}
@@ -392,7 +404,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       {dialog === 'discard' && (
         <Dialog
-          title="Cenango Accounting"
+          title="TallyCheck"
           onClose={closeDialog}
           buttons={
             <>

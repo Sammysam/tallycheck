@@ -8,7 +8,7 @@ npm ci                 # pinned Tauri CLI only
 npm run installer      # = build cenango-mcp, then tauri build with src-tauri/tauri.installer.json
 ```
 
-The result is `target\release\bundle\nsis\Cenango Accounting_<version>_x64-setup.exe`:
+The result is `target\release\bundle\nsis\TallyCheck_<version>_x64-setup.exe`:
 
 * An NSIS installer for the current Windows user, so no administrator rights are needed. The React app ships as a resource; the API server is inside the executable.
 * D41: `cenango-mcp.exe` (the Claude connector) is installed next to the app, as a resource added by `src-tauri/tauri.installer.json`; development builds do not need it.
@@ -25,7 +25,7 @@ An unsigned installer works, but Windows SmartScreen warns about it. Signing nee
 
   ```
   signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /sha1 <thumbprint> ^
-    "target\release\bundle\nsis\Cenango Accounting_<version>_x64-setup.exe"
+    "target\release\bundle\nsis\TallyCheck_<version>_x64-setup.exe"
   ```
 
 No certificate is available to this project, so the installers built here are **unsigned**.

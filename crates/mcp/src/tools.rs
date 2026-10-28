@@ -3,7 +3,7 @@
 use serde_json::{json, Map, Value};
 use std::time::Duration;
 
-pub const INSTRUCTIONS: &str = "Cenango Accounting: an offline accounting app running on this PC. \
+pub const INSTRUCTIONS: &str = "TallyCheck: an offline accounting app running on this PC. \
 Use these tools to answer questions from the company's books (invoices, bills, payments, reports, \
 products and stock, bank transactions waiting to be matched). Amounts are in the company's currency \
 unless a currency is given. If the key allows it, you can create DRAFT invoices, bills, customers \
@@ -27,11 +27,13 @@ impl Api {
 
     async fn send(&self, req: reqwest::RequestBuilder) -> Result<Value, String> {
         let key = self.key.as_deref().ok_or_else(|| {
-            "No key: set CENANGO_API_KEY to a key made in Cenango Accounting under Settings → Integrations → Claude.".to_string()
+            "No key: set CENANGO_API_KEY to a key made in TallyCheck under Settings → Integrations → Claude."
+                .to_string()
         })?;
-        let res = req.bearer_auth(key).send().await.map_err(|e| {
-            format!("Cenango Accounting is not reachable at {} ({e}). Is the app open on this PC?", self.base)
-        })?;
+        let res =
+            req.bearer_auth(key).send().await.map_err(|e| {
+                format!("TallyCheck is not reachable at {} ({e}). Is the app open on this PC?", self.base)
+            })?;
         let status = res.status().as_u16();
         let body: Value = res.json().await.unwrap_or(Value::Null);
         if (200..300).contains(&status) {

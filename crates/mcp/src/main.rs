@@ -1,4 +1,4 @@
-//! D41: `cenango-mcp` — Cenango Accounting's MCP server (integrations plan, phase 5).
+//! D41: `cenango-mcp` — TallyCheck's MCP server (integrations plan, phase 5).
 //!
 //! Claude (Claude Desktop, Claude Code) starts this program and talks to it over stdin / stdout
 //! (MCP: JSON-RPC 2.0, one message per line). It calls the running app on this PC with a key made

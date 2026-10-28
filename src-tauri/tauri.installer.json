@@ -2,7 +2,10 @@
   "bundle": {
     "resources": {
       "../frontend/dist/": "frontend/",
-      "../target/release/cenango-mcp.exe": "cenango-mcp.exe"
+      "../target/release/cenango-mcp.exe": "cenango-mcp.exe",
+      "../LICENSE": "LICENSE.txt",
+      "../COMMERCIAL-LICENSE.md": "COMMERCIAL-LICENSE.md",
+      "../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
     }
   }
 }
