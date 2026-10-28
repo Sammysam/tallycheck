@@ -131,7 +131,7 @@ async fn restore(config: &AppConfig, file: &str) -> anyhow::Result<()> {
     let key = key_for(config, path)?;
     std::fs::create_dir_all(&config.data_dir)?;
     let _lock = api_server::server::lock_data_dir(&config.data_dir)
-        .context("close Cenango Accounting before restoring from the command line")?;
+        .context("close TallyCheck before restoring from the command line")?;
     let answer = match std::env::var("ACCOUNTING_RESTORE_CONFIRM") {
         Ok(v) => v,
         Err(_) => {

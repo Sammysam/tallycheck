@@ -5,7 +5,7 @@
     {
       "name": "cenango-accounting",
       "source": "./cenango-accounting",
-      "description": "Ask Claude about your Cenango Accounting books, and let it draft invoices and bills for you to post."
+      "description": "Ask Claude about your TallyCheck books, and let it draft invoices and bills for you to post."
     }
   ]
 }

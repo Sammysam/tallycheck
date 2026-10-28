@@ -40,8 +40,8 @@ fn startup_error_box(message: &str) {
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
         let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-        let text = wide(&format!("Cenango Accounting could not start.\n\n{message}"));
-        let title = wide("Cenango Accounting");
+        let text = wide(&format!("TallyCheck could not start.\n\n{message}"));
+        let title = wide("TallyCheck");
         // SAFETY: both buffers are NUL-terminated UTF-16 and outlive the call; no owner window.
         unsafe {
             MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
@@ -63,7 +63,7 @@ pub fn run() {
             // The page draws its own menu bar, toolbar and status bar (File, Edit, View, …), so
             // the window has no native menu.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(base))
-                .title("Cenango Accounting")
+                .title("TallyCheck")
                 .inner_size(1366.0, 860.0)
                 .min_inner_size(1024.0, 700.0)
                 .build()?;
@@ -74,7 +74,7 @@ pub fn run() {
     let app = match app {
         Ok(app) => app,
         Err(e) => {
-            eprintln!("Cenango Accounting could not start: {e}");
+            eprintln!("TallyCheck could not start: {e}");
             startup_error_box(&e.to_string());
             std::process::exit(1);
         }

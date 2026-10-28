@@ -1,6 +1,6 @@
 ---
 name: explain-a-report
-description: Explain a Cenango Accounting report (profit and loss, balance sheet, cash flow, trial balance, ageing) in plain words and dig into the accounts behind a figure. Use when the user asks why a number is what it is, what changed, or what a report means.
+description: Explain a TallyCheck report (profit and loss, balance sheet, cash flow, trial balance, ageing) in plain words and dig into the accounts behind a figure. Use when the user asks why a number is what it is, what changed, or what a report means.
 ---
 
 # Explain a report

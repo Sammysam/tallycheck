@@ -1,6 +1,6 @@
 [package]
 name = "accounting-desktop"
-description = "Cenango Accounting — offline desktop shell"
+description = "TallyCheck — offline desktop shell"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

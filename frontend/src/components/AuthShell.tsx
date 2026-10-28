@@ -7,7 +7,7 @@ export default function AuthShell({ children }: { children: ReactNode }) {
     <div className="h-screen overflow-auto flex items-center justify-center p-6 bg-[#e9ecef]">
       <div className="w-full max-w-[420px] bg-white border border-[#cfcfcf] rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.18)] overflow-hidden">
         <div className="auth-panel px-6 py-5">
-          <img src="/Logo_black.png" alt="Cenango" className="logo-white h-6 w-auto" />
+          <img src="/Logo_tallycheck.png" alt="TallyCheck" className="logo-white h-6 w-auto" />
           <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-orange-300">Accounting System</p>
         </div>
         <div className="px-6 py-5">{children}</div>

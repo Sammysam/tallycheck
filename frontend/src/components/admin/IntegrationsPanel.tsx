@@ -39,7 +39,7 @@ const INFO: Record<Id, { icon: typeof ShoppingBag; color: string; blurb: string;
     icon: ShoppingBag, color: 'text-green-700',
     blurb: 'Orders as draft invoices; Shopify Payments as lines to match.',
     steps: [
-      <>In Shopify admin, open <b>Settings → Apps and sales channels → Develop apps</b> and create an app, e.g. “Cenango Accounting”.</>,
+      <>In Shopify admin, open <b>Settings → Apps and sales channels → Develop apps</b> and create an app, e.g. “TallyCheck”.</>,
       <>Under <b>Admin API access scopes</b>, tick <b>read_orders</b> and <b>read_shopify_payments_payouts</b> (and <b>read_all_orders</b> for orders older than 60 days); save and <b>Install app</b>.</>,
       <>Copy the <b>Admin API access token</b> (it starts with shpat_) and paste it below.</>,
     ],
@@ -51,7 +51,7 @@ const INFO: Record<Id, { icon: typeof ShoppingBag; color: string; blurb: string;
     blurb: 'Paid orders as draft invoices. Payments come through Stripe or PayPal.',
     steps: [
       <>In WordPress, open <b>WooCommerce → Settings → Advanced → REST API</b> and click <b>Add key</b>.</>,
-      <>Give it a name (“Cenango Accounting”), choose your user, set <b>Permissions: Read</b> and click <b>Generate API key</b>.</>,
+      <>Give it a name (“TallyCheck”), choose your user, set <b>Permissions: Read</b> and click <b>Generate API key</b>.</>,
       <>Copy the <b>consumer key</b> (ck_…) and <b>consumer secret</b> (cs_…) — WooCommerce shows the secret only once.</>,
     ],
     fields: [

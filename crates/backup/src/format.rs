@@ -23,7 +23,7 @@ const MAX_HEADER: u32 = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FormatError {
-    #[error("not a Cenango Accounting backup file")]
+    #[error("not a TallyCheck backup file")]
     NotABackup,
     #[error("backup format version {0} is not supported by this version of the app")]
     UnsupportedVersion(u8),
