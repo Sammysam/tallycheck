@@ -648,9 +648,15 @@ answer 201.
 - Reference quirks to decide in their wave: bills never accumulate partial AP payments; a
   part-paid bill can be voided; `POST /accounts/seed` does nothing after the payroll migration
   seeded 11 accounts.
-- The copied frontend fails `npm run lint` (77 errors, 10 warnings) exactly as the reference
-  does, and `npm audit --omit=dev` reports advisories in react-router, form-data and dompurify.
-  Upgrades need a decision; they are not "minimal changes".
+- The copied frontend fails `npm run lint` (57 problems: 49 errors, 8 warnings, all inherited from
+  the reference).
+- Security advisories fixed 2026-10-28 (asked by the user): `npm audit fix` in `frontend/` moved
+  react-router(-dom) 7.16.0 → 7.18.5, dompurify 3.4.11 → 3.4.17, form-data 4.0.5 → 4.0.6,
+  follow-redirects 1.16.0 → 1.16.2, axios 1.17.0 → 1.21.0 and some build-only tools, within the
+  existing version ranges; `npm audit` reports 0 in `frontend/` and the root. `cargo audit` lists
+  `rsa` (RUSTSEC-2023-0071, no fix upstream), which is only in Cargo.lock through sqlx's unused
+  MySQL driver and is never compiled, and `glib` / `proc-macro-error`, Linux (GTK) only. Run both
+  audits before each release.
 - Fresh installs get the default chart automatically (D20); the migration itself still seeds
   only the 11 payroll accounts, as the reference did, so imports are unaffected.
 - `currentBalance` on bank accounts is never updated by postings (balances come from the
