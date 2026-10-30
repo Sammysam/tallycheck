@@ -643,7 +643,9 @@ recommendations without answering each one individually; revisit any of them on 
   Cenango's update key; the public key is in `tauri.conf.json`, the private key and password live
   outside the project (`%USERPROFILE%\.tallycheck-signing\`) and must go to the company password
   manager. Release: `python tools/release.py` (docs/installer-and-updates.md). The feed address
-  (`UPDATE_FEED`) is not set until the release page exists; `ACCOUNTING_UPDATE_URL` overrides it.
+  (`UPDATE_FEED`) is the latest GitHub release's `latest.json` of the public repository
+  https://github.com/Sammysam/tallycheck (pushed 2026-10-30, remote `github`; Bitbucket stays `origin`), which is also
+  the AGPL source link shown in Help → About; `ACCOUNTING_UPDATE_URL` overrides it.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

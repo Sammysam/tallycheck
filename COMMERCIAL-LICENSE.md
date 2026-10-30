@@ -6,7 +6,8 @@ TallyCheck is available under **two licenses**. You may use it under either one.
 
 ## 1. GNU Affero General Public License v3 (AGPL-3.0-only)
 
-The full text is in `LICENSE` (installed as `LICENSE.txt`). In short, and without replacing the
+The full text is in `LICENSE` (installed as `LICENSE.txt`). The source code is published at
+<https://github.com/Sammysam/tallycheck>. In short, and without replacing the
 license text:
 
 - You may use, study, change and share the program, including for commercial work.
