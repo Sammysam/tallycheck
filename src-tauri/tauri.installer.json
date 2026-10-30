@@ -6,6 +6,7 @@
       "../LICENSE": "LICENSE.txt",
       "../COMMERCIAL-LICENSE.md": "COMMERCIAL-LICENSE.md",
       "../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
-    }
+    },
+    "createUpdaterArtifacts": true
   }
 }

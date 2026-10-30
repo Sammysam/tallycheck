@@ -4392,3 +4392,29 @@ async fn us_payroll_state_income_tax_rules() -> TestResult {
     );
     Ok(())
 }
+
+/// D45: updates are an Administrator's job on the main PC; a server without the desktop shell
+/// has no updater and says so.
+#[tokio::test]
+async fn updates_are_for_a_local_administrator_and_need_the_desktop_app() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let accountant = app.signed_in("acc1", "Accountant").await?;
+    let r = app.local(Method::GET, "/api/system/update", &accountant, None).await?;
+    assert_nest_error(&r, 403, json!("Updates are installed by an Administrator on the main PC"), "/api/system/update");
+    let remote =
+        app.call_from("192.168.1.50:50000", HOST, Method::GET, "/api/system/update", Some(&admin), None).await?;
+    assert_eq!(remote.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.call(Method::GET, "/api/system/update", None, None).await?.status, StatusCode::UNAUTHORIZED);
+
+    let r = app.local(Method::GET, "/api/system/update", &admin, None).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(
+        r.body,
+        json!({"current": env!("CARGO_PKG_VERSION"), "supported": false, "available": null, "error": null})
+    );
+    let r = app.local(Method::POST, "/api/system/update/install", &admin, None).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.body["message"], json!("Updates are installed from the TallyCheck desktop app"));
+    Ok(())
+}

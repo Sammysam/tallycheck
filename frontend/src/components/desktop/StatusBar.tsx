@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
+import { Download, ShieldCheck } from 'lucide-react';
 
 interface StatusBarProps {
   location: string;
@@ -7,10 +7,13 @@ interface StatusBarProps {
   role: string;
   offerTwoFactor: boolean;
   onTwoFactor: () => void;
+  /** D45: a newer version to offer, or null. */
+  updateVersion: string | null;
+  onUpdate: () => void;
 }
 
 /** Bottom strip: where you are, who is signed in, the server link, Caps Lock and the date. */
-export default function StatusBar({ location, user, role, offerTwoFactor, onTwoFactor }: StatusBarProps) {
+export default function StatusBar({ location, user, role, offerTwoFactor, onTwoFactor, updateVersion, onUpdate }: StatusBarProps) {
   const [online, setOnline] = useState(true);
   const [caps, setCaps] = useState(false);
 
@@ -42,6 +45,17 @@ export default function StatusBar({ location, user, role, offerTwoFactor, onTwoF
   return (
     <footer className="desk-statusbar">
       <span className="desk-status-cell flex-1 truncate">{location || 'Ready'}</span>
+      {updateVersion && (
+        <button
+          type="button"
+          onClick={onUpdate}
+          className="desk-status-cell desk-status-btn"
+          title="A newer version of TallyCheck is published"
+        >
+          <Download size={12} />
+          Update to {updateVersion}
+        </button>
+      )}
       {offerTwoFactor && (
         <button
           type="button"

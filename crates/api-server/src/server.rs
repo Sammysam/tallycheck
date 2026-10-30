@@ -105,6 +105,14 @@ impl ServerHandle {
 /// first admin from `ADMIN_USERNAME` / `ADMIN_PASSWORD` if set (reference `onModuleInit`),
 /// binds the configured address and serves until `shutdown`.
 pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
+    start_with_updater(config, None).await
+}
+
+/// [`start`], with the desktop shell's updater behind `/api/system/update` (D45).
+pub async fn start_with_updater(
+    config: &AppConfig,
+    updater: Option<std::sync::Arc<dyn crate::updates::Updater>>,
+) -> anyhow::Result<ServerHandle> {
     config.check_local_data_dir()?;
     std::fs::create_dir_all(&config.data_dir).context("creating the data folder")?;
     let lock = lock_data_dir(&config.data_dir)?;
@@ -135,7 +143,8 @@ pub async fn start(config: &AppConfig) -> anyhow::Result<ServerHandle> {
     let addr = listener.local_addr()?;
     let state = AppState::new(db.clone(), JwtKeys::new(&secret), files, config.lan_enabled, addr.port())
         .with_data_dir(config.data_dir.clone())
-        .with_lan_policy(config.lan_allowed.clone(), config.lan_host_names.clone());
+        .with_lan_policy(config.lan_allowed.clone(), config.lan_host_names.clone())
+        .with_updater(updater);
     let frontend = resolve_frontend_dir(config.frontend_dir.as_deref());
     match &frontend {
         Some(d) => tracing::info!("serving frontend from {}", d.display()),

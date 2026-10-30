@@ -12,10 +12,12 @@ pub mod middleware;
 pub mod routes;
 pub mod server;
 pub mod state;
+pub mod updates;
 pub mod upload;
 pub mod validate;
 
 pub use server::{
-    build_router, init_logging, open_file_store, seed_fresh_install, start, ServerHandle, STORAGE_KEY_FILE,
+    build_router, init_logging, open_file_store, seed_fresh_install, start, start_with_updater, ServerHandle,
+    STORAGE_KEY_FILE,
 };
 pub use state::AppState;
