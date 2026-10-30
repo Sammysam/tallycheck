@@ -23,8 +23,8 @@
     "publisher": "Cenango (Pvt) Ltd",
     "shortDescription": "TallyCheck",
     "longDescription": "Offline accounting, employees and payroll.",
-    "copyright": "Copyright (C) 2026 Cenango (Pvt) Ltd. Licensed under the GNU AGPL v3 or a commercial license.",
-    "licenseFile": "../LICENSE",
+    "copyright": "Copyright (C) 2026 Cenango (Pvt) Ltd. Licensed under the MIT or Apache-2.0 license.",
+    "licenseFile": "../NOTICE",
     "resources": {
       "../frontend/dist/": "frontend/"
     },

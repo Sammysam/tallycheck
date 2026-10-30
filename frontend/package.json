@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "MIT OR Apache-2.0",
   "version": "0.0.0",
   "type": "module",
   "scripts": {

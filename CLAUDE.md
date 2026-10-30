@@ -14,12 +14,13 @@ A fully offline Windows desktop port of the Cenango accounting web app.
 - **This repo:** `C:\dev\accounting-desktop` — deliberately outside OneDrive. OneDrive sync
   corrupts live SQLite WAL databases and thrashes `target/`.
 
-**License** (decided by the user 2026-10-28): dual — GNU AGPL v3 (`AGPL-3.0-only`, `LICENSE`) or a
-commercial license from Cenango (Pvt) Ltd (`COMMERCIAL-LICENSE.md`). Every new dependency must be
-AGPL-compatible (no GPL-2.0-only, SSPL, BUSL or other proprietary licenses);
+**License** (changed 2026-10-30 at the request of the user's senior; was AGPL v3 + commercial from
+2026-10-28): `MIT OR Apache-2.0` — `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE` (copyright, and the
+TallyCheck / Cenango names and logos are not licensed). New dependencies must allow use in a
+permissively licensed product: no GPL, AGPL, LGPL-only, SSPL, BUSL or proprietary licenses.
 `python tools/third_party_notices.py` rewrites `THIRD-PARTY-NOTICES.txt` and runs before every
-installer build. The installer shows `LICENSE` and installs all three files; Help → About states the
-license and the right to the source code (AGPL §13 covers LAN users).
+installer build. The installer shows `NOTICE` and installs the license files; Help → About states
+the license and the source link.
 
 If the reference and this file disagree about *behaviour*, the reference wins unless the
 deviation is listed in §9 (Approved deviations).
@@ -645,7 +646,7 @@ recommendations without answering each one individually; revisit any of them on 
   manager. Release: `python tools/release.py` (docs/installer-and-updates.md). The feed address
   (`UPDATE_FEED`) is the latest GitHub release's `latest.json` of the public repository
   https://github.com/Sammysam/tallycheck (pushed 2026-10-30, remote `github`; Bitbucket stays `origin`), which is also
-  the AGPL source link shown in Help → About; `ACCOUNTING_UPDATE_URL` overrides it.
+  the source link shown in Help → About; `ACCOUNTING_UPDATE_URL` overrides it.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

@@ -389,13 +389,12 @@ export default function Layout({ children }: { children: ReactNode }) {
           <div className="text-xs text-gray-600 mt-4 space-y-1.5">
             <p>Copyright © 2026 Cenango (Pvt) Ltd.</p>
             <p>
-              This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero
-              General Public License, version 3, as published by the Free Software Foundation. It comes with
-              ABSOLUTELY NO WARRANTY. A commercial license is also available from Cenango (Pvt) Ltd.
+              Licensed under the MIT License or the Apache License 2.0, at your option. It comes with no warranty.
+              The names TallyCheck and Cenango and their logos are not covered by these licenses.
             </p>
             <p>
-              The license (LICENSE.txt), the commercial license notice and the third-party notices are in the program
-              folder. You are entitled to the source code of this program, including when you use it over a network:
+              The licenses (LICENSE-MIT.txt, LICENSE-APACHE.txt), NOTICE.txt and the third-party notices are in the program
+              folder. Source code:
               <br />
               <span className="select-all">https://github.com/Sammysam/tallycheck</span>
             </p>

@@ -1,7 +1,7 @@
 {
   "name": "accounting-desktop-tooling",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "MIT OR Apache-2.0",
   "description": "Build tooling only (Tauri CLI for the Windows installer). The app's frontend lives in frontend/.",
   "scripts": {
     "installer": "python tools/third_party_notices.py && cargo build --release -p mcp && tauri build --config src-tauri/tauri.installer.json"
