@@ -1,7 +1,7 @@
 TallyCheck — third-party software notices
 
-TallyCheck is Copyright (C) 2026 Cenango (Pvt) Ltd and is licensed under the GNU Affero
-General Public License v3 (see LICENSE) or a commercial license (see COMMERCIAL-LICENSE.md).
+TallyCheck is Copyright (C) 2026 Cenango (Pvt) Ltd and is licensed under the MIT License
+(LICENSE-MIT) or the Apache License 2.0 (LICENSE-APACHE), at your option; see NOTICE.
 It is built with the libraries below, each under its own license, reproduced here as shipped.
 
 Rust crates: 432    npm packages: 58
