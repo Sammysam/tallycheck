@@ -630,6 +630,21 @@ recommendations without answering each one individually; revisit any of them on 
   the user chose to go ahead. The installer installs to `%LOCALAPPDATA%\TallyCheck`, so a PC with
   the old "Cenango Accounting" uninstalls that first (its data is kept).
 
+- **D45 In-app updates** (requested by the user 2026-10-30). Tauri's updater
+  (`tauri-plugin-updater`) runs in the desktop shell (`src-tauri/src/updates.rs`) and reaches the
+  page only through the server: `GET /api/system/update` → `{current, supported, available
+  {version, notes, date} | null, error}`, `POST /api/system/update/install` → 202 once the update is
+  downloaded and its signature verified; the shell then closes the server and database and hands
+  over to the installer (passive mode), which opens the new version. Both Administrator + loopback
+  only (403 "Updates are installed by an Administrator on the main PC"), like backup; a server
+  without the shell answers `supported: false` / 400. The page keeps no Tauri IPC. Screens: status
+  bar **Update to x.y.z** (checked once when an Administrator opens the app, silent when offline),
+  Help → Check for updates…, an update window with the notes. Updates are minisign-signed with
+  Cenango's update key; the public key is in `tauri.conf.json`, the private key and password live
+  outside the project (`%USERPROFILE%\.tallycheck-signing\`) and must go to the company password
+  manager. Release: `python tools/release.py` (docs/installer-and-updates.md). The feed address
+  (`UPDATE_FEED`) is not set until the release page exists; `ACCOUNTING_UPDATE_URL` overrides it.
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
@@ -682,6 +697,7 @@ cargo run -p api-server --bin accounting-server -- backup <folder> | verify-back
 cargo run -p api-server --bin accounting-server -- set-backup-password
 cargo run -p importer -- --source postgres://… --source-tz +05:30 --target <new folder> --files <folder>
 npm ci && npm run installer                       # Windows installer (frontend/dist must be built)
+python tools/release.py --notes "…" --download-base https://…/v{version}  # signed update + latest.json (D45)
 ```
 Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
 UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh, empty database

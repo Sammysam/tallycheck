@@ -18,6 +18,7 @@ pub mod roles;
 pub mod settings;
 pub mod system;
 pub mod taxes;
+pub mod updates;
 pub mod us_payroll;
 pub mod users;
 
@@ -183,6 +184,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/bank-lines/{id}/ignore", post(imports::bank_ignore))
         .route("/bank-lines/{id}/restore", post(imports::bank_restore))
         .route("/bank-lines/{id}/unmatch", post(imports::bank_unmatch))
+        .route("/system/update", get(updates::check))
+        .route("/system/update/install", post(updates::install))
         .route("/system/backup", get(system::status))
         .route("/system/backup/password", post(system::set_password))
         .route("/system/backup/settings", axum::routing::put(system::update_settings))

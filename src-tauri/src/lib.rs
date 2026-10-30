@@ -1,6 +1,9 @@
 //! Desktop shell: starts the embedded API server (which also serves the React app) and opens
 //! a window on it. The page is a normal http://127.0.0.1 origin with no Tauri IPC access —
 //! no capabilities are granted to remote URLs — so the frontend runs exactly as in a browser.
+//! Updates (D45) run here too and reach the page only through the server's own API.
+
+mod updates;
 
 use api_server::ServerHandle;
 use app_core::config::AppConfig;
@@ -25,7 +28,11 @@ fn start_server(app: &tauri::App) -> anyhow::Result<String> {
         }
     }
 
-    let handle = tauri::async_runtime::block_on(api_server::start(&config))?;
+    let updater = updates::feed_url().map(|feed| {
+        std::sync::Arc::new(updates::TauriUpdater { app: app.handle().clone(), feed })
+            as std::sync::Arc<dyn api_server::updates::Updater>
+    });
+    let handle = tauri::async_runtime::block_on(api_server::start_with_updater(&config, updater))?;
     // Always open the loopback address, even when LAN access binds 0.0.0.0.
     let url = format!("http://127.0.0.1:{}/", handle.addr.port());
     app.manage(Server(Mutex::new(Some(handle))));
@@ -51,8 +58,18 @@ fn startup_error_box(message: &str) {
     let _ = message;
 }
 
+/// Closes the server and the database (on exit, and before an update installer takes over).
+pub(crate) fn stop_server(handle: &tauri::AppHandle) {
+    let server = handle.state::<Server>().0.lock().ok().and_then(|mut s| s.take());
+    if let Some(server) = server {
+        tauri::async_runtime::block_on(server.shutdown());
+        tracing::info!("server stopped, database closed");
+    }
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let url = start_server(app).map_err(|e| {
                 tracing::error!("startup failed: {e:#}");
@@ -82,11 +99,7 @@ pub fn run() {
 
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
-            let server = handle.state::<Server>().0.lock().ok().and_then(|mut s| s.take());
-            if let Some(server) = server {
-                tauri::async_runtime::block_on(server.shutdown());
-                tracing::info!("server stopped, database closed");
-            }
+            stop_server(handle);
         }
     });
 }

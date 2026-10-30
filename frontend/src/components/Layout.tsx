@@ -24,6 +24,8 @@ import MenuBar, { type Menu, type MenuEntry } from './desktop/MenuBar';
 import Toolbar, { type ToolbarButton } from './desktop/Toolbar';
 import StatusBar from './desktop/StatusBar';
 import Dialog from './desktop/Dialog';
+import UpdateDialog from './desktop/UpdateDialog';
+import { useAvailableUpdate } from '../lib/updates';
 import { hasCommand, isUnsaved, runCommand, setUnsaved, subscribeCommands } from '../lib/commands';
 import { exportScreen } from '../lib/exportCsv';
 import { companyIsSetUp, region, SETUP_LATER, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
@@ -69,13 +71,15 @@ export default function Layout({ children }: { children: ReactNode }) {
     }
   });
   const [refreshKey, setRefreshKey] = useState(0);
-  const [dialog, setDialog] = useState<'shortcuts' | 'about' | 'discard' | 'nothing-to-export' | null>(null);
+  const [dialog, setDialog] = useState<'shortcuts' | 'about' | 'discard' | 'nothing-to-export' | 'update' | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   // Menu items grey out when the screen has no "New" / "Close".
   const canNew = useSyncExternalStore(subscribeCommands, () => hasCommand('new'));
   const canClose = useSyncExternalStore(subscribeCommands, () => hasCommand('close'));
 
   const isAdmin = user?.role === 'Admin';
+  // D45: an Administrator is told when a newer TallyCheck is published.
+  const [update] = useAvailableUpdate(isAdmin);
 
   // D25: the company's details and currency, loaded once; every screen formats with them.
   const [regionReady, setRegionReady] = useState(false);
@@ -288,6 +292,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       items: [
         { label: 'Keyboard shortcuts', shortcut: 'F1', onSelect: () => setDialog('shortcuts') },
         'separator',
+        ...(isAdmin ? [{ label: 'Check for updates…', onSelect: () => setDialog('update') }] : []),
         { label: 'About TallyCheck', onSelect: () => setDialog('about') },
       ],
     },
@@ -341,7 +346,11 @@ export default function Layout({ children }: { children: ReactNode }) {
         role={user?.role ?? ''}
         offerTwoFactor={user?.twoFactorEnabled === false}
         onTwoFactor={go('/2fa/setup')}
+        updateVersion={update?.available?.version ?? null}
+        onUpdate={() => setDialog('update')}
       />
+
+      {dialog === 'update' && <UpdateDialog initial={update} onClose={closeDialog} />}
 
       {dialog === 'shortcuts' && (
         <Dialog
