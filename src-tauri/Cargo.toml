@@ -11,6 +11,10 @@ publish.workspace = true
 name = "accounting_desktop_lib"
 crate-type = ["rlib"]
 
+[features]
+# D47: the Microsoft Store build (MSIX). No in-app updater: the Store updates the app.
+store = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

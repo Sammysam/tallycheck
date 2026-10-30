@@ -1,0 +1,114 @@
+# D48: builds the TallyCheck installer from this public repository, has it code-signed by
+# SignPath Foundation (free for open source projects), then makes the update signature and
+# latest.json for the in-app updater (D45) and puts everything in a DRAFT GitHub release.
+# A person checks the draft and publishes it; only a published release reaches the app.
+#
+# Needs (Settings → Secrets and variables → Actions):
+#   secrets.SIGNPATH_API_TOKEN               SignPath CI user's API token
+#   vars.SIGNPATH_ORGANIZATION_ID            SignPath organization id
+#   secrets.TAURI_SIGNING_PRIVATE_KEY        contents of updater.key (the update key)
+#   secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+# Every signing request also needs a manual approval in SignPath (their rule).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What's new (shown in the app's update window)"
+        required: true
+
+permissions:
+  contents: write # create the draft release
+  actions: read # SignPath reads the uploaded artifact
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version and tag agree
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          "version=$v" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$v") {
+            throw "Tag ${{ github.ref_name }} does not match the app version $v"
+          }
+
+      - name: Frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Installer (unsigned)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm ci
+          npm run installer
+
+      - name: Upload the installer for signing
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: target/release/bundle/nsis/TallyCheck_${{ steps.version.outputs.version }}_x64-setup.exe
+          if-no-files-found: error
+
+      - name: Code-sign with SignPath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: tallycheck
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 86400
+          output-artifact-directory: signed
+
+      # Code signing changed the file, so the update signature is made now, from the signed file.
+      - name: Update signature and latest.json
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NOTES: ${{ github.event.inputs.notes || 'See the release notes on GitHub.' }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $exe = "TallyCheck_${v}_x64-setup.exe"
+          $bundle = "target/release/bundle/nsis"
+          Copy-Item "signed/$exe" "$bundle/$exe" -Force
+          Remove-Item "$bundle/$exe.sig" -ErrorAction SilentlyContinue
+          npx tauri signer sign "$bundle/$exe"
+          if (-not (Test-Path "$bundle/$exe.sig")) { throw "no update signature" }
+          python tools/release.py --skip-build --notes "$env:NOTES" `
+            --download-base "https://github.com/${{ github.repository }}/releases/download/v{version}"
+
+      - name: Draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $bundle = "target/release/bundle/nsis"
+          gh release create "v$v" --draft --title "TallyCheck $v" --notes "Draft: check, then publish." `
+            "$bundle/TallyCheck_${v}_x64-setup.exe" "$bundle/latest.json"

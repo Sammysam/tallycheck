@@ -14,7 +14,7 @@ The result is `target\release\bundle\nsis\TallyCheck_<version>_x64-setup.exe`:
 * D41: `cenango-mcp.exe` (the Claude connector) is installed next to the app, as a resource added by `src-tauri/tauri.installer.json`; development builds do not need it.
 * First start on a new PC: the app has no users, so it shows **Create administrator**. That screen works only on the PC itself and disappears once the first account exists (D17).
 * The WebView2 bootstrapper is embedded. On Windows 10/11, WebView2 is normally present already. On a PC without it and without internet, use Microsoft's offline WebView2 installer once.
-* The data folder `%LOCALAPPDATA%\CenangoAccounting` is **not** touched by install, upgrade or uninstall.
+* The data folder `%LOCALAPPDATA%\TallyCheckData` (separate from the program folder `%LOCALAPPDATA%\TallyCheck`) is **not** touched by install, upgrade or uninstall. A PC set up before the rename keeps its `%LOCALAPPDATA%\CenangoAccounting` folder, which TallyCheck goes on using where it is (D46).
 
 ## Code signing
 

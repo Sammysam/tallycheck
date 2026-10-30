@@ -36,22 +36,31 @@ fn info_json(u: &crate::updates::UpdateInfo) -> Value {
     json!({ "version": u.version, "notes": u.notes, "date": u.date })
 }
 
-/// `{current, supported, available, error}`: `available` is the newer version or null; `error`
-/// is why the feed couldn't be checked (usually no internet), which the screen may ignore.
+/// `{current, channel, supported, available, error}`: `channel` is "direct" or "store" (D47);
+/// `available` is the newer version or null; `error` is why the feed couldn't be checked
+/// (usually no internet), which the screen may ignore.
 pub async fn check(State(s): State<AppState>, _a: UpdateAdmin) -> AppResult<Json<Value>> {
+    let channel = s.update_channel.as_str();
     let Some(updater) = s.updater.clone() else {
-        return Ok(Json(json!({ "current": CURRENT_VERSION, "supported": false, "available": null, "error": null })));
+        return Ok(Json(json!({
+            "current": CURRENT_VERSION, "channel": channel, "supported": false, "available": null, "error": null
+        })));
     };
     let (available, error) = match updater.check().await {
         Ok(found) => (found.as_ref().map(info_json).unwrap_or(Value::Null), Value::Null),
         Err(e) => (Value::Null, Value::String(e)),
     };
-    Ok(Json(json!({ "current": CURRENT_VERSION, "supported": true, "available": available, "error": error })))
+    Ok(Json(json!({
+        "current": CURRENT_VERSION, "channel": channel, "supported": true, "available": available, "error": error
+    })))
 }
 
 /// 202 once the update is downloaded and its signature checked; the app then closes, updates
 /// itself and opens again.
 pub async fn install(State(s): State<AppState>, _a: UpdateAdmin) -> AppResult<(StatusCode, Json<Value>)> {
+    if s.update_channel == crate::updates::UpdateChannel::Store {
+        return Err(AppError::bad_request("This copy of TallyCheck is updated by the Microsoft Store"));
+    }
     let updater = s
         .updater
         .clone()

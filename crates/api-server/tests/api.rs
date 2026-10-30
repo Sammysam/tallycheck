@@ -4411,7 +4411,7 @@ async fn updates_are_for_a_local_administrator_and_need_the_desktop_app() -> Tes
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     assert_eq!(
         r.body,
-        json!({"current": env!("CARGO_PKG_VERSION"), "supported": false, "available": null, "error": null})
+        json!({"current": env!("CARGO_PKG_VERSION"), "channel": "direct", "supported": false, "available": null, "error": null})
     );
     let r = app.local(Method::POST, "/api/system/update/install", &admin, None).await?;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);

@@ -11,6 +11,8 @@ export interface UpdateInfo {
 
 export interface UpdateStatus {
   current: string;
+  /** D47: "store" when the Microsoft Store updates this copy. */
+  channel: 'direct' | 'store';
   /** False when this build has no update feed (or the server runs without the desktop app). */
   supported: boolean;
   available: UpdateInfo | null;

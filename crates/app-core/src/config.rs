@@ -4,7 +4,7 @@
 //!
 //! | Setting | config.toml | Environment | Default |
 //! |---|---|---|---|
-//! | data directory | — | `ACCOUNTING_DATA_DIR` | `%LOCALAPPDATA%\CenangoAccounting` |
+//! | data directory | — | `ACCOUNTING_DATA_DIR` | `%LOCALAPPDATA%\TallyCheckData` (or the older `CenangoAccounting`, D46) |
 //! | bind address | `bind_address` | `ACCOUNTING_BIND` | `127.0.0.1` |
 //! | port | `port` | `ACCOUNTING_PORT` | `47800` |
 //! | LAN access | `lan_enabled` | `ACCOUNTING_LAN` | `false` |
@@ -17,7 +17,15 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_PORT: u16 = 47800;
-const APP_DIR_NAME: &str = "CenangoAccounting";
+/// The data folder under `%LOCALAPPDATA%` (D46). Not `TallyCheck`: that is where the installer
+/// puts the program, and an uninstall or update would take the books with it. Installations from
+/// before the rename keep their `CenangoAccounting` folder: it is used as it is, never moved or
+/// copied.
+pub const APP_DIR_NAME: &str = "TallyCheckData";
+pub const LEGACY_APP_DIR_NAME: &str = "CenangoAccounting";
+/// Set at *build* time only, for package tests: the test build uses this folder alone, so a test
+/// install never opens a real company's books.
+const TEST_APP_DIR_NAME: Option<&str> = option_env!("ACCOUNTING_APP_DIR_NAME");
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -204,7 +212,22 @@ fn read_file_config(path: &Path) -> Result<FileConfig, ConfigError> {
 }
 
 fn default_data_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()).map(|base| PathBuf::from(base).join(APP_DIR_NAME))
+    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?);
+    Some(choose_data_dir(&base, TEST_APP_DIR_NAME))
+}
+
+/// `TallyCheckData`, unless only the older `CenangoAccounting` exists there (D46); a test build's
+/// own folder name always wins.
+fn choose_data_dir(base: &Path, test_name: Option<&str>) -> PathBuf {
+    if let Some(name) = test_name {
+        return base.join(name);
+    }
+    let (current, legacy) = (base.join(APP_DIR_NAME), base.join(LEGACY_APP_DIR_NAME));
+    if !current.exists() && legacy.is_dir() {
+        legacy
+    } else {
+        current
+    }
 }
 
 /// UNC shares (`\\server\share`) and mapped network drives.
@@ -250,6 +273,24 @@ mod drive {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D46: a new PC gets `TallyCheckData`; a PC from before the rename keeps using its
+    /// `CenangoAccounting` folder in place, even next to the installer's own `TallyCheck` program
+    /// folder; once `TallyCheckData` exists it wins; a test build's folder is used alone.
+    #[test]
+    fn data_folder_keeps_older_installations_in_place() -> Result<(), Box<dyn std::error::Error>> {
+        let base = tempfile::tempdir()?;
+        let b = base.path();
+        assert_eq!(choose_data_dir(b, None), b.join("TallyCheckData"));
+        std::fs::create_dir(b.join("TallyCheck"))?; // the installed program, never the data
+        assert_eq!(choose_data_dir(b, None), b.join("TallyCheckData"));
+        std::fs::create_dir(b.join("CenangoAccounting"))?;
+        assert_eq!(choose_data_dir(b, None), b.join("CenangoAccounting"));
+        assert_eq!(choose_data_dir(b, Some("TallyCheckStoreTest")), b.join("TallyCheckStoreTest"));
+        std::fs::create_dir(b.join("TallyCheckData"))?;
+        assert_eq!(choose_data_dir(b, None), b.join("TallyCheckData"));
+        Ok(())
+    }
 
     #[test]
     fn lan_networks_parse_and_match() -> Result<(), ConfigError> {

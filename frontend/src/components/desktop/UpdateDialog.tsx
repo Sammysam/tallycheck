@@ -64,7 +64,10 @@ export default function UpdateDialog({ initial, onClose }: { initial: UpdateStat
       <div className="text-sm text-gray-700 space-y-2">
         {checking && <p>Checking for a newer version…</p>}
         {status && <p>You have TallyCheck <b>{status.current}</b>.</p>}
-        {status && !status.supported && (
+        {status?.channel === 'store' && (
+          <p>This copy of TallyCheck is updated by the Microsoft Store. Open the Store's Library to get the newest version.</p>
+        )}
+        {status && status.channel !== 'store' && !status.supported && (
           <p>This copy of TallyCheck is not set up to update itself. Install a newer version from its installer.</p>
         )}
         {status?.supported && status.error && <p className="text-amber-700">{status.error}</p>}

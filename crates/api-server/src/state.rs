@@ -23,6 +23,8 @@ pub struct AppState {
     pub data_dir: Option<PathBuf>,
     /// D45: the desktop shell's updater; `None` when the server runs on its own.
     pub updater: Option<Arc<dyn crate::updates::Updater>>,
+    /// D47: a Microsoft Store copy is updated by the Store, never by our updater.
+    pub update_channel: crate::updates::UpdateChannel,
 }
 
 impl AppState {
@@ -38,6 +40,7 @@ impl AppState {
             lan_host_names: Arc::new(Vec::new()),
             data_dir: None,
             updater: None,
+            update_channel: crate::updates::UpdateChannel::Direct,
         }
     }
 
@@ -46,8 +49,13 @@ impl AppState {
         self
     }
 
-    pub fn with_updater(mut self, updater: Option<Arc<dyn crate::updates::Updater>>) -> Self {
+    pub fn with_updater(
+        mut self,
+        updater: Option<Arc<dyn crate::updates::Updater>>,
+        channel: crate::updates::UpdateChannel,
+    ) -> Self {
         self.updater = updater;
+        self.update_channel = channel;
         self
     }
 

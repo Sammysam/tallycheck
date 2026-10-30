@@ -7,6 +7,23 @@
 use std::future::Future;
 use std::pin::Pin;
 
+/// How this copy is updated (D47): by our own updater, or by the Microsoft Store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UpdateChannel {
+    #[default]
+    Direct,
+    Store,
+}
+
+impl UpdateChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UpdateChannel::Direct => "direct",
+            UpdateChannel::Store => "store",
+        }
+    }
+}
+
 /// A newer version offered by the update feed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateInfo {

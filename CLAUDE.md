@@ -625,7 +625,7 @@ recommendations without answering each one individually; revisit any of them on 
   Windows app name (`productName`), About, sign-in, messages, MCP texts, plugin descriptions, docs
   and the logo (`frontend/public` icons, `Logo_tallycheck.png` wordmark, `src-tauri/icons/icon.ico`
   from the user's design). Kept on purpose so existing installations keep working: the data folder
-  `%LOCALAPPDATA%\CenangoAccounting`, the identifier `lk.cenango.accounting`, `cenango-mcp.exe`,
+  the data folder (see D46), the identifier `lk.cenango.accounting`, `cenango-mcp.exe`,
   `CENANGO_API_KEY` and the plugin id `cenango-accounting`. The publisher and copyright holder stay
   Cenango (Pvt) Ltd. Risk raised with the user: "Tally" is Tally Solutions' trademark (TallyPrime);
   the user chose to go ahead. The installer installs to `%LOCALAPPDATA%\TallyCheck`, so a PC with
@@ -647,6 +647,36 @@ recommendations without answering each one individually; revisit any of them on 
   (`UPDATE_FEED`) is the latest GitHub release's `latest.json` of the public repository
   https://github.com/Sammysam/tallycheck (pushed 2026-10-30, remote `github`; Bitbucket stays `origin`), which is also
   the source link shown in Help → About; `ACCOUNTING_UPDATE_URL` overrides it.
+
+- **D46 Data folder `TallyCheckData`** (requested by the user 2026-10-30). The default data folder is
+  `%LOCALAPPDATA%\TallyCheckData` — not `TallyCheck`, which is the installer's program folder (an
+  uninstall or update would take the books with it). When only the older `%LOCALAPPDATA%\CenangoAccounting` exists, it is
+  used where it is — never moved, copied or migrated (`app_core::config::choose_data_dir`).
+  `ACCOUNTING_APP_DIR_NAME` set at *build* time replaces both names, for package tests only, so a
+  test install can never open real books. The identifier `lk.cenango.accounting`,
+  `cenango-mcp.exe`, `CENANGO_API_KEY` and the plugin id stay (they are not shown to users;
+  changing them would break updates and Claude connections of existing installations).
+
+- **D47 Microsoft Store (MSIX) build** (requested by the user 2026-10-30; company account, first
+  Store version 1.0.0). `python tools/build_msix.py` builds `accounting-desktop --features store`
+  (no in-app updater; `/api/system/update` answers `channel: "store"` and install is refused with
+  "This copy of TallyCheck is updated by the Microsoft Store") and cenango-mcp in
+  `target/msix-build`, lays out `TallyCheck.exe`, `frontend/`, license files and tiles, fills
+  `src-tauri/msix/AppxManifest.xml` with the Partner Center identity and packs it with the Windows
+  SDK's makeappx. The Store signs MSIX packages itself, so no certificate is bought. The data
+  folders (D46) are excluded from MSIX file-system virtualization (restricted capability
+  `unvirtualizedResources`) so the books survive updates and uninstalling. `--test` builds a
+  package with a made-up identity and its own data folder `TallyCheckStoreTest` (compiled in via
+  `ACCOUNTING_APP_DIR_NAME`). The normal installer is unchanged. Submission: `docs/microsoft-store.md`.
+
+- **D48 Free code signing via SignPath Foundation** (requested by the user 2026-10-30).
+  `.github/workflows/release.yml` (tag `v<version>` or run by hand): builds the NSIS installer on
+  GitHub, sends it to SignPath (project `tallycheck`, artifact configuration `installer` =
+  `.signpath/artifact-configuration.xml`, policy `release-signing`, manual approval), then makes the
+  update signature from the *signed* file, writes `latest.json` (`tools/release.py --skip-build`)
+  and creates a draft GitHub release for a person to publish. `CODE_SIGNING_POLICY.md` is the
+  policy page SignPath requires. Possible only because the license is MIT OR Apache-2.0 without
+  commercial dual licensing. Manual steps and conditions: `docs/signpath.md`.
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
@@ -701,6 +731,7 @@ cargo run -p api-server --bin accounting-server -- set-backup-password
 cargo run -p importer -- --source postgres://… --source-tz +05:30 --target <new folder> --files <folder>
 npm ci && npm run installer                       # Windows installer (frontend/dist must be built)
 python tools/release.py --notes "…" --download-base https://…/v{version}  # signed update + latest.json (D45)
+python tools/build_msix.py --identity-name … --publisher "CN=…" --publisher-display-name …  # Store MSIX (D47; --test for a test package)
 ```
 Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
 UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh, empty database

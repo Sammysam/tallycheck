@@ -3,6 +3,7 @@
 //! no capabilities are granted to remote URLs — so the frontend runs exactly as in a browser.
 //! Updates (D45) run here too and reach the page only through the server's own API.
 
+#[cfg(not(feature = "store"))]
 mod updates;
 
 use api_server::ServerHandle;
@@ -28,11 +29,18 @@ fn start_server(app: &tauri::App) -> anyhow::Result<String> {
         }
     }
 
-    let updater = updates::feed_url().map(|feed| {
-        std::sync::Arc::new(updates::TauriUpdater { app: app.handle().clone(), feed })
-            as std::sync::Arc<dyn api_server::updates::Updater>
-    });
-    let handle = tauri::async_runtime::block_on(api_server::start_with_updater(&config, updater))?;
+    // D47: a Microsoft Store build has no updater of its own; the Store updates it.
+    #[cfg(feature = "store")]
+    let (updater, channel) = (None, api_server::updates::UpdateChannel::Store);
+    #[cfg(not(feature = "store"))]
+    let (updater, channel) = (
+        updates::feed_url().map(|feed| {
+            std::sync::Arc::new(updates::TauriUpdater { app: app.handle().clone(), feed })
+                as std::sync::Arc<dyn api_server::updates::Updater>
+        }),
+        api_server::updates::UpdateChannel::Direct,
+    );
+    let handle = tauri::async_runtime::block_on(api_server::start_with_updater(&config, updater, channel))?;
     // Always open the loopback address, even when LAN access binds 0.0.0.0.
     let url = format!("http://127.0.0.1:{}/", handle.addr.port());
     app.manage(Server(Mutex::new(Some(handle))));
@@ -68,8 +76,10 @@ pub(crate) fn stop_server(handle: &tauri::AppHandle) {
 }
 
 pub fn run() {
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    let builder = tauri::Builder::default();
+    #[cfg(not(feature = "store"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let app = builder
         .setup(|app| {
             let url = start_server(app).map_err(|e| {
                 tracing::error!("startup failed: {e:#}");
