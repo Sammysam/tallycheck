@@ -63,9 +63,12 @@ so it was not installed." This is separate from Windows code signing (see above)
 3. Upload `TallyCheck_<version>_x64-setup.exe` to the download address and replace the
    `latest.json` that the app's feed points at.
 
-The feed address is `UPDATE_FEED` in `src-tauri/src/updates.rs` (HTTPS only).
-**It is not set yet**: until the release page exists, the app reports that it is not set up to
-update itself. `ACCOUNTING_UPDATE_URL` overrides it for testing (a debug build also accepts http).
+The feed address is `UPDATE_FEED` in `src-tauri/src/updates.rs`:
+`https://github.com/Sammysam/tallycheck/releases/latest/download/latest.json` — the `latest.json` attached to the newest
+GitHub release of <https://github.com/Sammysam/tallycheck>. So a release is: create a GitHub release (tag `v<version>`),
+attach `TallyCheck_<version>_x64-setup.exe` and `latest.json` (step 2 with
+`--download-base https://github.com/Sammysam/tallycheck/releases/download/v{version}`), and publish it as the latest
+release. `ACCOUNTING_UPDATE_URL` overrides the feed for testing (a debug build also accepts http).
 
 Before any update: make a backup (*File → Backup and restore…*) and keep it off the PC.
 

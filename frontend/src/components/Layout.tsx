@@ -395,7 +395,9 @@ export default function Layout({ children }: { children: ReactNode }) {
             </p>
             <p>
               The license (LICENSE.txt), the commercial license notice and the third-party notices are in the program
-              folder. You are entitled to the source code of this program, including when you use it over a network.
+              folder. You are entitled to the source code of this program, including when you use it over a network:
+              <br />
+              <span className="select-all">https://github.com/Sammysam/tallycheck</span>
             </p>
           </div>
         </Dialog>

@@ -7,10 +7,10 @@ use api_server::updates::{UpdateFuture, UpdateInfo, Updater};
 use tauri::{AppHandle, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-/// Where released versions are announced (`latest.json`). `None` until the company's release
-/// page exists: the app then says updates are not set up. `ACCOUNTING_UPDATE_URL` overrides it
-/// (tests and staging); an update must still carry a valid signature either way.
-const UPDATE_FEED: Option<&str> = None;
+/// Where released versions are announced: the `latest.json` of the newest GitHub release.
+/// `ACCOUNTING_UPDATE_URL` overrides it (tests and staging); an update must still carry a valid
+/// signature either way.
+const UPDATE_FEED: Option<&str> = Some("https://github.com/Sammysam/tallycheck/releases/latest/download/latest.json");
 
 pub fn feed_url() -> Option<Url> {
     let raw = std::env::var("ACCOUNTING_UPDATE_URL").ok().filter(|v| !v.trim().is_empty());
