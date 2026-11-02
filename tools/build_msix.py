@@ -88,6 +88,8 @@ def main() -> int:
     ap.add_argument("--identity-name")
     ap.add_argument("--publisher", help='e.g. "CN=12345678-ABCD-…" from Partner Center')
     ap.add_argument("--publisher-display-name")
+    ap.add_argument("--display-name", default="TallyCheck",
+                    help="must match a product name reserved in Partner Center exactly (case counts)")
     ap.add_argument("--test", action="store_true", help="test identity and test data folder")
     ap.add_argument("--version", help="defaults to tauri.conf.json's version, as x.y.z.0")
     ap.add_argument("--out", default=str(ROOT / "target" / "msix"))
@@ -100,7 +102,7 @@ def main() -> int:
     else:
         if not (a.identity_name and a.publisher and a.publisher_display_name):
             sys.exit("Give --identity-name, --publisher and --publisher-display-name from Partner Center (or --test)")
-        ident, publisher, publisher_display, display = a.identity_name, a.publisher, a.publisher_display_name, "TallyCheck"
+        ident, publisher, publisher_display, display = a.identity_name, a.publisher, a.publisher_display_name, a.display_name
         data_dirs = DATA_DIRS
     conf = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
     version = store_version(a.version or conf["version"])

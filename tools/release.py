@@ -15,9 +15,11 @@ Upload the installer and latest.json to the release page; the app's update feed 
 src-tauri/src/updates.rs) must point at that latest.json. Bump the version first (Cargo.toml
 [workspace.package] and src-tauri/tauri.conf.json), or installed copies see nothing new."""
 import argparse
+import hashlib
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -72,7 +74,13 @@ def main() -> int:
     }
     out = BUNDLE / "latest.json"
     out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(f"Upload to the release page:\n  {setup}\n  {out}")
+    # The website's download button links to .../releases/latest/download/TallyCheck-setup.exe, which
+    # always gives the newest release. Same bytes as the versioned file, so the same SmartScreen
+    # reputation and the same SHA-256.
+    stable = BUNDLE / "TallyCheck-setup.exe"
+    shutil.copy2(setup, stable)
+    digest = hashlib.sha256(setup.read_bytes()).hexdigest()
+    print(f"Upload to the release page:\n  {setup}\n  {stable}\n  {out}\nSHA-256: {digest}")
     return 0
 
 

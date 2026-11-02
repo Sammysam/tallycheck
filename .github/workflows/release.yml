@@ -111,4 +111,4 @@ jobs:
           $v = "${{ steps.version.outputs.version }}"
           $bundle = "target/release/bundle/nsis"
           gh release create "v$v" --draft --title "TallyCheck $v" --notes "Draft: check, then publish." `
-            "$bundle/TallyCheck_${v}_x64-setup.exe" "$bundle/latest.json"
+            "$bundle/TallyCheck_${v}_x64-setup.exe" "$bundle/TallyCheck-setup.exe" "$bundle/latest.json"
