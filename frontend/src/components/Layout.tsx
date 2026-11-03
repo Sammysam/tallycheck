@@ -260,6 +260,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       ? [{ label: 'Backup and restore…', onSelect: go('/settings?tab=backup') }, 'separator' as const]
       : []),
     ...(user?.twoFactorEnabled === false ? [{ label: 'Turn on two-factor sign-in…', onSelect: go('/2fa/setup') }] : []),
+    { label: 'Password recovery key…', onSelect: go('/recovery-key') },
     { label: 'Sign out', onSelect: signOut },
   ];
 

@@ -88,7 +88,15 @@ impl Kek {
     }
 
     /// Re-derives the key a backup was made with.
+    /// The header is read before anything is authenticated, so its cost parameters are capped
+    /// (four times what this app writes) instead of letting a crafted file demand gigabytes.
     pub fn from_password_for(password: &str, slot: &KeySlot) -> Result<Kek, KeyError> {
+        if !(1..=MEMORY_KIB * 4).contains(&slot.memory_kib)
+            || !(1..=ITERATIONS * 4).contains(&slot.iterations)
+            || !(1..=PARALLELISM * 4).contains(&slot.parallelism)
+        {
+            return Err(KeyError::Kdf("the backup's key settings are outside what this app makes".into()));
+        }
         let params = KdfParams {
             memory_kib: slot.memory_kib,
             iterations: slot.iterations,
@@ -188,5 +196,31 @@ mod tests {
         assert!(matches!(wrong.unwrap(&slot), Err(KeyError::WrongPassword)));
         assert!(!format!("{saved:?}").contains("42"));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod kdf_limits {
+    use super::*;
+
+    fn slot(memory_kib: u32, iterations: u32, parallelism: u32) -> KeySlot {
+        KeySlot {
+            kdf: "argon2id".into(),
+            memory_kib,
+            iterations,
+            parallelism,
+            salt: "00".repeat(16),
+            nonce: "00".repeat(12),
+            wrapped_key: "00".repeat(48),
+        }
+    }
+
+    #[test]
+    fn crafted_key_settings_are_refused_before_deriving() {
+        for s in [slot(4 * 1024 * 1024, 3, 1), slot(MEMORY_KIB, 1000, 1), slot(MEMORY_KIB, 3, 64), slot(0, 3, 1)] {
+            assert!(matches!(Kek::from_password_for("office backup 2026", &s), Err(KeyError::Kdf(_))));
+        }
+        // What this app writes still derives (a wrong key here is fine: only the cap is tested).
+        assert!(Kek::from_password_for("office backup 2026", &slot(MEMORY_KIB, ITERATIONS, PARALLELISM)).is_ok());
     }
 }

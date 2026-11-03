@@ -678,6 +678,68 @@ recommendations without answering each one individually; revisit any of them on 
   policy page SignPath requires. Possible only because the license is MIT OR Apache-2.0 without
   commercial dual licensing. Manual steps and conditions: `docs/signpath.md`.
 
+- **D49 Forgotten passwords** (requested by the user 2026-11-03; the app is offline, so there is
+  no e-mail reset). Layer 1, **recovery key**: `recovery_keys` (one per user, SHA-256 of the
+  normalised key). A key is `TCRK-` + 20 Crockford base32 characters (100 random bits); case,
+  spaces, dashes and O/I/L typed for 0/1 don't matter. The first administrator gets one from
+  `POST /api/auth/first-run` (`recoveryKey` in the answer), shown on a "Save your recovery key"
+  screen (copy / save as file / print, tick box before Continue). `POST /api/auth/recovery/key`
+  (public, 200) `{username, recoveryKey, password}` sets the password, uses the key up and answers
+  the new one; wrong username and wrong key get one message ("That username and recovery key don't
+  match…"); failures are throttled per username in their own `recovery_throttle` (5 / 15 min, 429)
+  and audited ("Failed password recovery" / "Reset the password with the recovery key"). Signed-in
+  users: `GET /api/auth/recovery-key` → `{hasKey, createdAt}`, `POST` `{password}` (their current
+  password; never through a Claude key) → 201 a new key replacing the old (File → Password
+  recovery key…, `/recovery-key`). Layer 3, **Windows sign-in**: `POST /api/auth/recovery/windows`
+  `{username, password}` only from loopback and only with the desktop shell's
+  `local_verify::WindowsVerifier` (`src-tauri/src/windows_verify.rs`): Windows Hello
+  (`UserConsentVerifier`, over the TallyCheck window) or, without Hello, Windows' own password
+  window checked with `LogonUserW` and accepted only for the SID that runs TallyCheck (that Windows
+  account can already open the data folder). Then the password is set and a new key issued;
+  audited "Reset the password with Windows sign-in". `GET /api/auth/recovery/options` →
+  `{recoveryKey: true, windows}`. Sign-in screen: "Forgot password?" → `/forgot-password`.
+  Existing installations make their key under File → Password recovery key…. Sessions already
+  signed in are not ended by a reset (JWTs can't be revoked yet).
+
+- **D50 Security review fixes** (full review requested by the user 2026-11-03; all findings fixed
+  with the user's approval). Sign-in: the throttle counts an attempt *before* the password check
+  (`LoginThrottle::begin`, so parallel guesses stop at 5), keys are per username **and** per side
+  (this PC / other PCs: a LAN client cannot lock the owner out), at most 10,000 keys (fewest
+  attempts forgotten first), usernames over 255 characters refused unlogged. An administrator's
+  password reset and switching a user off cancel the user's recovery key. Windows recovery: one
+  prompt at a time; whether the username exists is said only after Windows confirms. "This PC"
+  (first run, Windows recovery, backup / restore, updates, Claude keys) = loopback peer **and** a
+  loopback address-bar host (`extract::from_this_pc`); a key without a recorded peer is refused.
+  LAN host names: exactly `PC`, `PC.local`, `PC.<USERDNSDOMAIN>` or configured names (was any
+  `PC.*`). Every response has a Content-Security-Policy (`middleware::CONTENT_SECURITY_POLICY`: no
+  inline or eval scripts; inline styles, data:/blob: images and blob: PDFs allowed); the printed
+  documents attach their buttons with addEventListener and escape every value, the logo included;
+  the server accepts only a plain base64 PNG/JPEG/WebP data URL as logo. The window navigates only
+  within the server origin. CSV export prefixes `= + - @` tab CR LF unless the value is a number.
+  Data: calamine 0.38 (RUSTSEC-2026-0436), zip files over 100 MB unpacked refused, XLSX/XLSB read
+  cell by cell (≤ 200 columns, more refuses the file); every money / quantity field ≤ numeric(15,2)
+  ("Amount is too large"); manual journal entries cannot use a source type the app writes itself.
+  Permissions: `GET /settings` hides `payroll.*` without `payroll` and `integration.*` without
+  `settings` (keys see neither); PAYSLIP documents need `payroll` as well as `employees`; invoice
+  imports and connector syncs started by a user without `customers` report unknown customers
+  instead of creating them (the hourly sync still creates them); `invoices:all` scope also applies
+  to bank-line documents / payments and to INVOICES imports. Integrations: reqwest errors are
+  shown without their URL (the WooCommerce secret could be in it); WooCommerce refuses addresses
+  that are IP literals or resolve to private / loopback / link-local ranges and pins the checked
+  address; redirects only to the same scheme, host and port; Shopify's next-page link is compared
+  by parsed origin. Backup: restore accepts only the manifest, `database/accounting.db`, the storage
+  key and `files/…`; Argon2 settings above 4× the app's own are refused; network (UNC) paths are
+  refused for backup folders and restore files. Release: the update-signing key is only in the
+  signing step (build with `createUpdaterArtifacts:false`, then `tauri signer sign`), actions
+  pinned by commit, no `${{ }}` inside `run:`; `*.zip` is git-ignored.
+
+- **D51 TallyCheck names for the Claude connector** (requested by the user 2026-11-03). `crates/mcp`
+  builds the same server twice: `tallycheck-mcp.exe` (new, `src/bin/tallycheck-mcp.rs`) and
+  `cenango-mcp.exe` (kept for existing Claude connections); both are installed (installer and MSIX).
+  It reads `TALLYCHECK_API_KEY` / `TALLYCHECK_API_URL` first, then `CENANGO_API_KEY` /
+  `CENANGO_API_URL`. Settings → Integrations → Claude shows the new names. Unchanged: the plugin id
+  `cenango-accounting` and its `.mcp.json`, the MCP `serverInfo.name`, the identifier.
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`

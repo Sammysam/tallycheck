@@ -18,6 +18,8 @@ serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tracing.workspace = true
+# Already in the tree through calamine (MIT): a workbook's unpacked size is checked first.
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -48,7 +48,12 @@ SignPath may decline a project, and may pause or revoke signing if the rules are
    * secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — its password.
 
    The update key then also lives in GitHub's encrypted secrets. Anyone who can change the
-   workflow on `main` could use it, so keep write access to the repository small.
+   workflow on `main` could use it, so keep write access to the repository small. The workflow
+   gives the key only to the step that runs `tauri signer sign` on the SignPath-signed installer:
+   `npm ci` (run with `--ignore-scripts`) and the cargo / Tauri build never have it. Third-party
+   actions are pinned to full commit SHAs (the tag is in a comment); to update one, look up the
+   new tag's commit (`git ls-remote https://github.com/<owner>/<action> refs/tags/<tag>`) and
+   replace both.
 
 ## Making a release
 

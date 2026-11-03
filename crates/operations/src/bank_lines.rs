@@ -222,7 +222,12 @@ async fn transfers_near(
     Ok(rows)
 }
 
-async fn suggestions(conn: &mut SqliteConnection, line: &BankLine, currency: &Option<String>) -> AppResult<Vec<Value>> {
+async fn suggestions(
+    conn: &mut SqliteConnection,
+    line: &BankLine,
+    currency: &Option<String>,
+    scope: &invoices::Scope,
+) -> AppResult<Vec<Value>> {
     let size = line.size()?;
     let foreign = currency.is_some();
     let mut out = Vec::new();
@@ -272,7 +277,7 @@ async fn suggestions(conn: &mut SqliteConnection, line: &BankLine, currency: &Op
     // customer / vendor is named in the bank text (part payments).
     let text = format!("{} {}", line.description, line.reference.clone().unwrap_or_default()).to_lowercase();
     let mut docs: Vec<(bool, Value)> = Vec::new();
-    for (owed, party, mut v) in open_documents(conn, line.money_in(), currency).await? {
+    for (owed, party, mut v) in open_documents(conn, line.money_in(), currency, scope).await? {
         let exact = owed == size;
         let named = party.len() >= 3 && text.contains(&party.to_lowercase()) && size <= owed;
         if exact || named {
@@ -287,11 +292,13 @@ async fn suggestions(conn: &mut SqliteConnection, line: &BankLine, currency: &Op
 }
 
 /// Posted invoices (money in) or bills (money out) in `currency` with something still owed:
-/// (owed, customer / vendor name, JSON for the screen).
+/// (owed, customer / vendor name, JSON for the screen). Invoices follow the caller's
+/// `invoices:all` scope, as on the Invoices screen.
 async fn open_documents(
     conn: &mut SqliteConnection,
     money_in: bool,
     currency: &Option<String>,
+    scope: &invoices::Scope,
 ) -> AppResult<Vec<(Money, String, Value)>> {
     let mut out = Vec::new();
     if money_in {
@@ -302,6 +309,9 @@ async fn open_documents(
         .await?;
         for id in ids {
             let inv = invoices::load_any(conn, &id).await?;
+            if !scope.sees_all && inv.created_by_id.as_deref() != scope.user_id.as_deref() {
+                continue;
+            }
             let owed = inv.outstanding()?;
             if &inv.currency != currency || owed <= Money::ZERO {
                 continue;
@@ -333,11 +343,11 @@ async fn open_documents(
 }
 
 /// Every open invoice or bill a line could pay, for the "Payment for…" dialog.
-pub async fn documents(db: &Db, id: &str) -> AppResult<Value> {
+pub async fn documents(db: &Db, id: &str, scope: &invoices::Scope) -> AppResult<Value> {
     let mut conn = db.read().acquire().await?;
     let line = find_one(&mut conn, id).await?;
     let currency = account_currency(&mut conn, &line.account_id).await?;
-    let docs = open_documents(&mut conn, line.money_in(), &currency).await?;
+    let docs = open_documents(&mut conn, line.money_in(), &currency, scope).await?;
     Ok(Value::Array(docs.into_iter().map(|(_, _, v)| v).collect()))
 }
 
@@ -376,7 +386,7 @@ fn to_json(line: &BankLine) -> Value {
 
 /// The account's lines, newest first; unmatched ones carry suggestions, matched ones what they
 /// were matched to. `status` None = all.
-pub async fn list(db: &Db, account_id: &str, status: Option<&str>) -> AppResult<Value> {
+pub async fn list(db: &Db, account_id: &str, status: Option<&str>, scope: &invoices::Scope) -> AppResult<Value> {
     let mut conn = db.read().acquire().await?;
     let currency = account_currency(&mut conn, account_id).await?;
     let rows = sqlx::query(&format!(
@@ -392,7 +402,7 @@ pub async fn list(db: &Db, account_id: &str, status: Option<&str>) -> AppResult<
         let line = from_row(r)?;
         let mut v = to_json(&line);
         if line.status == "UNMATCHED" {
-            v["suggestions"] = Value::Array(suggestions(&mut conn, &line, &currency).await?);
+            v["suggestions"] = Value::Array(suggestions(&mut conn, &line, &currency, scope).await?);
         } else if line.status == "MATCHED" {
             v["match"] = match_label(&mut conn, &line).await?;
         }
@@ -492,13 +502,15 @@ pub async fn pay(
     invoice_id: Option<String>,
     bill_id: Option<String>,
     payment_method: String,
+    scope: &invoices::Scope,
 ) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     let line = unmatched(&mut tx, id).await?;
     let currency = account_currency(&mut tx, &line.account_id).await?;
     let (kind, customer_id, vendor_id, doc_currency) = match (&invoice_id, &bill_id, line.money_in()) {
         (Some(i), None, true) => {
-            let inv = invoices::load_any(&mut tx, i).await?;
+            // Someone else's invoice is "not found" without `invoices:all`, as on its screen.
+            let inv = invoices::find_one(&mut tx, i, scope).await?;
             ("AR", inv.customer_id.clone(), None, inv.currency)
         }
         (None, Some(b), false) => {

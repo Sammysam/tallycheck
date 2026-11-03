@@ -53,11 +53,35 @@ fn key_may_not_reach(path: &str) -> bool {
             .any(|c| path == c.trim_end_matches('/') || path.starts_with(&format!("{}/", c.trim_end_matches('/'))))
 }
 
+/// Whether a request really comes from this PC: the connection is from a loopback address
+/// **and** the address-bar host is a loopback name (`127.0.0.1`, `localhost`, `[::1]`). The
+/// second part stops a web page that rebinds its own domain name to 127.0.0.1 (DNS rebinding)
+/// from reaching the main-PC-only actions: its requests carry the attacker's host name. A
+/// request without a recorded peer address is not from this PC.
+pub fn from_this_pc(parts: &Parts) -> bool {
+    let peer_local = parts
+        .extensions
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .is_some_and(|c| c.0.ip().is_loopback());
+    let host = parts.headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    peer_local && host_is_loopback(host)
+}
+
+/// `127.0.0.1[:port]`, `localhost[:port]` or `[::1][:port]`.
+pub fn host_is_loopback(host: &str) -> bool {
+    let h = host.trim().to_ascii_lowercase();
+    let name = if let Some(rest) = h.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("").to_string()
+    } else {
+        h.rsplit_once(':').map_or(h.as_str(), |(n, _)| n).to_string()
+    };
+    name == "localhost" || name.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
+}
+
 /// D41: a request authenticated by a key: only from this PC; reads, or (if allowed) drafts.
 async fn by_key(parts: &Parts, state: &AppState, token: &str) -> Result<CurrentUser, AppError> {
     let key = api_keys::verify(&state.db, token).await?.ok_or_else(AppError::unauthorized_default)?;
-    let peer = parts.extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip());
-    if peer.is_some_and(|ip| !ip.is_loopback()) {
+    if !from_this_pc(parts) {
         return Err(AppError::Forbidden("Keys work only on the PC that runs the app".into()));
     }
     // Inside the nested /api router the URI has lost its prefix; the original one has it.

@@ -12,7 +12,7 @@ import { company as companyDetails, region as companyRegion } from '../lib/regio
 const companyName = () => companyDetails().name.toUpperCase();
 
 const esc = (s?: string | null) =>
-  String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const num = (v: number | string | null | undefined) =>
   amount(v ?? 0);
 const n = (v: number | string | null | undefined) => Number(v) || 0;
@@ -71,7 +71,7 @@ function slipMarkup(run: RunDetail, l: PayrollLine, company: CompanyDetails): st
     <div class="sec">EARNINGS <span style="float:right">${esc(companyRegion().currencySymbol)}</span></div>
     <table>
       ${row('Basic Salary', l.basicForMonth, true)}
-      <tr class="ln"><td>No. of days worked</td><td class="r">${n(l.daysWorked)} / ${l.daysInMonth}</td></tr>
+      <tr class="ln"><td>No. of days worked</td><td class="r">${n(l.daysWorked)} / ${esc(String(l.daysInMonth ?? ''))}</td></tr>
       ${row('BRA - 2005', l.bra2005)}
       ${row('BRA I & II - 2016', l.bra2016)}
       ${row('Vehicle Allowance', l.vehicleAllowance)}
@@ -103,7 +103,7 @@ function slipMarkup(run: RunDetail, l: PayrollLine, company: CompanyDetails): st
       ${row('EPF 12%', l.epfEmployer, true)}
       ${row('ETF 3%', l.etf, true)}
     </table>` : ''}
-    ${l.bankAccountNo ? `<div class="muted small" style="margin-top:6px">Paid to ${esc(l.bankName || '')} ${esc(l.bankBranch || '')} · A/C ${esc(l.bankAccountNo)}${run.payDate ? ' on ' + fmtDate(run.payDate) : ''}</div>` : ''}
+    ${l.bankAccountNo ? `<div class="muted small" style="margin-top:6px">Paid to ${esc(l.bankName || '')} ${esc(l.bankBranch || '')} · A/C ${esc(l.bankAccountNo)}${run.payDate ? ' on ' + esc(fmtDate(run.payDate)) : ''}</div>` : ''}
     ${l.notes ? `<div class="muted small">${esc(l.notes)}</div>` : ''}
     <div class="hr">${esc(company.hrSignatory || 'HR')}</div>
     <div class="muted small" style="margin-top:4px">${esc(l.slipNumber)}</div>

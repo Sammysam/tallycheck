@@ -97,6 +97,9 @@ columns on `employee_us_tax` (the web edition's migrations 005 + 006 in one). JS
 with `json_valid`, the line order column `seq` is the SQLite rowid, and the remittance type check
 includes STATE_INCOME_TAX from the start. Account choices are settings (`payroll.us.account.*`).
 
+D49 adds `recovery_keys` (one row per user: the SHA-256 of the normalised password recovery key and
+when it was made).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

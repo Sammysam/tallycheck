@@ -23,7 +23,7 @@ By default the app listens on `127.0.0.1` only, so nothing on the network can re
 
 * **Accounts and permissions.** Every API route requires a signed-in user and the route's permission. Failed logins are throttled and audited. Two-factor sign-in is optional per user (D16). With LAN mode on, strongly consider turning 2FA on for every account, especially Admin and anyone with payroll access.
 * **Allowed networks.** Requests from addresses outside `lan_allowed_networks` are refused with 403, so a port-forwarded or public-Wi-Fi exposure still does not serve the internet.
-* **Host check (DNS rebinding).** The address-bar name must be an IP address, `localhost`, this PC's name or a configured name. A malicious web page that re-points its own domain at the office PC is refused.
+* **Host check (DNS rebinding).** The address-bar name must be an IP address, `localhost`, this PC's name (`PC`, `PC.local`, or `PC.<its Windows domain>` — no other `PC.something`) or a configured name. A malicious web page that re-points its own domain at the office PC is refused.
 * **Request forgery.** The API authenticates with a bearer token sent in the `Authorization` header from the app's own page. No cookies are used, so another site cannot make a browser send authenticated requests. Cross-origin pages get no CORS permission, so they cannot read responses either.
 * **Admin-only operations stay local.** Backup and restore answer only an Administrator connected from the main PC itself.
 * Security headers: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`. Downloads are `Cache-Control: private, no-store`.

@@ -92,6 +92,7 @@ fn request(user: &CurrentUser, m: &Map<String, Value>) -> AppResult<imports::Req
         default_account_id: text(m, "defaultAccountId"),
         date_order,
         rows,
+        may_create_customers: user.user.has_permission("customers"),
     })
 }
 
@@ -115,9 +116,27 @@ pub async fn run(
     Ok((StatusCode::CREATED, Json(out)))
 }
 
+/// Only Admin / `invoices:all` see other people's invoices (as the invoice routes).
+fn invoice_scope(user: &auth::User) -> operations::invoices::Scope {
+    operations::invoices::Scope {
+        user_id: Some(user.id.clone()),
+        sees_all: user.is_admin() || user.role.as_ref().is_some_and(|r| r.grants("invoices:all")),
+    }
+}
+
+/// Whether the caller may see an import: an INVOICES import made by someone else follows the
+/// `invoices:all` scope of the invoices it created.
+fn sees_import(user: &CurrentUser, imp: &imports::ImportRecord) -> bool {
+    imp.kind != Kind::Invoices.as_str()
+        || invoice_scope(&user.user).sees_all
+        || imp.created_by_id.as_deref() == Some(user.user.id.as_str())
+}
+
 pub async fn list(State(state): State<AppState>, user: CurrentUser) -> AppResult<Json<Vec<imports::ImportRecord>>> {
     may_import(&user)?;
-    Ok(Json(imports::list(&state.db).await?))
+    let mut all = imports::list(&state.db).await?;
+    all.retain(|imp| sees_import(&user, imp));
+    Ok(Json(all))
 }
 
 /// Undoes an import (DELETE): what it created is removed if nothing has used it yet.
@@ -134,6 +153,9 @@ pub async fn undo(
     let kind = Kind::parse(&imp.kind).ok_or_else(|| AppError::internal("stored import kind"))?;
     if !user.user.has_permission(kind.permission()) {
         return Err(forbidden());
+    }
+    if !sees_import(&user, &imp) {
+        return Err(AppError::NotFound(format!("Import with ID {id} not found")));
     }
     Ok(Json(imports::undo(&state.db, &id).await?))
 }
@@ -176,7 +198,7 @@ pub async fn layout_remove(State(state): State<AppState>, user: CurrentUser, Pat
 
 pub async fn bank_list(
     State(state): State<AppState>,
-    _auth: Authorized<perm::Banking>,
+    auth: Authorized<perm::Banking>,
     Query(q): Query<HashMap<String, String>>,
 ) -> AppResult<Json<Value>> {
     let account =
@@ -188,7 +210,7 @@ pub async fn bank_list(
             return Err(AppError::bad_request("status must be UNMATCHED, MATCHED or IGNORED"));
         }
     }
-    Ok(Json(bank_lines::list(&state.db, account, status).await?))
+    Ok(Json(bank_lines::list(&state.db, account, status, &invoice_scope(auth.user())).await?))
 }
 
 pub async fn bank_accounts(State(state): State<AppState>, _auth: Authorized<perm::Banking>) -> AppResult<Json<Value>> {
@@ -197,11 +219,11 @@ pub async fn bank_accounts(State(state): State<AppState>, _auth: Authorized<perm
 
 pub async fn bank_documents(
     State(state): State<AppState>,
-    _auth: Authorized<perm::Banking>,
+    auth: Authorized<perm::Banking>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     parse_uuid(&id)?;
-    Ok(Json(bank_lines::documents(&state.db, &id).await?))
+    Ok(Json(bank_lines::documents(&state.db, &id, &invoice_scope(auth.user())).await?))
 }
 
 pub async fn bank_match(
@@ -237,7 +259,7 @@ pub async fn bank_pay(
     if !["CASH", "BANK_TRANSFER", "CHECK"].contains(&method.as_str()) {
         return Err(AppError::bad_request("paymentMethod must be one of CASH, BANK_TRANSFER, CHECK"));
     }
-    Ok(Json(bank_lines::pay(&state.db, &id, invoice_id, bill_id, method).await?))
+    Ok(Json(bank_lines::pay(&state.db, &id, invoice_id, bill_id, method, &invoice_scope(auth.user())).await?))
 }
 
 pub async fn bank_expense(

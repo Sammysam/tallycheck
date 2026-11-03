@@ -2,7 +2,10 @@
 
 use crate::format::{read_header, sha256_hex, unhex, ArchiveReader, DecryptReader, Header};
 use crate::keys::{self, Kek, KeyError};
-use crate::{latest_schema_version, BackupError, BackupResult, Manifest, DB_ENTRY, MANIFEST_ENTRY, STORAGE_KEY_ENTRY};
+use crate::{
+    latest_schema_version, BackupError, BackupResult, Manifest, DB_ENTRY, FILES_PREFIX, MANIFEST_ENTRY,
+    STORAGE_KEY_ENTRY,
+};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
 use std::collections::BTreeMap;
@@ -59,6 +62,16 @@ fn safe_relative(name: &str) -> Option<PathBuf> {
     ok.then(|| p.to_path_buf())
 }
 
+/// The only entries a backup holds: the manifest, the database, the file-encryption key and
+/// stored files. Anything else (a WAL file, other secrets…) means the file was not made by this
+/// app, and it is refused before anything is written.
+fn allowed_entry(name: &str) -> bool {
+    name == MANIFEST_ENTRY
+        || name == DB_ENTRY
+        || name == STORAGE_KEY_ENTRY
+        || name.strip_prefix(FILES_PREFIX).is_some_and(|rest| !rest.is_empty() && safe_relative(rest).is_some())
+}
+
 struct Sink<'a> {
     staging: Option<&'a Path>,
 }
@@ -88,6 +101,9 @@ fn read_all(path: &Path, key: &BackupKey, staging: Option<&Path>) -> BackupResul
     let mut manifest: Option<Manifest> = None;
     let mut storage_key = None;
     while let Some((name, size)) = archive.next_entry().map_err(|e| BackupError::Verify(e.to_string()))? {
+        if !allowed_entry(&name) {
+            return Err(BackupError::Verify(format!("unexpected entry {name:?} in the backup")));
+        }
         if name == MANIFEST_ENTRY {
             let mut json = Vec::new();
             archive.copy_entry(size, &mut json).map_err(|e| BackupError::Verify(e.to_string()))?;
@@ -262,4 +278,29 @@ pub fn apply_pending_restore(data_dir: &Path) -> io::Result<Option<PathBuf>> {
     let _ = fs::remove_file(done.join(APPLYING));
     let _ = fs::remove_file(done.join(READY));
     Ok(Some(previous))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_entries_a_backup_holds_are_accepted() {
+        for ok in [MANIFEST_ENTRY, DB_ENTRY, STORAGE_KEY_ENTRY, "files/employees/a/photo.bin", "files/x"] {
+            assert!(allowed_entry(ok), "{ok}");
+        }
+        for bad in [
+            "accounting.db",
+            "accounting.db-wal",
+            "database/accounting.db-wal",
+            "secrets/backup-key.dpapi",
+            "secrets/jwt-secret.dpapi",
+            "files/",
+            "files/../accounting.db",
+            "restore-staging/READY",
+            "manifest.json.bak",
+        ] {
+            assert!(!allowed_entry(bad), "{bad}");
+        }
+    }
 }

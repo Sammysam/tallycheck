@@ -171,6 +171,7 @@ try {
   await send('Runtime.enable');
   await send('Network.enable');
   let secret = '';
+  let recoveryKey = '';
 
   await check('a fresh install opens the create-administrator screen (D17)', async () => {
     await send('Page.navigate', { url: BASE + '/login' });
@@ -189,6 +190,14 @@ try {
     await waitFor(`document.body.innerText.includes('The two passwords do not match')`, 'mismatch error');
     await pw(1, 'admin12345');
     await evaluate(`document.querySelector('button[type=submit]').click()`);
+    // D49: the recovery key is shown once; Continue only after ticking "I have saved it".
+    await waitFor(`document.body.innerText.includes('Save your recovery key') && /TCRK(-[0-9A-Z]{4}){5}/.test(document.body.innerText)`, 'recovery key');
+    await shot('00a-recovery-key');
+    recoveryKey = await evaluate(`document.body.innerText.match(/TCRK(-[0-9A-Z]{4}){5}/)[0]`);
+    await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.trim() === 'Continue'); return b.disabled; })()`)
+      .then((disabled) => { if (!disabled) throw new Error('Continue must wait for the tick box'); });
+    await evaluate(`document.querySelector('input[type=checkbox]').click()`);
+    await clickText('Continue');
     // D25: no company ships with the app; the new administrator enters theirs first.
     await waitFor(`location.pathname === '/company-setup' && !!document.querySelector('form[aria-label="Company setup"]')`, 'company setup');
     await shot('00b-company-setup');
@@ -248,6 +257,26 @@ try {
     await sleep(800);
     if ((await evaluate('location.pathname')) !== '/login') throw new Error('left the login page');
     await shot('01-login');
+  });
+
+  await check('a forgotten password is reset with the recovery key (D49)', async () => {
+    await clickText('Forgot password?');
+    await waitFor(`location.pathname === '/forgot-password'`, 'forgot password page');
+    await type('input[type=text]', 'admin');
+    await type('input[placeholder^="TCRK"]', recoveryKey.toLowerCase());
+    const pw = (i, v) => evaluate(`(() => { const el = document.querySelectorAll('input[type=password]')[${i}];
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(v)});
+      el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await pw(0, 'admin12345');
+    await pw(1, 'admin12345');
+    await shot('01a-forgot-password');
+    await evaluate(`document.querySelector('button[type=submit]').click()`);
+    await waitFor(`document.body.innerText.includes('Your password has been changed') && /TCRK(-[0-9A-Z]{4}){5}/.test(document.body.innerText)`, 'new recovery key');
+    const next = await evaluate(`document.body.innerText.match(/TCRK(-[0-9A-Z]{4}){5}/)[0]`);
+    if (next === recoveryKey) throw new Error('the used key was not replaced');
+    await evaluate(`document.querySelector('input[type=checkbox]').click()`);
+    await clickText('Go to sign in');
+    await waitFor(`location.pathname === '/login' && !!document.querySelector('input[type=password]')`, 'back on sign in');
   });
 
   await check('without 2FA the password alone signs in (D16)', async () => {

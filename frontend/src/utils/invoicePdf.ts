@@ -70,7 +70,7 @@ const fmtDate = (d?: string | null) => {
 };
 
 const esc = (s?: string | null) =>
-  String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+  String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
 function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
   const co = company();
@@ -146,7 +146,7 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
       #inv-pdf-root .sign .name { font-weight: bold; }
       #inv-pdf-root .sysnote { margin-top: 34px; padding-top: 8px; border-top: 1px solid #ccc; text-align: center; font-size: 11px; font-style: italic; color: #444; }
     </style>
-    <div class="logo-row">${co.logo ? `<img src="${co.logo}" alt="logo" />` : `<div class="co-name">${esc(co.name)}</div>`}</div>
+    <div class="logo-row">${co.logo ? `<img src="${esc(co.logo)}" alt="logo" />` : `<div class="co-name">${esc(co.name)}</div>`}</div>
     <div class="rule"></div>
     <div class="contact">${esc(co.contactLine)}${co.emailWebLine ? `<br/>${esc(co.emailWebLine)}` : ''}${co.taxNumber ? `<br/>Tax No: ${esc(co.taxNumber)}` : ''}</div>
     <div class="rule"></div>
@@ -260,12 +260,16 @@ function openInvoiceWindow(
       `@media print{body{background:#fff;padding:0;}#sheet{width:auto;box-shadow:none;}#bar{display:none;}}` +
       `@page{size:A4;margin:0;}` +
       `</style></head><body>` +
-      `<div id="bar"><button class="secondary" onclick="window.close()">Close</button>` +
-      `<button onclick="window.print()">Print</button></div>` +
+      `<div id="bar"><button class="secondary" id="bar-close">Close</button>` +
+      `<button id="bar-print">Print</button></div>` +
       `<div id="sheet"><div id="inv-pdf-root">${markup}</div></div>` +
       `</body></html>`,
   );
   win.document.close();
+  // Handlers are attached from here: inline onclick attributes would be blocked by the
+  // Content-Security-Policy, which the about:blank window inherits from this page.
+  win.document.getElementById('bar-close')?.addEventListener('click', () => win.close());
+  win.document.getElementById('bar-print')?.addEventListener('click', () => win.print());
 
   if (!autoPrint) return;
 

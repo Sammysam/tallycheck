@@ -114,6 +114,16 @@ impl Rule {
         }
     }
 
+    /// `IsMoneyNumber` / `IsQuantity` (possibly with a custom message) on a number beyond
+    /// numeric(15,2) — 999,999,999,999.99 either way.
+    fn too_large(&self, v: &Value) -> bool {
+        match self {
+            Rule::Msg(inner, _) => inner.too_large(v),
+            Rule::IsMoneyNumber | Rule::IsQuantity => is_too_large(v),
+            _ => false,
+        }
+    }
+
     pub(crate) fn message(&self, prop: &str) -> String {
         match self {
             Rule::Msg(_, msg) => (*msg).to_string(),
@@ -146,6 +156,19 @@ impl Rule {
                 format!("each value in {prop} must be one of the following values: {}", list().join(", "))
             }
         }
+    }
+}
+
+/// The message for an amount or quantity beyond numeric(15,2), as the HR validators answer.
+pub(crate) const TOO_LARGE: &str = "Amount is too large";
+
+/// A JSON number whose absolute value is more than numeric(15,2) holds (in hundredths). A
+/// number in exponent form beyond the limit counts too; other values are left to the rules.
+pub(crate) fn is_too_large(v: &Value) -> bool {
+    let Some(n) = v.as_number() else { return false };
+    match app_core::money::Money::from_json(v) {
+        Some(m) => m.cents().unsigned_abs() > app_core::money::MAX_NUMERIC_15_2_CENTS as u64,
+        None => n.as_i64().is_some() || n.as_f64().is_some_and(|x| x.abs() >= 1e12),
     }
 }
 
@@ -183,10 +206,18 @@ impl Validator {
             }
             return self;
         }
-        let mut failed: Vec<String> =
-            rules.iter().filter(|r| !r.passes(&value)).map(|r| format!("{}{}", self.prefix, r.message(prop))).collect();
-        failed.reverse();
-        self.errors.extend(failed);
+        if rules.iter().any(|r| r.too_large(&value)) {
+            // Beyond numeric(15,2): one plain message instead of the rule texts.
+            self.errors.push(TOO_LARGE.to_string());
+        } else {
+            let mut failed: Vec<String> = rules
+                .iter()
+                .filter(|r| !r.passes(&value))
+                .map(|r| format!("{}{}", self.prefix, r.message(prop)))
+                .collect();
+            failed.reverse();
+            self.errors.extend(failed);
+        }
         if let Some(v) = present {
             self.output.insert(prop.to_string(), v);
         }
@@ -210,6 +241,9 @@ impl Validator {
     pub fn finish(self) -> Result<Map<String, Value>, AppError> {
         if self.errors.is_empty() {
             Ok(self.output)
+        } else if self.errors.iter().any(|e| e == TOO_LARGE) {
+            // As `hr::money`: a 400 with the one message, whatever else was wrong.
+            Err(AppError::bad_request(TOO_LARGE))
         } else {
             Err(AppError::validation(self.errors))
         }
@@ -404,6 +438,21 @@ const COMPANY_SETTINGS: &[(&str, usize)] = &[
     ("tax.defaultPurchases", 36),
 ];
 
+/// A PNG, JPEG or WebP picture as a base64 data URL and nothing else:
+/// `^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$`. The logo is placed into printed
+/// pages, so any other text (quotes, markup, a second URL) is refused.
+pub(crate) fn is_logo_data_url(value: &str) -> bool {
+    let Some(data) = ["data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,"]
+        .iter()
+        .find_map(|p| value.strip_prefix(p))
+    else {
+        return false;
+    };
+    let body = data.trim_end_matches('=');
+    let padding = data.len() - body.len();
+    !body.is_empty() && padding <= 2 && body.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+}
+
 /// Returns the provided (non-null) settings in declaration order.
 pub fn update_settings(body: Map<String, Value>) -> Result<Vec<(String, String)>, AppError> {
     let mut v = Validator::new(body);
@@ -443,12 +492,7 @@ pub fn update_settings(body: Map<String, Value>) -> Result<Vec<(String, String)>
             "region.fiscalYearStart" => value.parse::<u8>().is_ok_and(|m| (1..=12).contains(&m)),
             "company.name" => !value.is_empty(),
             // A picture uploaded on the Settings page, or none.
-            "company.logo" => {
-                value.is_empty()
-                    || ["data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,"]
-                        .iter()
-                        .any(|p| value.starts_with(p))
-            }
+            "company.logo" => value.is_empty() || is_logo_data_url(value),
             _ => true,
         };
         if !ok {

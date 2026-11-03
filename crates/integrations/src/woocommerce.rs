@@ -13,6 +13,7 @@ use app_core::money::Money;
 use app_core::{AppError, AppResult};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
+use std::net::{IpAddr, SocketAddr};
 
 const SERVICE: &str = "WooCommerce";
 const PAID: &[&str] = &["processing", "completed", "on-hold", "refunded"];
@@ -25,6 +26,13 @@ pub fn normalize_site(input: &str) -> AppResult<String> {
     let host = s.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("");
     if host.is_empty() || !host.contains('.') || host.contains(char::is_whitespace) {
         return Err(AppError::bad_request("Enter the shop's web address, e.g. https://shop.example.lk"));
+    }
+    // A shop is reached by its name; a bare IP address (often a machine on this network) is not
+    // a shop's address.
+    let bare = host.trim_start_matches('[').split(']').next().unwrap_or(host);
+    let without_port = if host.starts_with('[') { bare } else { host.rsplit_once(':').map_or(host, |(h, _)| h) };
+    if host.contains('@') || without_port.parse::<IpAddr>().is_ok() || bare.parse::<IpAddr>().is_ok() {
+        return Err(AppError::bad_request("Enter the shop's web address by name, e.g. https://shop.example.lk"));
     }
     if s.starts_with("http://") {
         return Err(AppError::bad_request("The shop must use https:// so the key is never sent in the clear"));
@@ -39,14 +47,85 @@ struct Api {
     http: reqwest::Client,
 }
 
+/// Whether an address is on the public internet: not loopback, private, link-local, shared,
+/// unspecified, multicast, documentation or reserved (IPv4 and IPv6, and IPv4 inside IPv6).
+pub fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xC0) == 64)
+                || (o[0] == 198 && (o[1] & 0xFE) == 18)
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+                || o[0] >= 240)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            let s = v6.segments();
+            if v6.is_loopback() || v6.is_unspecified() {
+                return false;
+            }
+            // NAT64 (64:ff9b::/96) and IPv4-compatible (::a.b.c.d) addresses carry an IPv4 one.
+            if (s[0] == 0x64 && s[1] == 0xff9b && s[2..6] == [0, 0, 0, 0]) || s[..6] == [0, 0, 0, 0, 0, 0] {
+                let v4 = std::net::Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8);
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            !(v6.is_multicast()
+                || (s[0] & 0xFE00) == 0xFC00
+                || (s[0] & 0xFFC0) == 0xFE80
+                || (s[0] & 0xFFC0) == 0xFEC0
+                || (s[0] == 0x2001 && s[1] == 0x0DB8))
+        }
+    }
+}
+
+/// The shop's addresses, refused unless every one is public. The client is then pinned to
+/// them, so a name that changes its answer between this check and the request (DNS
+/// rebinding) cannot point the key at this PC or the office network.
+async fn public_addrs(site: &str) -> AppResult<(String, Vec<SocketAddr>)> {
+    let url = reqwest::Url::parse(site)
+        .map_err(|_| AppError::bad_request("Enter the shop's web address, e.g. https://shop.example.lk"))?;
+    let host = url.host_str().unwrap_or_default().to_string();
+    let port = url.port_or_known_default().unwrap_or(443);
+    if host.is_empty() || host.parse::<IpAddr>().is_ok() || host.starts_with('[') {
+        return Err(AppError::bad_request("Enter the shop's web address by name, e.g. https://shop.example.lk"));
+    }
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map_err(|_| {
+            AppError::bad_request(format!(
+                "Could not find {host}. Check the site address and the internet connection and try again."
+            ))
+        })?
+        .collect();
+    if addrs.is_empty() || addrs.iter().any(|a| !is_public_ip(a.ip())) {
+        return Err(AppError::bad_request(format!(
+            "{host} points to this computer or the local network, not a shop on the internet"
+        )));
+    }
+    Ok((host, addrs))
+}
+
 impl Api {
-    fn new(site: &str, key: &str, secret: &str) -> AppResult<Api> {
-        Ok(Api {
-            base: common::base_url(Connector::WooCommerce, site.to_string()),
-            key: key.to_string(),
-            secret: secret.to_string(),
-            http: common::http()?,
-        })
+    async fn new(site: &str, key: &str, secret: &str) -> AppResult<Api> {
+        let base = common::base_url(Connector::WooCommerce, site.to_string());
+        // The loopback stand-in of the tests is the only address not checked.
+        let http = if base != site {
+            common::http()?
+        } else {
+            let (host, addrs) = public_addrs(site).await?;
+            common::client_builder().resolve_to_addrs(&host, &addrs).build().map_err(AppError::internal)?
+        };
+        Ok(Api { base, key: key.to_string(), secret: secret.to_string(), http })
     }
 
     /// GET with the key; if the site strips the Authorization header (common on shared hosting),
@@ -85,7 +164,7 @@ pub async fn connect(body: &Map<String, Value>) -> AppResult<Connected> {
             "Paste the consumer key (ck_…) and consumer secret (cs_…) of the REST API key",
         ));
     }
-    let api = Api::new(&site, &key, &secret)?;
+    let api = Api::new(&site, &key, &secret).await?;
     let (general, _) = api.get("settings/general", &[]).await?;
     let currency = general
         .as_array()
@@ -238,7 +317,7 @@ fn order(o: &Value) -> Order {
 
 pub async fn fetch(cfg: &Config, secret: &Value, since: &str) -> AppResult<Fetched> {
     let site = cfg.option("siteUrl").map(str::to_string).or_else(|| cfg.remote_id.clone()).unwrap_or_default();
-    let api = Api::new(&site, secret["key"].as_str().unwrap_or(""), secret["secret"].as_str().unwrap_or(""))?;
+    let api = Api::new(&site, secret["key"].as_str().unwrap_or(""), secret["secret"].as_str().unwrap_or("")).await?;
     let mut orders = Vec::new();
     let mut page = 1;
     loop {
@@ -270,10 +349,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_public_addresses_are_shops() {
+        let ip = |s: &str| s.parse::<IpAddr>().expect("ip");
+        for private in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.0.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "100.64.0.1",
+            "255.255.255.255",
+            "224.0.0.1",
+            "::1",
+            "::",
+            "fe80::1",
+            "fc00::1",
+            "fd12:3456::1",
+            "::ffff:127.0.0.1",
+            "::ffff:192.168.1.1",
+            "64:ff9b::a9fe:a9fe",
+            "::7f00:1",
+            "2001:db8::1",
+        ] {
+            assert!(!is_public_ip(ip(private)), "{private}");
+        }
+        for public in ["8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "::ffff:8.8.8.8"] {
+            assert!(is_public_ip(ip(public)), "{public}");
+        }
+    }
+
+    #[tokio::test]
+    async fn names_that_resolve_to_this_pc_are_refused() {
+        // "localhost" resolves without any network.
+        let msg = public_addrs("https://localhost").await.expect_err("loopback").user_message();
+        assert!(msg.contains("local network"), "{msg}");
+    }
+
+    #[test]
     fn site_addresses_need_https() {
         assert_eq!(normalize_site("Shop.Example.lk/").ok().as_deref(), Some("https://shop.example.lk"));
         assert!(normalize_site("http://shop.example.lk").is_err());
         assert!(normalize_site("not a site").is_err());
+        for ip in
+            ["https://127.0.0.1", "192.168.1.10", "https://10.0.0.5:8443/", "https://[::1]", "https://[fe80::1]:443"]
+        {
+            assert!(normalize_site(ip).is_err(), "{ip}");
+        }
+        assert!(normalize_site("https://user@shop.example.lk").is_err());
     }
 
     #[test]

@@ -50,9 +50,11 @@ function cellValue(cell: HTMLTableCellElement): string {
 }
 
 function csvField(raw: string): string {
-  // Text that Excel would run as a formula (=, +, @, or - not followed by a number) is
-  // prefixed with an apostrophe so it stays text.
-  const v = /^[=+@\t\r]/.test(raw) || (/^-/.test(raw) && !/^-\d/.test(raw)) ? `'${raw}` : raw;
+  // Text that Excel would run as a formula (starting with = + - @, a tab or a line break) is
+  // prefixed with an apostrophe so it stays text. Only a plain number ("-2500.63") is left
+  // alone, so amounts still add up; "-1+cmd|…" is not a plain number and gets the apostrophe.
+  const t = raw.trim();
+  const v = /^[=+\-@\t\r\n]/.test(t) && !/^-?\d+(\.\d+)?$/.test(t) ? `'${t}` : t;
   return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 }
 

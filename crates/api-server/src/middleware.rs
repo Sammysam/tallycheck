@@ -62,9 +62,22 @@ pub fn lan_host_allowed(host: &str, extra: &[String]) -> bool {
         return true;
     }
     let this_pc = std::env::var("COMPUTERNAME").unwrap_or_default().to_ascii_lowercase();
-    (!this_pc.is_empty()
-        && (name == this_pc || name == format!("{this_pc}.local") || name.starts_with(&format!("{this_pc}."))))
-        || extra.iter().any(|e| e.trim().eq_ignore_ascii_case(&name))
+    // The PC's name in its own Windows domain (set on domain-joined PCs), e.g. `pc.office.lan`.
+    let domain = std::env::var("USERDNSDOMAIN").unwrap_or_default().to_ascii_lowercase();
+    this_pc_names(&this_pc, &domain).contains(&name) || extra.iter().any(|e| e.trim().eq_ignore_ascii_case(&name))
+}
+
+/// Exact names of this PC. Any other `<pc>.something` is refused: an attacker's domain such as
+/// `<pc>.attacker.example` could otherwise be rebound to this PC's address (DNS rebinding).
+fn this_pc_names(pc: &str, domain: &str) -> Vec<String> {
+    if pc.is_empty() {
+        return Vec::new();
+    }
+    let mut names = vec![pc.to_string(), format!("{pc}.local")];
+    if !domain.is_empty() {
+        names.push(format!("{pc}.{domain}"));
+    }
+    names
 }
 
 /// Reference `AuditInterceptor`: every successful POST/PATCH/PUT/DELETE outside `/auth/` is
@@ -129,8 +142,16 @@ pub async fn audit_log(State(state): State<AppState>, req: Request, next: Next) 
     Response::from_parts(parts, Body::from(bytes))
 }
 
-pub fn security_headers() -> [(axum::http::HeaderName, HeaderValue); 3] {
+/// Content-Security-Policy: scripts only from the app itself (no inline scripts, no `eval`), so
+/// text that slips into a page as HTML cannot run. Inline styles stay allowed (the printed
+/// documents carry `<style>` blocks); pictures may be `data:` / `blob:` (logos, uploads, PDFs).
+pub const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; script-src 'self'; \
+     style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; \
+     connect-src 'self'; object-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+
+pub fn security_headers() -> [(axum::http::HeaderName, HeaderValue); 4] {
     [
+        (axum::http::header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CONTENT_SECURITY_POLICY)),
         (axum::http::header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
         (axum::http::header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")),
         (axum::http::header::REFERRER_POLICY, HeaderValue::from_static("no-referrer")),

@@ -2,6 +2,7 @@
   "bundle": {
     "resources": {
       "../frontend/dist/": "frontend/",
+      "../target/release/tallycheck-mcp.exe": "tallycheck-mcp.exe",
       "../target/release/cenango-mcp.exe": "cenango-mcp.exe",
       "../LICENSE-MIT": "LICENSE-MIT.txt",
       "../LICENSE-APACHE": "LICENSE-APACHE.txt",

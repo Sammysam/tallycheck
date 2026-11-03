@@ -16,9 +16,10 @@ Settings → Integrations → **Claude (AI assistant)** → **+ New key**. Leave
 questions only. Copy the key (`cak_…`) — it is shown once. The window also shows ready-made setup
 for Claude Desktop and Claude Code with the right paths.
 
-The connector program, `cenango-mcp.exe`, is installed next to the app
-(usually `%LOCALAPPDATA%\TallyCheck\cenango-mcp.exe`). The app must be open while Claude
-uses it.
+The connector program, `tallycheck-mcp.exe`, is installed next to the app
+(usually `%LOCALAPPDATA%\TallyCheck\tallycheck-mcp.exe`). The app must be open while Claude
+uses it. Older versions installed it as `cenango-mcp.exe` and read `CENANGO_API_KEY` /
+`CENANGO_API_URL`; both names still work.
 
 ## 2a. Claude Desktop
 
@@ -27,9 +28,9 @@ Settings → Developer → Edit Config, and add (with your key and path):
 ```json
 {
   "mcpServers": {
-    "cenango-accounting": {
-      "command": "C:\\Users\\<you>\\AppData\\Local\\TallyCheck\\cenango-mcp.exe",
-      "env": { "CENANGO_API_KEY": "cak_…", "CENANGO_API_URL": "http://127.0.0.1:47800" }
+    "tallycheck": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\TallyCheck\\tallycheck-mcp.exe",
+      "env": { "TALLYCHECK_API_KEY": "cak_…", "TALLYCHECK_API_URL": "http://127.0.0.1:47800" }
     }
   }
 }
@@ -54,7 +55,7 @@ Then in Claude Code:
 Or without the plugin, only the connector:
 
 ```
-claude mcp add cenango-accounting -e CENANGO_API_KEY=cak_… -- "C:\…\cenango-mcp.exe"
+claude mcp add tallycheck -e TALLYCHECK_API_KEY=cak_… -- "C:\…\tallycheck-mcp.exe"
 ```
 
 ## What is included

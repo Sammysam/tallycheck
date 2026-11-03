@@ -6004,7 +6004,7 @@ DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
 
-calamine 0.37.0 — MIT
+calamine 0.38.0 — MIT
   https://github.com/tafia/calamine
 
   --- LICENSE-MIT.md ---

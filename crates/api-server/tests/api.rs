@@ -3487,19 +3487,27 @@ async fn claude_keys_read_create_drafts_only_and_can_be_revoked() -> TestResult 
     assert!(!listed.body.to_string().contains(&ro_key), "a key is shown only once");
 
     // Read-only: reads, never writes; people, users and keys are closed.
-    let me = app.call(Method::GET, "/api/api-keys/me", Some(ro_key.as_str()), None).await?;
+    let me =
+        app.call_from("127.0.0.1:50000", HOST, Method::GET, "/api/api-keys/me", Some(ro_key.as_str()), None).await?;
     assert_eq!((me.body["canWrite"].clone(), me.body["user"].clone()), (json!(false), json!("admin")));
-    assert_eq!(app.call(Method::GET, "/api/invoices", Some(ro_key.as_str()), None).await?.status, StatusCode::OK);
+    assert_eq!(
+        app.call_from("127.0.0.1:50000", HOST, Method::GET, "/api/invoices", Some(ro_key.as_str()), None).await?.status,
+        StatusCode::OK
+    );
     let draft = json!({"customerId": cust.body["id"], "date": "2026-10-22", "lines": [{"description": "Work", "quantity": 1, "unitPrice": 100}]});
-    let no = app.call(Method::POST, "/api/invoices", Some(ro_key.as_str()), Some(draft.clone())).await?;
+    let no = app
+        .call_from("127.0.0.1:50000", HOST, Method::POST, "/api/invoices", Some(ro_key.as_str()), Some(draft.clone()))
+        .await?;
     assert_eq!(no.status, StatusCode::FORBIDDEN);
     for closed in ["/api/employees", "/api/payroll/runs", "/api/users", "/api/api-keys", "/api/audit-logs"] {
-        let r = app.call(Method::GET, closed, Some(ro_key.as_str()), None).await?;
+        let r = app.call_from("127.0.0.1:50000", HOST, Method::GET, closed, Some(ro_key.as_str()), None).await?;
         assert_eq!(r.status, StatusCode::FORBIDDEN, "{closed}");
     }
 
     // Write key: a draft yes; posting, paying and settings no.
-    let inv = app.call(Method::POST, "/api/invoices", Some(rw_key.as_str()), Some(draft)).await?;
+    let inv = app
+        .call_from("127.0.0.1:50000", HOST, Method::POST, "/api/invoices", Some(rw_key.as_str()), Some(draft))
+        .await?;
     assert_eq!(inv.status, StatusCode::CREATED, "{}", inv.body);
     assert_eq!(inv.body["status"], json!("DRAFT"));
     let inv_id = inv.body["id"].as_str().ok_or("id")?;
@@ -3509,7 +3517,9 @@ async fn claude_keys_read_create_drafts_only_and_can_be_revoked() -> TestResult 
         (Method::PATCH, "/api/settings".to_string()),
         (Method::POST, "/api/payments".to_string()),
     ] {
-        let r = app.call(method.clone(), &path, Some(rw_key.as_str()), Some(json!({}))).await?;
+        let r = app
+            .call_from("127.0.0.1:50000", HOST, method.clone(), &path, Some(rw_key.as_str()), Some(json!({})))
+            .await?;
         assert_eq!(r.status, StatusCode::FORBIDDEN, "{method} {path}");
     }
     let log = app.call(Method::GET, "/api/audit-logs?limit=20", Some(&admin), None).await?;
@@ -3517,7 +3527,8 @@ async fn claude_keys_read_create_drafts_only_and_can_be_revoked() -> TestResult 
 
     // Revoked: refused at once.
     app.call(Method::DELETE, &format!("/api/api-keys/{}", id_of(&rw.body)), Some(&admin), None).await?;
-    let gone = app.call(Method::GET, "/api/invoices", Some(rw_key.as_str()), None).await?;
+    let gone =
+        app.call_from("127.0.0.1:50000", HOST, Method::GET, "/api/invoices", Some(rw_key.as_str()), None).await?;
     assert_eq!(gone.status, StatusCode::UNAUTHORIZED);
     // A user without `settings` cannot make keys.
     let viewer = app.signed_in("viewer", "Viewer").await?;
@@ -4416,5 +4427,676 @@ async fn updates_are_for_a_local_administrator_and_need_the_desktop_app() -> Tes
     let r = app.local(Method::POST, "/api/system/update/install", &admin, None).await?;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
     assert_eq!(r.body["message"], json!("Updates are installed from the TallyCheck desktop app"));
+    Ok(())
+}
+
+// -- D49: password recovery ---------------------------------------------------------------
+
+struct FakeWindows(api_server::local_verify::Verification);
+
+impl api_server::local_verify::WindowsVerifier for FakeWindows {
+    fn verify(&self, _message: String) -> api_server::local_verify::VerifyFuture {
+        let answer = self.0.clone();
+        Box::pin(async move { answer })
+    }
+}
+
+impl App {
+    async fn with_windows(answer: api_server::local_verify::Verification) -> Result<App, AppError> {
+        let dir = tempfile::tempdir().map_err(AppError::internal)?;
+        let db = Db::open(&dir.path().join("t.db")).await?;
+        let files = documents::FileStore::new(
+            dir.path().join("files"),
+            documents::StorageKey::from_bytes(&[5u8; 32]).map_err(AppError::internal)?,
+        );
+        let state =
+            AppState::new(db.clone(), JwtKeys::new(b"test-secret-test-secret-test-secret!"), files, false, 47800)
+                .with_windows_verifier(Some(std::sync::Arc::new(FakeWindows(answer))));
+        let router = build_router(state, None);
+        Ok(App { _dir: dir, db, router })
+    }
+
+    async fn first_admin(&self) -> Result<(String, String), Box<dyn std::error::Error>> {
+        let body = json!({"username": "owner", "password": "first-password"});
+        let r = self.call_from("127.0.0.1:50000", HOST, Method::POST, "/api/auth/first-run", None, Some(body)).await?;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+        Ok((
+            r.body["accessToken"].as_str().ok_or("token")?.to_string(),
+            r.body["recoveryKey"].as_str().ok_or("recoveryKey")?.to_string(),
+        ))
+    }
+
+    async fn can_sign_in(&self, password: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let r = self
+            .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "owner", "password": password})))
+            .await?;
+        Ok(r.body["accessToken"].is_string())
+    }
+}
+
+#[tokio::test]
+async fn a_forgotten_password_is_reset_with_the_recovery_key() -> TestResult {
+    let app = App::new().await?;
+    let (_token, key) = app.first_admin().await?;
+    assert!(key.starts_with("TCRK-"), "{key}");
+    let path = "/api/auth/recovery/key";
+
+    let options = app.call_from("127.0.0.1:50000", HOST, Method::GET, "/api/auth/recovery/options", None, None).await?;
+    assert_eq!(options.body, json!({"recoveryKey": true, "windows": false}), "no desktop shell here");
+
+    let wrong = app
+        .call(Method::POST, path, None, Some(json!({"username": "owner", "recoveryKey": "TCRK-0000-0000-0000-0000-0000", "password": "new-password-1"})))
+        .await?;
+    assert_nest_error(
+        &wrong,
+        400,
+        json!("That username and recovery key don't match. Check both and try again."),
+        path,
+    );
+    let short = app
+        .call(Method::POST, path, None, Some(json!({"username": "owner", "recoveryKey": key, "password": "short"})))
+        .await?;
+    assert_eq!(short.status, StatusCode::BAD_REQUEST);
+    assert!(app.can_sign_in("first-password").await?, "nothing changed yet");
+
+    // Typed in lower case with spaces: still the key.
+    let typed = key.to_lowercase().replace('-', " ");
+    let ok = app
+        .call(
+            Method::POST,
+            path,
+            None,
+            Some(json!({"username": "owner", "recoveryKey": typed, "password": "new-password-1"})),
+        )
+        .await?;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
+    let next = ok.body["recoveryKey"].as_str().ok_or("next key")?.to_string();
+    assert_ne!(next, key);
+    assert!(app.can_sign_in("new-password-1").await?);
+    assert!(!app.can_sign_in("first-password").await?);
+
+    let reused = app
+        .call(
+            Method::POST,
+            path,
+            None,
+            Some(json!({"username": "owner", "recoveryKey": key, "password": "new-password-2"})),
+        )
+        .await?;
+    assert_eq!(reused.status, StatusCode::BAD_REQUEST, "a key works once");
+
+    // Guessing is throttled per username.
+    for _ in 0..5 {
+        app.call(Method::POST, path, None, Some(json!({"username": "owner", "recoveryKey": "TCRK-1111-1111-1111-1111-1111", "password": "new-password-3"})))
+            .await?;
+    }
+    let locked = app
+        .call(
+            Method::POST,
+            path,
+            None,
+            Some(json!({"username": "owner", "recoveryKey": next, "password": "new-password-3"})),
+        )
+        .await?;
+    assert_eq!(locked.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(app.can_sign_in("new-password-1").await?, "the sign-in throttle is separate");
+
+    let actions: Vec<String> =
+        sqlx::query_scalar(r#"SELECT "action" FROM "audit_logs""#).fetch_all(app.db.read()).await?;
+    assert!(actions.iter().any(|a| a == "Reset the password with the recovery key"), "{actions:?}");
+    assert!(actions.iter().any(|a| a == "Failed password recovery"), "{actions:?}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_signed_in_user_makes_a_new_recovery_key_with_their_password() -> TestResult {
+    let app = App::new().await?;
+    let (token, first) = app.first_admin().await?;
+    let path = "/api/auth/recovery-key";
+    let status = app.call(Method::GET, path, Some(&token), None).await?;
+    assert_eq!(status.body["hasKey"], json!(true));
+    assert_eq!(app.call(Method::GET, path, None, None).await?.status, StatusCode::UNAUTHORIZED);
+
+    let wrong = app.call(Method::POST, path, Some(&token), Some(json!({"password": "not-it"}))).await?;
+    assert_nest_error(&wrong, 400, json!("That is not your current password"), path);
+    let made = app.call(Method::POST, path, Some(&token), Some(json!({"password": "first-password"}))).await?;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    let key = made.body["recoveryKey"].as_str().ok_or("key")?;
+    assert_ne!(key, first);
+
+    let old = app
+        .call(
+            Method::POST,
+            "/api/auth/recovery/key",
+            None,
+            Some(json!({"username": "owner", "recoveryKey": first, "password": "new-password-1"})),
+        )
+        .await?;
+    assert_eq!(old.status, StatusCode::BAD_REQUEST, "the new key replaced the first one");
+    let new = app
+        .call(
+            Method::POST,
+            "/api/auth/recovery/key",
+            None,
+            Some(json!({"username": "owner", "recoveryKey": key, "password": "new-password-1"})),
+        )
+        .await?;
+    assert_eq!(new.status, StatusCode::OK, "{}", new.body);
+    Ok(())
+}
+
+#[tokio::test]
+async fn windows_sign_in_resets_a_password_only_on_the_main_pc_and_only_when_confirmed() -> TestResult {
+    use api_server::local_verify::Verification;
+    let path = "/api/auth/recovery/windows";
+    let body = json!({"username": "owner", "password": "new-password-1"});
+
+    // Without the desktop shell there is no Windows verification.
+    let plain = App::new().await?;
+    plain.first_admin().await?;
+    let none = plain.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, Some(body.clone())).await?;
+    assert_eq!(none.status, StatusCode::BAD_REQUEST);
+
+    let refused = App::with_windows(Verification::NotVerified).await?;
+    refused.first_admin().await?;
+    let options =
+        refused.call_from("127.0.0.1:50000", HOST, Method::GET, "/api/auth/recovery/options", None, None).await?;
+    assert_eq!(options.body["windows"], json!(true));
+    let remote_options =
+        refused.call_from("192.168.1.50:50000", HOST, Method::GET, "/api/auth/recovery/options", None, None).await?;
+    assert_eq!(remote_options.body["windows"], json!(false));
+    let no = refused.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, Some(body.clone())).await?;
+    assert_eq!(no.status, StatusCode::BAD_REQUEST, "{}", no.body);
+    assert!(refused.can_sign_in("first-password").await?);
+
+    let app = App::with_windows(Verification::Verified).await?;
+    let (_t, old_key) = app.first_admin().await?;
+    let remote = app.call_from("192.168.1.50:50000", HOST, Method::POST, path, None, Some(body.clone())).await?;
+    assert_eq!(remote.status, StatusCode::FORBIDDEN, "never from another PC");
+    let no_peer = app.call(Method::POST, path, None, Some(body.clone())).await?;
+    assert_eq!(no_peer.status, StatusCode::FORBIDDEN);
+    let unknown = app
+        .call_from(
+            "127.0.0.1:50000",
+            HOST,
+            Method::POST,
+            path,
+            None,
+            Some(json!({"username": "ghost", "password": "new-password-1"})),
+        )
+        .await?;
+    assert_eq!(unknown.status, StatusCode::BAD_REQUEST);
+    assert!(app.can_sign_in("first-password").await?);
+
+    let ok = app.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, Some(body)).await?;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
+    assert!(ok.body["recoveryKey"].as_str().is_some_and(|k| k.starts_with("TCRK-") && k != old_key));
+    assert!(app.can_sign_in("new-password-1").await?);
+    let actions: Vec<String> =
+        sqlx::query_scalar(r#"SELECT "action" FROM "audit_logs""#).fetch_all(app.db.read()).await?;
+    assert!(actions.iter().any(|a| a == "Reset the password with Windows sign-in"), "{actions:?}");
+    Ok(())
+}
+
+// ---- security fixes 2026-11-03: auth / LAN / headers (keep tests for that area below) ----
+
+fn lan_app_state(db: Db, dir: &tempfile::TempDir) -> Result<AppState, AppError> {
+    let files = documents::FileStore::new(
+        dir.path().join("files"),
+        documents::StorageKey::from_bytes(&[5u8; 32]).map_err(AppError::internal)?,
+    );
+    Ok(AppState::new(db, JwtKeys::new(b"test-secret-test-secret-test-secret!"), files, true, 47800).with_lan_policy(
+        vec![app_core::config::Network::parse("192.168.1.0/24").ok_or_else(|| AppError::internal("net"))?],
+        vec![],
+    ))
+}
+
+#[tokio::test]
+async fn wrong_passwords_sent_all_at_once_still_stop_at_five() -> TestResult {
+    let app = App::new().await?;
+    app.first_admin().await?;
+    let mut set = tokio::task::JoinSet::new();
+    for i in 0..20 {
+        let router = app.router.clone();
+        set.spawn(async move {
+            let body = json!({"username": "owner", "password": format!("guess-{i}")}).to_string();
+            let mut req = Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/login")
+                .header("host", HOST)
+                .header("content-type", "application/json")
+                .body(Body::from(body))?;
+            let addr: std::net::SocketAddr = "127.0.0.1:50000".parse()?;
+            req.extensions_mut().insert(axum::extract::ConnectInfo(addr));
+            Ok::<StatusCode, Box<dyn std::error::Error + Send + Sync>>(router.oneshot(req).await?.status())
+        });
+    }
+    let mut checked = 0;
+    while let Some(r) = set.join_next().await {
+        if r?.map_err(|e| e.to_string())? == StatusCode::UNAUTHORIZED {
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 5, "only five passwords were actually tried");
+    Ok(())
+}
+
+#[tokio::test]
+async fn other_pcs_cannot_lock_the_owner_out_and_rebinding_names_are_refused() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let db = Db::open(&dir.path().join("t.db")).await?;
+    let state = lan_app_state(db.clone(), &dir)?;
+    let app = App { _dir: dir, db, router: build_router(state, None) };
+    app.first_admin().await?;
+    let login = "/api/auth/login";
+    let lan_host = "192.168.1.10:47800";
+    for i in 0..6 {
+        let body = json!({"username": "owner", "password": format!("guess-{i}")});
+        app.call_from("192.168.1.20:50000", lan_host, Method::POST, login, None, Some(body)).await?;
+    }
+    let lan = json!({"username": "owner", "password": "first-password"});
+    let locked = app.call_from("192.168.1.20:50000", lan_host, Method::POST, login, None, Some(lan.clone())).await?;
+    assert_eq!(locked.status, StatusCode::TOO_MANY_REQUESTS, "the LAN side is locked");
+    let mine = app.call_from("127.0.0.1:50000", HOST, Method::POST, login, None, Some(lan)).await?;
+    assert_eq!(mine.status, StatusCode::OK, "the main PC still signs in: {}", mine.body);
+
+    // `<pc>.attacker.example` rebound to this PC is not one of this PC's names.
+    let pc = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "testpc".into()).to_ascii_lowercase();
+    let rebound = format!("{pc}.attacker.example:47800");
+    let r = app.call_from("127.0.0.1:50000", &rebound, Method::GET, "/api/auth/me", None, None).await?;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert!(!api_server::middleware::lan_host_allowed(&rebound, &[]));
+    assert!(api_server::middleware::lan_host_allowed(&format!("{pc}.local:47800"), &[]));
+
+    // Main-PC-only actions also need a loopback address-bar host, not just a loopback peer.
+    let options =
+        app.call_from("127.0.0.1:50000", lan_host, Method::GET, "/api/auth/recovery/options", None, None).await?;
+    assert_eq!(options.status, StatusCode::OK);
+    let first_run = app.call_from("127.0.0.1:50000", lan_host, Method::GET, "/api/auth/first-run", None, None).await?;
+    assert_eq!(first_run.body["canSetUpHere"], json!(false));
+    Ok(())
+}
+
+#[tokio::test]
+async fn overlong_usernames_are_refused_without_a_log_entry() -> TestResult {
+    let app = App::new().await?;
+    app.first_admin().await?;
+    let name = "x".repeat(10_000);
+    let r = app.call(Method::POST, "/api/auth/login", None, Some(json!({"username": name, "password": "p"}))).await?;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    let long_rows: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "audit_logs" WHERE length("username") > 255"#)
+        .fetch_one(app.db.read())
+        .await?;
+    assert_eq!(long_rows, 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn every_response_carries_a_content_security_policy() -> TestResult {
+    let app = App::new().await?;
+    let r = app.call(Method::GET, "/api/auth/first-run", None, None).await?;
+    let csp = r.headers.get("content-security-policy").and_then(|v| v.to_str().ok()).unwrap_or_default();
+    assert!(csp.contains("script-src 'self'") && csp.contains("base-uri 'none'"), "{csp}");
+    assert!(!csp.contains("unsafe-eval"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_admin_password_reset_cancels_the_users_recovery_key() -> TestResult {
+    let app = App::new().await?;
+    let (token, key) = app.first_admin().await?;
+    let made = app
+        .call(Method::POST, "/api/users", Some(&token), Some(json!({"username": "second", "password": "second-pass"})))
+        .await?;
+    let second = made.body["id"].as_str().ok_or("id")?.to_string();
+    let sid = second.clone();
+    // The second user signs in and makes a key; the owner's key is untouched by what follows.
+    let login = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "second", "password": "second-pass"})))
+        .await?;
+    let st = login.body["accessToken"].as_str().ok_or("token")?.to_string();
+    let k =
+        app.call(Method::POST, "/api/auth/recovery-key", Some(&st), Some(json!({"password": "second-pass"}))).await?;
+    let second_key = k.body["recoveryKey"].as_str().ok_or("key")?.to_string();
+    let reset = app
+        .call(
+            Method::POST,
+            &format!("/api/users/{sid}/reset-password"),
+            Some(&token),
+            Some(json!({"password": "set-by-admin"})),
+        )
+        .await?;
+    assert!(reset.status.is_success(), "{} {}", reset.status, reset.body);
+    let used = app
+        .call(
+            Method::POST,
+            "/api/auth/recovery/key",
+            None,
+            Some(json!({"username": "second", "recoveryKey": second_key, "password": "taken-back"})),
+        )
+        .await?;
+    assert_eq!(used.status, StatusCode::BAD_REQUEST, "the old key no longer works");
+    let owner = app
+        .call(
+            Method::POST,
+            "/api/auth/recovery/key",
+            None,
+            Some(json!({"username": "owner", "recoveryKey": key, "password": "new-password-1"})),
+        )
+        .await?;
+    assert_eq!(owner.status, StatusCode::OK, "{}", owner.body);
+    Ok(())
+}
+
+// ---- security fixes 2026-11-03: frontend-facing server checks (keep tests for that area below) ----
+
+// ---- security fixes 2026-11-03: data / permissions / integrations (keep tests for that area below) ----
+
+impl App {
+    /// A user holding exactly `permissions` (through a role of their own); returns a token.
+    async fn with_permissions(
+        &self,
+        admin: &str,
+        username: &str,
+        permissions: &[&str],
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let role = format!("Role of {username}");
+        let r = self
+            .call(Method::POST, "/api/roles", Some(admin), Some(json!({"name": role, "permissions": permissions})))
+            .await?;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+        self.signed_in(username, &role).await
+    }
+
+    async fn account_ids(&self, admin: &str) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+        self.call(Method::PATCH, "/api/settings", Some(admin), Some(json!({"region.currency": "LKR"}))).await?;
+        self.call(Method::POST, "/api/accounts/seed", Some(admin), None).await?;
+        let accounts = self.call(Method::GET, "/api/accounts", Some(admin), None).await?;
+        Ok(accounts
+            .body
+            .as_array()
+            .ok_or("accounts")?
+            .iter()
+            .map(|a| {
+                (a["code"].as_str().unwrap_or_default().to_string(), a["id"].as_str().unwrap_or_default().to_string())
+            })
+            .collect())
+    }
+}
+
+fn code_of(accounts: &[(String, String)], code: &str) -> String {
+    accounts.iter().find(|(c, _)| c == code).map(|(_, id)| id.clone()).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn company_logo_must_be_a_plain_picture_data_url() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    for bad in [
+        "data:image/png;base64,AAAA\" onerror=\"alert(1)",
+        "data:image/png;base64,AAAA<script>",
+        "data:image/png;base64,",
+        "data:image/png;base64,AAAA===",
+        "data:image/svg+xml;base64,AAAA",
+        "data:image/png;base64,AAAA javascript:x",
+    ] {
+        let r = app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"company.logo": bad}))).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
+        assert_eq!(r.body["message"], json!(["company.logo must be a PNG, JPEG or WebP picture"]));
+    }
+    for good in ["data:image/png;base64,iVBORw0KGgo=", "data:image/webp;base64,UklGR+/a", ""] {
+        let r = app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"company.logo": good}))).await?;
+        assert_eq!(r.status, StatusCode::OK, "{good}: {}", r.body);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn amounts_beyond_numeric_15_2_and_reserved_source_types_are_refused() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let accounts = app.account_ids(&admin).await?;
+    let (cash, revenue) = (code_of(&accounts, "1000"), code_of(&accounts, "4000"));
+    let entry = |amount: Value, source: Option<&str>| {
+        json!({"date": "2026-10-01", "description": "Test", "sourceType": source, "lines": [
+            {"accountId": cash, "debit": amount, "credit": 0},
+            {"accountId": revenue, "debit": 0, "credit": amount}]})
+    };
+    for huge in [json!(1_000_000_000_000_000i64), json!(1e15), json!(1_000_000_000_000i64)] {
+        let r = app.call(Method::POST, "/api/ledger/entries", Some(&admin), Some(entry(huge.clone(), None))).await?;
+        assert_nest_error(&r, 400, json!("Amount is too large"), "/api/ledger/entries");
+    }
+    let max = app
+        .call(Method::POST, "/api/ledger/entries", Some(&admin), Some(entry(json!(999_999_999_999.99), None)))
+        .await?;
+    assert_eq!(max.status, StatusCode::CREATED, "{}", max.body);
+    // Invoice lines, quantities and payments too.
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Big Co"}))).await?;
+    let inv = |qty: Value, price: Value| {
+        json!({"customerId": cust.body["id"], "date": "2026-10-01",
+               "lines": [{"description": "x", "quantity": qty, "unitPrice": price, "accountId": revenue}]})
+    };
+    let r = app.call(Method::POST, "/api/invoices", Some(&admin), Some(inv(json!(1), json!(5e12)))).await?;
+    assert_eq!((r.status, r.body["message"].clone()), (StatusCode::BAD_REQUEST, json!("Amount is too large")));
+    let r = app
+        .call(Method::POST, "/api/invoices", Some(&admin), Some(inv(json!(10_000_000_000_000i64), json!(1))))
+        .await?;
+    assert_eq!((r.status, r.body["message"].clone()), (StatusCode::BAD_REQUEST, json!("Amount is too large")));
+
+    // Manual entries may not pose as a document's entry; a plain or MANUAL one is fine.
+    for reserved in [
+        "INVOICE",
+        "PAYMENT_AR",
+        "payroll",
+        "US_PAYROLL_PAYMENT",
+        "STOCK_ADJUSTMENT",
+        "BANK_TRANSFER",
+        "CREDIT_NOTE",
+        "REVALUATION",
+    ] {
+        let r =
+            app.call(Method::POST, "/api/ledger/entries", Some(&admin), Some(entry(json!(10), Some(reserved)))).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{reserved}: {}", r.body);
+    }
+    for ok in [None, Some("MANUAL"), Some("OPENING_BALANCE")] {
+        let r = app.call(Method::POST, "/api/ledger/entries", Some(&admin), Some(entry(json!(10), ok))).await?;
+        assert_eq!(r.status, StatusCode::CREATED, "{ok:?}: {}", r.body);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn settings_show_payroll_and_integration_keys_only_to_those_allowed() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let mut tx = app.db.begin().await?;
+    database::settings::upsert(&mut tx, "payroll.companyEpfNumber", "E/12345").await?;
+    database::settings::upsert(&mut tx, "integration.shopify.remoteId", "s.myshopify.com").await?;
+    tx.commit().await?;
+    app.call(Method::PATCH, "/api/settings", Some(&admin), Some(json!({"company.name": "Test Co"}))).await?;
+    let plain = app.with_permissions(&admin, "clerk", &["invoices"]).await?;
+    let payroll = app.with_permissions(&admin, "pay", &["payroll"]).await?;
+    let settings = app.with_permissions(&admin, "setter", &["settings"]).await?;
+    let keys = |r: &Resp| {
+        (r.body.get("payroll.companyEpfNumber").is_some(), r.body.get("integration.shopify.remoteId").is_some())
+    };
+    for (token, expect) in
+        [(&plain, (false, false)), (&payroll, (true, false)), (&settings, (false, true)), (&admin, (true, true))]
+    {
+        let r = app.call(Method::GET, "/api/settings", Some(token), None).await?;
+        assert_eq!(r.status, StatusCode::OK);
+        assert_eq!(r.body["company.name"], json!("Test Co"));
+        assert_eq!(keys(&r), expect, "{}", r.body);
+    }
+    let key = app
+        .call(Method::POST, "/api/api-keys", Some(&admin), Some(json!({"name": "Claude reader", "canWrite": false})))
+        .await?;
+    let key = key.body["key"].as_str().ok_or("key")?.to_string();
+    let r = app.call_from("127.0.0.1:50000", HOST, Method::GET, "/api/settings", Some(key.as_str()), None).await?;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!((keys(&r), r.body["company.name"].clone()), ((false, false), json!("Test Co")));
+    Ok(())
+}
+
+#[tokio::test]
+async fn payslips_need_the_payroll_permission() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let hr = app.with_permissions(&admin, "hr", &["employees"]).await?;
+    let hr_pay = app.with_permissions(&admin, "hrpay", &["employees", "payroll"]).await?;
+    let e = app
+        .call(Method::POST, "/api/employees", Some(&admin), Some(json!({"employeeId": "E-1", "name": "Asha"})))
+        .await?;
+    let id = e.body["id"].as_str().ok_or("id")?.to_string();
+    let docs = format!("/api/employees/{id}/documents");
+    let up = |category: &'static str| {
+        multipart(
+            &[("title", category), ("category", category)],
+            Some(("file", "a.pdf", "application/pdf", b"%PDF-1.4")),
+        )
+    };
+    let slip = app.upload(&docs, &admin, up("PAYSLIP")).await?;
+    assert_eq!(slip.status, StatusCode::CREATED, "{}", slip.body);
+    let slip_id = slip.body["id"].as_str().ok_or("slip")?.to_string();
+    let contract = app.upload(&docs, &hr, up("CONTRACT")).await?;
+    assert_eq!(contract.status, StatusCode::CREATED, "{}", contract.body);
+
+    let cats = |r: &Resp| -> Vec<String> {
+        r.body
+            .as_array()
+            .map(|a| a.iter().filter_map(|d| d["category"].as_str().map(str::to_string)).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(cats(&app.call(Method::GET, &docs, Some(&hr), None).await?), ["CONTRACT"]);
+    assert_eq!(cats(&app.call(Method::GET, &docs, Some(&hr_pay), None).await?).len(), 2);
+    let profile = app.call(Method::GET, &format!("/api/employees/{id}"), Some(&hr), None).await?;
+    assert_eq!(profile.body["documents"].as_array().map(Vec::len), Some(1), "{}", profile.body);
+
+    let (status, _, bytes) = app.download(&format!("{docs}/{slip_id}/download"), &hr).await?;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(!bytes.starts_with(b"%PDF"));
+    assert_eq!(app.download(&format!("{docs}/{slip_id}/download"), &hr_pay).await?.0, StatusCode::OK);
+    assert_eq!(app.upload(&docs, &hr, up("PAYSLIP")).await?.status, StatusCode::FORBIDDEN);
+    assert_eq!(app.upload(&format!("{docs}/{slip_id}/replace"), &hr, up("OTHER")).await?.status, StatusCode::NOT_FOUND);
+    let relabel =
+        app.call(Method::PATCH, &format!("{docs}/{slip_id}"), Some(&hr), Some(json!({"category": "OTHER"}))).await?;
+    assert_eq!(relabel.status, StatusCode::NOT_FOUND);
+    let contract_id = contract.body["id"].as_str().ok_or("contract")?;
+    let to_slip = app
+        .call(Method::PATCH, &format!("{docs}/{contract_id}"), Some(&hr), Some(json!({"category": "PAYSLIP"})))
+        .await?;
+    assert_eq!(to_slip.status, StatusCode::FORBIDDEN);
+    let del = app.call(Method::DELETE, &format!("{docs}/{slip_id}"), Some(&hr), None).await?;
+    assert_eq!(del.status, StatusCode::NOT_FOUND);
+    let del = app.call(Method::DELETE, &format!("{docs}/{slip_id}"), Some(&hr_pay), None).await?;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+    Ok(())
+}
+
+#[tokio::test]
+async fn imports_and_bank_lines_follow_the_customer_and_invoice_scope_rules() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let accounts = app.account_ids(&admin).await?;
+    let (cash, revenue) = (code_of(&accounts, "1000"), code_of(&accounts, "4000"));
+    let sales = app.with_permissions(&admin, "sales", &["invoices", "banking", "payments"]).await?;
+    let id = |v: &Value| v["id"].as_str().unwrap_or_default().to_string();
+
+    // Importing invoices for an unknown customer needs the Customers permission.
+    app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Known Co"}))).await?;
+    let rows = json!({"kind": "INVOICES", "source": "Shop", "defaultAccountId": revenue, "dateOrder": "DMY", "rows": [
+        {"number": "S-1", "customer": "Known Co", "date": "10/10/2026", "description": "Tea", "unitPrice": "500"},
+        {"number": "S-2", "customer": "Brand New Co", "date": "10/10/2026", "description": "Tea", "unitPrice": "150"}]});
+    let mine = app.call(Method::POST, "/api/imports", Some(&sales), Some(rows.clone())).await?;
+    assert_eq!(mine.status, StatusCode::CREATED, "{}", mine.body);
+    assert_eq!((mine.body["created"].clone(), mine.body["errors"].clone()), (json!(1), json!(1)), "{}", mine.body);
+    assert!(mine.body.to_string().contains("you need the Customers permission"), "{}", mine.body);
+    let customers = app.call(Method::GET, "/api/customers", Some(&admin), None).await?;
+    assert!(!customers.body.to_string().contains("Brand New Co"));
+    let my_import = mine.body["id"].as_str().ok_or("import")?.to_string();
+
+    // An admin's invoice import is not shown to, nor undone by, a user without invoices:all.
+    let theirs = app
+        .call(
+            Method::POST,
+            "/api/imports",
+            Some(&admin),
+            Some(json!({"kind": "INVOICES", "source": "Other", "defaultAccountId": revenue, "dateOrder": "DMY", "rows": [
+                {"number": "A-1", "customer": "Brand New Co", "date": "11/10/2026", "description": "Cake", "unitPrice": "200"}]})),
+        )
+        .await?;
+    assert_eq!(theirs.body["created"], json!(1), "{}", theirs.body);
+    let their_import = theirs.body["id"].as_str().ok_or("import")?.to_string();
+    let listed = app.call(Method::GET, "/api/imports", Some(&sales), None).await?;
+    let ids: Vec<String> = listed.body.as_array().ok_or("list")?.iter().map(id).collect();
+    assert!(ids.contains(&my_import) && !ids.contains(&their_import), "{ids:?}");
+    let undo = app.call(Method::DELETE, &format!("/api/imports/{their_import}"), Some(&sales), None).await?;
+    assert_eq!(undo.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.call(Method::GET, "/api/imports", Some(&admin), None).await?.body.as_array().map(Vec::len), Some(2));
+
+    // Posted invoices: one of the admin's, one of the sales user's.
+    let invoices = app.call(Method::GET, "/api/invoices", Some(&admin), None).await?;
+    for inv in invoices.body["data"].as_array().ok_or("invoices")? {
+        let p = app.call(Method::POST, &format!("/api/invoices/{}/post", id(inv)), Some(&admin), None).await?;
+        assert_eq!(p.status, StatusCode::CREATED, "{}", p.body);
+    }
+    let admin_inv = invoices.body["data"]
+        .as_array()
+        .and_then(|a| a.iter().find(|i| i["customer"]["name"] == "Brand New Co" || i["poNumber"] == "A-1"))
+        .map(id)
+        .ok_or("admin invoice")?;
+    let bank = json!({"kind": "BANK", "source": "Bank", "accountId": cash, "dateOrder": "DMY",
+        "rows": [{"date": "12/10/2026", "description": "Deposit Brand New Co", "amount": "200.00"}]});
+    assert_eq!(app.call(Method::POST, "/api/imports", Some(&admin), Some(bank)).await?.status, StatusCode::CREATED);
+    let lines = app.call(Method::GET, &format!("/api/bank-lines?accountId={cash}"), Some(&sales), None).await?;
+    let line = lines.body["data"].as_array().and_then(|a| a.first()).map(id).ok_or("line")?;
+    assert!(!lines.body.to_string().contains(&admin_inv), "suggestions hide others' invoices: {}", lines.body);
+    let docs = app.call(Method::GET, &format!("/api/bank-lines/{line}/documents"), Some(&sales), None).await?;
+    let doc_ids: Vec<String> = docs.body.as_array().ok_or("docs")?.iter().map(id).collect();
+    assert_eq!(doc_ids.len(), 1, "{}", docs.body);
+    assert!(!doc_ids.contains(&admin_inv));
+    let admin_docs = app.call(Method::GET, &format!("/api/bank-lines/{line}/documents"), Some(&admin), None).await?;
+    assert_eq!(admin_docs.body.as_array().map(Vec::len), Some(2));
+    let pay = app
+        .call(
+            Method::POST,
+            &format!("/api/bank-lines/{line}/payment"),
+            Some(&sales),
+            Some(json!({"invoiceId": admin_inv})),
+        )
+        .await?;
+    assert_eq!(pay.status, StatusCode::NOT_FOUND, "{}", pay.body);
+    let pay = app
+        .call(
+            Method::POST,
+            &format!("/api/bank-lines/{line}/payment"),
+            Some(&admin),
+            Some(json!({"invoiceId": admin_inv})),
+        )
+        .await?;
+    assert_eq!(pay.status, StatusCode::OK, "{}", pay.body);
+    Ok(())
+}
+
+#[tokio::test]
+async fn backups_and_restores_refuse_network_paths() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    for (uri, body) in [
+        ("/api/system/backup/run", json!({"folder": r"\\server\share\backups"})),
+        ("/api/system/backup/run", json!({"folder": "//server/share"})),
+        ("/api/system/backup/settings", json!({"enabled": false, "folder": r"\\?\UNC\server\share"})),
+        ("/api/system/restore/verify", json!({"file": r"\\10.0.0.5\c$\backup.cbk"})),
+        ("/api/system/restore/stage", json!({"file": r"\\server\x.cbk", "confirm": "RESTORE"})),
+    ] {
+        let method = if uri.ends_with("settings") { Method::PUT } else { Method::POST };
+        let r = app.local(method, uri, &admin, Some(body)).await?;
+        assert_nest_error(
+            &r,
+            400,
+            json!("Choose a folder on this PC (a drive letter such as C: or D:), not a network address"),
+            uri,
+        );
+    }
     Ok(())
 }

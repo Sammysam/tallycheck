@@ -8,6 +8,7 @@
 pub mod body;
 pub mod errors;
 pub mod extract;
+pub mod local_verify;
 pub mod middleware;
 pub mod routes;
 pub mod server;
@@ -17,7 +18,7 @@ pub mod upload;
 pub mod validate;
 
 pub use server::{
-    build_router, init_logging, open_file_store, seed_fresh_install, start, start_with_updater, ServerHandle,
-    STORAGE_KEY_FILE,
+    build_router, init_logging, open_file_store, seed_fresh_install, start, start_with_shell, start_with_updater,
+    ServerHandle, STORAGE_KEY_FILE,
 };
 pub use state::AppState;

@@ -6,6 +6,8 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import TwoFactorSetup from './pages/TwoFactorSetup';
 import FirstRunSetup from './pages/FirstRunSetup';
+import ForgotPassword from './pages/ForgotPassword';
+import RecoveryKey from './pages/RecoveryKey';
 import CompanySetup from './pages/CompanySetup';
 import TwoFactorVerify from './pages/TwoFactorVerify';
 import Dashboard from './pages/Dashboard';
@@ -54,6 +56,7 @@ export default function App() {
           {/* Public auth routes */}
           <Route path="/login"      element={<Login />} />
           <Route path="/setup"      element={<FirstRunSetup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/2fa/setup"  element={<TwoFactorSetup />} />
           <Route path="/2fa/verify" element={<TwoFactorVerify />} />
           <Route path="/company-setup" element={<ProtectedRoute permission="settings"><CompanySetup /></ProtectedRoute>} />
@@ -64,6 +67,7 @@ export default function App() {
               <Layout>
                 <Routes>
                   <Route path="/"                         element={<Dashboard />} />
+                  <Route path="/recovery-key"             element={<RecoveryKey />} />
                   <Route path="/accounts"                 element={<Accounts />} />
                   <Route path="/customers"                element={<Customers />} />
                   <Route path="/vendors"                  element={<Vendors />} />

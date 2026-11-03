@@ -19,6 +19,15 @@ pub async fn post_entry(
     body: JsonBody,
 ) -> AppResult<(StatusCode, Json<JournalEntry>)> {
     let dto = validate::create_journal_entry(body.object())?;
+    // An entry claiming to come from a document would be shown as that document's entry and
+    // escape the D18 rules; only the app itself writes those source types.
+    if let Some(kind) = dto.source_type.as_deref().map(|k| k.trim().to_ascii_uppercase()) {
+        if is_reserved_source(&kind) {
+            return Err(AppError::bad_request(format!(
+                "sourceType {kind} is reserved for entries the app posts from documents"
+            )));
+        }
+    }
     let mut tx = state.db.begin().await?;
     // D34: a line on a foreign-currency account carries its foreign amount, signed by side.
     let foreign: Vec<Option<app_core::money::Money>> = dto
@@ -78,6 +87,15 @@ pub async fn get_entry(
 ) -> AppResult<Json<JournalEntry>> {
     let mut conn = state.db.read().acquire().await?;
     Ok(Json(entries::get(&mut conn, &id).await?))
+}
+
+/// Source types the app writes itself (documents, payroll, stock, bank transfers, revaluation).
+fn is_reserved_source(kind: &str) -> bool {
+    document_name(kind).is_some()
+        || matches!(kind, "BANK_TRANSFER" | "REVALUATION")
+        || kind.starts_with("PAYMENT")
+        || kind.starts_with("PAYROLL")
+        || kind.starts_with("US_PAYROLL")
 }
 
 /// Which screen owns an entry posted by a business document.

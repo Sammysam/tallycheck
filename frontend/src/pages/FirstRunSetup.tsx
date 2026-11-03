@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AuthShell, { PasswordInput } from '../components/AuthShell';
+import RecoveryKeyCard from '../components/RecoveryKeyCard';
 import api, { errMsg } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -14,6 +15,7 @@ export default function FirstRunSetup() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState<{ token: string; key: string } | null>(null);
   const { completeAuth } = useAuth();
   const navigate = useNavigate();
 
@@ -35,9 +37,14 @@ export default function FirstRunSetup() {
     }
     setLoading(true);
     try {
-      const { data } = await api.post<{ accessToken: string }>('/auth/first-run', { username, password });
-      completeAuth(data.accessToken);
-      navigate('/', { replace: true });
+      const { data } = await api.post<{ accessToken: string; recoveryKey?: string }>('/auth/first-run', { username, password });
+      // D49: show the recovery key before going in; sign in only once it has been saved.
+      if (data.recoveryKey) {
+        setCreated({ token: data.accessToken, key: data.recoveryKey });
+      } else {
+        completeAuth(data.accessToken);
+        navigate('/', { replace: true });
+      }
     } catch (err) {
       setError(errMsg(err, 'Could not create the account'));
     } finally {
@@ -47,6 +54,21 @@ export default function FirstRunSetup() {
 
   const input =
     'w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent';
+
+  if (created) {
+    return (
+      <AuthShell>
+        <RecoveryKeyCard
+          recoveryKey={created.key}
+          username={username}
+          onDone={() => {
+            completeAuth(created.token);
+            navigate('/', { replace: true });
+          }}
+        />
+      </AuthShell>
+    );
+  }
 
   return (
     <AuthShell>
@@ -74,7 +96,7 @@ export default function FirstRunSetup() {
                 <PasswordInput required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} className={input} />
               </div>
               <p className="text-xs text-gray-400">
-                This account can do everything, including payroll and user management. Keep the password safe. You can turn on 2FA after signing in.
+                This account can do everything, including payroll and user management. Keep the password safe. Next you get a recovery key in case you forget it. Tip: later, add a second administrator under Administration → Users, so someone can always reset passwords.
               </p>
               {error && <p className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>}
               <button

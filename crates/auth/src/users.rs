@@ -118,7 +118,7 @@ pub async fn get_by_username(db: &Db, username: &str) -> AppResult<Option<User>>
     find_by_username(&mut conn, username).await
 }
 
-async fn require(conn: &mut SqliteConnection, id: &str) -> AppResult<User> {
+pub(crate) async fn require(conn: &mut SqliteConnection, id: &str) -> AppResult<User> {
     find_by_id(conn, id).await?.ok_or_else(|| AppError::NotFound(format!("User {id} not found")))
 }
 
@@ -237,6 +237,11 @@ pub async fn update_user(db: &Db, id: &str, dto: UpdateUser) -> AppResult<User> 
         .execute(&mut *tx)
         .await?;
     }
+    // D49: switching a user off also cancels their recovery key, so turning them on again
+    // later does not bring back a key that may have left with them.
+    if user.is_active && !is_active {
+        crate::recovery::revoke_in(&mut tx, id).await?;
+    }
     let updated = require(&mut tx, id).await?;
     tx.commit().await?;
     Ok(updated)
@@ -266,12 +271,15 @@ pub async fn reset_password(db: &Db, id: &str, new_password: &str) -> AppResult<
     let mut tx = db.begin().await?;
     require(&mut tx, id).await?;
     set_password_hash_in(&mut tx, id, &hash).await?;
+    // D49: an administrator's reset cancels the user's recovery key (it may be why the reset
+    // was needed, e.g. a leaked printout); the user makes a new one under File.
+    crate::recovery::revoke_in(&mut tx, id).await?;
     let user = require(&mut tx, id).await?;
     tx.commit().await?;
     Ok(user)
 }
 
-async fn set_password_hash_in(conn: &mut SqliteConnection, id: &str, hash: &str) -> AppResult<()> {
+pub(crate) async fn set_password_hash_in(conn: &mut SqliteConnection, id: &str, hash: &str) -> AppResult<()> {
     sqlx::query(r#"UPDATE "users" SET "passwordHash" = ?1, "updatedAt" = ?2 WHERE "id" = ?3"#)
         .bind(hash)
         .bind(now_iso())

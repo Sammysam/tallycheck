@@ -17,17 +17,23 @@ pub struct Api {
     http: reqwest::Client,
 }
 
+/// A setting from the environment: the TallyCheck name first, then the name used before the
+/// rename. Blank values count as not set.
+fn env_var(name: &str, older: &str) -> Option<String> {
+    [name, older].iter().filter_map(|n| std::env::var(n).ok()).map(|v| v.trim().to_string()).find(|v| !v.is_empty())
+}
+
 impl Api {
     pub fn from_env() -> Api {
-        let base = std::env::var("CENANGO_API_URL").unwrap_or_else(|_| "http://127.0.0.1:47800".into());
-        let key = std::env::var("CENANGO_API_KEY").ok().map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+        let base = env_var("TALLYCHECK_API_URL", "CENANGO_API_URL").unwrap_or_else(|| "http://127.0.0.1:47800".into());
+        let key = env_var("TALLYCHECK_API_KEY", "CENANGO_API_KEY");
         let http = reqwest::Client::builder().timeout(Duration::from_secs(60)).build().unwrap_or_default();
         Api { base: base.trim_end_matches('/').to_string(), key, http }
     }
 
     async fn send(&self, req: reqwest::RequestBuilder) -> Result<Value, String> {
         let key = self.key.as_deref().ok_or_else(|| {
-            "No key: set CENANGO_API_KEY to a key made in TallyCheck under Settings → Integrations → Claude."
+            "No key: set TALLYCHECK_API_KEY (or the older CENANGO_API_KEY) to a key made in TallyCheck under Settings → Integrations → Claude."
                 .to_string()
         })?;
         let res =

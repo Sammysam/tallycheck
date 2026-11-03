@@ -59,7 +59,10 @@ so it was not installed." This is separate from Windows code signing (see above)
 
 1. Raise the version in `Cargo.toml` (`[workspace.package] version`) and `src-tauri/tauri.conf.json`.
 2. `python tools/release.py --notes "What's new" --download-base https://<release page>/v{version}`
-   — signs and builds the installer (`npm run installer`) and writes `latest.json` next to it.
+   — builds the installer (`npm run installer`) **without** the update key in its environment
+   (`createUpdaterArtifacts` is switched off for that build), then signs the finished installer
+   with `npx tauri signer sign` — the only command that gets the key — and writes `latest.json`
+   next to it. npm packages, cargo build scripts and the Tauri build never see the key.
 3. Upload `TallyCheck_<version>_x64-setup.exe` to the download address and replace the
    `latest.json` that the app's feed points at.
 

@@ -63,7 +63,12 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1.5">Password</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-gray-600">Password</label>
+                <button type="button" tabIndex={-1} onClick={() => navigate('/forgot-password')} className="text-xs text-orange-700 hover:underline">
+                  Forgot password?
+                </button>
+              </div>
               <PasswordInput
                 required
                 value={password}

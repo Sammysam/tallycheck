@@ -159,5 +159,8 @@ pub async fn sync(
     if !auth.user().has_permission("banking") {
         return Err(AppError::Forbidden("Insufficient permissions".into()));
     }
-    Ok(Json(integrations::sync(&s.db, data_dir(&s)?, connector(&id)?, Some(&auth.user().id)).await?))
+    let may_create_customers = auth.user().has_permission("customers");
+    Ok(Json(
+        integrations::sync(&s.db, data_dir(&s)?, connector(&id)?, Some(&auth.user().id), may_create_customers).await?,
+    ))
 }

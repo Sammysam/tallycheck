@@ -234,15 +234,42 @@ pub fn base_url(c: Connector, real: String) -> String {
 }
 
 pub fn http() -> AppResult<reqwest::Client> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .user_agent("CenangoAccounting")
-        .build()
-        .map_err(AppError::internal)
+    client_builder().build().map_err(AppError::internal)
 }
 
-pub fn unreachable(service: &str, e: impl std::fmt::Display) -> AppError {
-    AppError::bad_request(format!("Could not reach {service}: {e}. Check the internet connection and try again."))
+/// The settings every connector's client shares. Redirects are followed only within the same
+/// scheme, host and port: a key in a header or the query never goes to another site.
+pub fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder().timeout(Duration::from_secs(60)).user_agent("CenangoAccounting").redirect(
+        reqwest::redirect::Policy::custom(|attempt| {
+            let first = attempt.previous().first().cloned();
+            if attempt.previous().len() >= 5 {
+                attempt.error("too many redirects")
+            } else if first.is_some_and(|f| same_origin(&f, attempt.url())) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }),
+    )
+}
+
+/// Same scheme, host and port.
+pub fn same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
+    a.scheme() == b.scheme() && a.host_str() == b.host_str() && a.port_or_known_default() == b.port_or_known_default()
+}
+
+/// A failed request in words, without its address: the address can hold a key (WooCommerce
+/// takes `consumer_secret` in the query when the site strips the Authorization header).
+pub fn describe(e: reqwest::Error) -> String {
+    e.without_url().to_string()
+}
+
+pub fn unreachable(service: &str, e: reqwest::Error) -> AppError {
+    AppError::bad_request(format!(
+        "Could not reach {service}: {}. Check the internet connection and try again.",
+        describe(e)
+    ))
 }
 
 /// Sends a request, waiting and retrying when the service says it is busy (429). Returns the
@@ -379,6 +406,7 @@ struct Ctx<'a> {
     cfg: &'a Config,
     home: String,
     created_by: Option<&'a str>,
+    may_create_customers: bool,
     unmapped: BTreeSet<String>,
 }
 
@@ -450,6 +478,12 @@ async fn order_to_invoice(tx: &mut Tx, ctx: &mut Ctx<'_>, import_id: &str, order
     .await?;
     let customer_id = match existing {
         Some(c) => c,
+        None if !ctx.may_create_customers => {
+            return Err(AppError::bad_request(format!(
+                "Customer {} does not exist; you need the Customers permission to create customers",
+                order.customer
+            )));
+        }
         None => {
             let p = parties::create_in(
                 tx,
@@ -530,12 +564,13 @@ pub async fn apply(
     fetched: Fetched,
     since: &str,
     created_by: Option<&str>,
+    may_create_customers: bool,
 ) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     let home = home_currency(&mut tx).await?;
     let source =
         format!("{} ({})", c.label(), cfg.remote_name.clone().or_else(|| cfg.remote_id.clone()).unwrap_or_default());
-    let mut ctx = Ctx { c, cfg, home, created_by, unmapped: BTreeSet::new() };
+    let mut ctx = Ctx { c, cfg, home, created_by, may_create_customers, unmapped: BTreeSet::new() };
     let mut rows = Vec::new();
     let mut notes = fetched.notes;
     let start = cfg.start_date.clone().unwrap_or_else(|| since.to_string());
@@ -659,5 +694,33 @@ pub async fn remember_outcome(db: &Db, c: Connector, result: &AppResult<Value>) 
                 .await
         }
         Err(e) => save(db, c, &[("lastError", Some(format!("{now} {}", e.user_message())))]).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn request_errors_never_show_the_address() {
+        // Port 9 on loopback: nothing listens, so the request fails at once.
+        let err = reqwest::Client::new()
+            .get("http://127.0.0.1:9/wp-json/wc/v3/orders?consumer_key=ck_abc&consumer_secret=cs_secret123")
+            .send()
+            .await
+            .expect_err("nothing listens on port 9");
+        assert!(err.to_string().contains("cs_secret123"), "reqwest itself shows the URL: {err}");
+        let msg = unreachable("WooCommerce", err).user_message();
+        assert!(!msg.contains("cs_secret123") && !msg.contains("ck_abc"), "{msg}");
+        assert!(msg.starts_with("Could not reach WooCommerce"), "{msg}");
+    }
+
+    #[test]
+    fn same_origin_compares_scheme_host_and_port() {
+        let u = |s: &str| reqwest::Url::parse(s).expect("url");
+        assert!(same_origin(&u("https://a.example/x"), &u("https://a.example:443/y?z")));
+        assert!(!same_origin(&u("https://a.example/x"), &u("http://a.example/x")));
+        assert!(!same_origin(&u("https://a.example/x"), &u("https://a.example.evil.test/x")));
+        assert!(!same_origin(&u("https://a.example/x"), &u("https://a.example:8443/x")));
     }
 }

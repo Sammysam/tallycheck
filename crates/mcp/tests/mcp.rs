@@ -16,10 +16,19 @@ struct Mcp {
 }
 
 impl Mcp {
+    /// `cenango-mcp.exe` with the older variable names, as connections made before the rename.
     fn start(base: &str, key: &str) -> Result<Mcp, Box<dyn std::error::Error>> {
-        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_cenango-mcp"))
-            .env("CENANGO_API_URL", base)
-            .env("CENANGO_API_KEY", key)
+        Self::start_as(env!("CARGO_BIN_EXE_cenango-mcp"), ("CENANGO_API_URL", base), ("CENANGO_API_KEY", key))
+    }
+
+    fn start_as(exe: &str, url: (&str, &str), key: (&str, &str)) -> Result<Mcp, Box<dyn std::error::Error>> {
+        let mut child = tokio::process::Command::new(exe)
+            .env_remove("TALLYCHECK_API_URL")
+            .env_remove("TALLYCHECK_API_KEY")
+            .env_remove("CENANGO_API_URL")
+            .env_remove("CENANGO_API_KEY")
+            .env(url.0, url.1)
+            .env(key.0, key.1)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .kill_on_drop(true)
@@ -164,7 +173,17 @@ async fn claude_reads_the_books_and_creates_only_drafts() -> TestResult {
     // No key at all: a clear message, not a crash.
     let mut keyless = Mcp::start(&base, "")?;
     let (msg, err) = keyless.tool("list_invoices", json!({})).await?;
-    assert!(err && msg.contains("CENANGO_API_KEY"), "{msg}");
+    assert!(err && msg.contains("TALLYCHECK_API_KEY") && msg.contains("CENANGO_API_KEY"), "{msg}");
+    // The TallyCheck names: `tallycheck-mcp.exe` with TALLYCHECK_API_URL / TALLYCHECK_API_KEY.
+    let mut renamed = Mcp::start_as(
+        env!("CARGO_BIN_EXE_tallycheck-mcp"),
+        ("TALLYCHECK_API_URL", &base),
+        ("TALLYCHECK_API_KEY", &read_key),
+    )?;
+    let init = renamed.rpc("initialize", json!({"protocolVersion": "2025-06-18"})).await?;
+    assert_eq!(init["result"]["protocolVersion"], json!("2025-06-18"));
+    let (text, err) = renamed.tool("list_invoices", json!({})).await?;
+    assert!(!err, "{text}");
 
     server.shutdown().await;
     Ok(())

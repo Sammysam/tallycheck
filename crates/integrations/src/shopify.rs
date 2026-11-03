@@ -31,6 +31,15 @@ pub fn normalize_shop(input: &str) -> AppResult<String> {
     Ok(format!("{handle}.myshopify.com"))
 }
 
+/// Whether `url` is on the store's own site: the same scheme, host and port as `base` (a plain
+/// prefix check would let `https://s.myshopify.com.evil.test/…` through).
+pub fn same_site(base: &str, url: &str) -> bool {
+    match (reqwest::Url::parse(base), reqwest::Url::parse(url)) {
+        (Ok(b), Ok(u)) => common::same_origin(&b, &u),
+        _ => false,
+    }
+}
+
 /// The `rel="next"` page of a `Link` header.
 pub fn next_link(header: Option<&str>) -> Option<String> {
     header?.split(',').find_map(|part| {
@@ -92,7 +101,7 @@ impl Api {
 
     /// One page and the next page's address; `Ok(None)` for 404 / 403 when `missing_ok`.
     async fn get(&self, url: &str, missing_ok: bool) -> AppResult<Option<(Value, Option<String>)>> {
-        if !url.starts_with(&self.base) {
+        if !same_site(&self.base, url) {
             return Err(AppError::internal("Shopify answered with a page on another site"));
         }
         let req = self.http.get(url).header("X-Shopify-Access-Token", &self.token).header("Accept", "application/json");
@@ -293,6 +302,17 @@ pub async fn fetch(cfg: &Config, secret: &Value, since: &str) -> AppResult<Fetch
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn next_pages_must_stay_on_the_store() {
+        let base = "https://s.myshopify.com";
+        assert!(same_site(base, "https://s.myshopify.com/admin/api/2026-07/orders.json?page_info=abc"));
+        assert!(!same_site(base, "https://s.myshopify.com.evil.test/admin/api/2026-07/orders.json"));
+        assert!(!same_site(base, "https://s.myshopify.com@evil.test/admin"));
+        assert!(!same_site(base, "http://s.myshopify.com/admin"));
+        assert!(same_site("http://127.0.0.1:4000", "http://127.0.0.1:4000/admin/api/x"));
+        assert!(!same_site("http://127.0.0.1:4000", "http://127.0.0.1:4001/admin/api/x"));
+    }
 
     #[test]
     fn store_addresses_are_normalised() {

@@ -326,6 +326,10 @@ try {
     await set('input[type=password]', ADMIN.password, 0);
     await set('input[type=password]', ADMIN.password, 1);
     await evaluate(`document.querySelector('button[type=submit]').click()`);
+    // D49: the recovery key screen comes first.
+    await waitFor(`document.body.innerText.includes('Save your recovery key')`, 'recovery key');
+    await evaluate(`document.querySelector('input[type=checkbox]').click()`);
+    await clickText('Continue');
     await waitFor(`location.pathname === '/company-setup' && !!document.querySelector('form[aria-label="Company setup"]')`, 'company setup');
   });
 

@@ -313,7 +313,12 @@ fn brackets(v: &Value) -> Result<Vec<Bracket>, AppError> {
         let pair = p.as_array().filter(|a| a.len() == 2).ok_or_else(bad)?;
         let upper = match &pair[0] {
             Value::Null => None,
-            n => Some(Money::from_json(n).ok_or_else(bad)?.cents()),
+            n => Some(
+                Money::from_json(n)
+                    .filter(|m| m.cents().unsigned_abs() <= app_core::money::MAX_NUMERIC_15_2_CENTS as u64)
+                    .ok_or_else(bad)?
+                    .cents(),
+            ),
         };
         let rate = pair[1].as_f64().and_then(|x| percent_to_ppm(&js_string(x))).ok_or_else(bad)?;
         out.push((upper, rate));

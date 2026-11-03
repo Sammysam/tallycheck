@@ -6,9 +6,10 @@ export default function AuthShell({ children }: { children: ReactNode }) {
   return (
     <div className="h-screen overflow-auto flex items-center justify-center p-6 bg-[#e9ecef]">
       <div className="w-full max-w-[420px] bg-white border border-[#cfcfcf] rounded-lg shadow-[0_16px_40px_rgba(0,0,0,0.18)] overflow-hidden">
-        <div className="auth-panel px-6 py-5">
-          <img src="/Logo_tallycheck.png" alt="TallyCheck" className="logo-white h-6 w-auto" />
-          <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-orange-300">Accounting System</p>
+        <div className="flex flex-col items-center px-6 pt-6 pb-4 bg-white border-b-[3px] border-orange-500">
+          <img src="/tallycheck-mark.png" alt="" className="h-16 w-16 object-contain" />
+          <img src="/Logo_tallycheck.png" alt="TallyCheck" className="mt-2 h-8 w-auto" />
+          <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-gray-500">Accounting System</p>
         </div>
         <div className="px-6 py-5">{children}</div>
         <div className="flex items-center gap-1.5 px-6 py-2 text-[11px] text-gray-500 bg-[#f3f3f3] border-t border-[#e5e5e5]">

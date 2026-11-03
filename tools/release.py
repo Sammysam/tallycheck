@@ -3,13 +3,19 @@
     python tools/release.py --notes "What's new in this version" \
         --download-base https://example.com/releases/v{version}
 
-1. Signs the update with the private update key. TAURI_SIGNING_PRIVATE_KEY (the key file's
-   contents) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD are used if set; otherwise
+1. Runs `npm run installer` (third-party notices, cenango-mcp, the NSIS installer) WITHOUT the
+   update key: npm, cargo and the build scripts never see it (`createUpdaterArtifacts` is turned
+   off for this build only).
+2. Signs the finished installer with `tauri signer sign` (writes the .sig) using the private
+   update key. TAURI_SIGNING_PRIVATE_KEY (the key file's contents) and
+   TAURI_SIGNING_PRIVATE_KEY_PASSWORD are used if set; otherwise
    %USERPROFILE%\\.tallycheck-signing\\updater.key and its password file. The key is never copied
-   into the project.
-2. Runs `npm run installer` (third-party notices, cenango-mcp, the NSIS installer + its .sig).
+   into the project and is in the environment of that one command only.
 3. Writes latest.json next to the installer: the version, the notes, the date, the download
    address of the installer and its signature.
+
+With --skip-build, steps 1 and 2 are skipped and the existing installer + .sig are used (the
+GitHub workflow signs the code-signed installer itself, then runs this with --skip-build).
 
 Upload the installer and latest.json to the release page; the app's update feed (UPDATE_FEED in
 src-tauri/src/updates.rs) must point at that latest.json. Bump the version first (Cargo.toml
@@ -22,11 +28,21 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = ROOT / "target" / "release" / "bundle" / "nsis"
 KEY_DIR = Path(os.path.expanduser("~")) / ".tallycheck-signing"
+
+
+# Environment variables that hold the update key; removed from the build's environment.
+KEY_VARS = ("TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PATH", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD")
+
+
+def build_env() -> dict:
+    """This process's environment without the update key, for npm / cargo / tauri build."""
+    return {k: v for k, v in os.environ.items() if k.upper() not in KEY_VARS}
 
 
 def signing_env() -> dict:
@@ -56,11 +72,21 @@ def main() -> int:
     base = a.download_base.replace("{version}", version).rstrip("/")
     if not base.startswith("https://"):
         sys.exit("--download-base must be an https:// address")
-    if not a.skip_build:
-        subprocess.run("npm run installer", cwd=ROOT, env=signing_env(), shell=True, check=True)
-
     setup = BUNDLE / f"TallyCheck_{version}_x64-setup.exe"
     sig = setup.with_name(setup.name + ".sig")
+    if not a.skip_build:
+        # Read the key first, so a missing key stops the release before a long build.
+        sign_env = signing_env()
+        with tempfile.TemporaryDirectory() as tmp:
+            override = Path(tmp) / "no-updater-artifacts.json"
+            override.write_text('{"bundle":{"createUpdaterArtifacts":false}}', encoding="utf-8")
+            subprocess.run(f'npm run installer -- --config "{override}"', cwd=ROOT, env=build_env(),
+                           shell=True, check=True)
+        if not setup.is_file():
+            sys.exit(f"missing {setup}")
+        sig.unlink(missing_ok=True)
+        subprocess.run(["npx", "--no-install", "tauri", "signer", "sign", str(setup)], cwd=ROOT,
+                       env=sign_env, shell=(os.name == "nt"), check=True)
     for f in (setup, sig):
         if not f.is_file():
             sys.exit(f"missing {f}")

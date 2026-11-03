@@ -322,7 +322,20 @@ async fn save(tx: &mut Tx, item: &Item, insert: bool) -> AppResult<()> {
     }
 }
 
+/// Prices, costs, reorder points and quantities must fit numeric(15,2).
+fn check_limits(values: &[Option<Money>]) -> AppResult<()> {
+    if values.iter().flatten().any(|m| m.cents().unsigned_abs() > app_core::money::MAX_NUMERIC_15_2_CENTS as u64) {
+        return Err(AppError::bad_request("Amount is too large"));
+    }
+    Ok(())
+}
+
+fn check_fields(f: &ItemFields) -> AppResult<()> {
+    check_limits(&[f.sale_price.flatten(), f.purchase_cost.flatten(), f.reorder_point.flatten()])
+}
+
 pub async fn create(db: &Db, f: ItemFields) -> AppResult<Item> {
+    check_fields(&f)?;
     let mut tx = db.begin().await?;
     let now = now_iso();
     let mut item = Item {
@@ -362,6 +375,7 @@ async fn has_moves(conn: &mut SqliteConnection, id: &str) -> AppResult<bool> {
 }
 
 pub async fn update(db: &Db, id: &str, f: ItemFields) -> AppResult<Item> {
+    check_fields(&f)?;
     let mut tx = db.begin().await?;
     let before = find_one(&mut tx, id).await?;
     let moved = has_moves(&mut tx, id).await?;
@@ -581,6 +595,7 @@ pub struct Adjustment {
 
 /// A stock count or correction: moves stock and posts the value against the chosen account.
 pub async fn adjust(db: &Db, id: &str, a: Adjustment) -> AppResult<Item> {
+    check_limits(&[Some(a.quantity), a.unit_cost])?;
     let mut tx = db.begin().await?;
     let item = find_one(&mut tx, id).await?;
     if !item.counted() {

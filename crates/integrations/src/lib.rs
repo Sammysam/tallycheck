@@ -84,13 +84,27 @@ pub async fn connect(db: &Db, data_dir: &Path, c: Connector, body: &Map<String, 
 }
 
 /// Fetches and writes; keeps the report (or the error) for the screen.
-pub async fn sync(db: &Db, data_dir: &Path, c: Connector, created_by: Option<&str>) -> AppResult<Value> {
-    let result = run_sync(db, data_dir, c, created_by).await;
+/// `may_create_customers`: whether an order for an unknown customer may create the customer
+/// (the person syncing holds `customers`, or the hourly sync an administrator switched on).
+pub async fn sync(
+    db: &Db,
+    data_dir: &Path,
+    c: Connector,
+    created_by: Option<&str>,
+    may_create_customers: bool,
+) -> AppResult<Value> {
+    let result = run_sync(db, data_dir, c, created_by, may_create_customers).await;
     common::remember_outcome(db, c, &result).await?;
     result
 }
 
-async fn run_sync(db: &Db, data_dir: &Path, c: Connector, created_by: Option<&str>) -> AppResult<Value> {
+async fn run_sync(
+    db: &Db,
+    data_dir: &Path,
+    c: Connector,
+    created_by: Option<&str>,
+    may_create_customers: bool,
+) -> AppResult<Value> {
     let cfg = common::load_config(db, c).await?;
     if cfg.remote_id.is_none() {
         return Err(AppError::bad_request(format!("Connect {} first", c.label())));
@@ -104,7 +118,7 @@ async fn run_sync(db: &Db, data_dir: &Path, c: Connector, created_by: Option<&st
         Connector::PayPal => paypal::fetch(&cfg, &secret, &since).await?,
         Connector::Stripe => stripe::fetch(&cfg, &secret, &since).await?,
     };
-    common::apply(db, c, &cfg, fetched, &since, created_by).await
+    common::apply(db, c, &cfg, fetched, &since, created_by, may_create_customers).await
 }
 
 /// The background loop: each connector with automatic sync on, once an hour.
@@ -123,7 +137,7 @@ pub fn spawn(db: Db, data_dir: PathBuf) -> tokio::task::JoinHandle<()> {
                 if !cfg.auto_sync || cfg.remote_id.is_none() || !common::connected(&data_dir, c) {
                     continue;
                 }
-                match sync(&db, &data_dir, c, None).await {
+                match sync(&db, &data_dir, c, None, true).await {
                     Ok(r) => {
                         tracing::info!(detail = %r["name"], "automatic {} sync", c.label());
                         audit::record(

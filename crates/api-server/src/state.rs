@@ -13,6 +13,8 @@ pub struct AppState {
     pub files: FileStore,
     pub jwt: JwtKeys,
     pub throttle: Arc<LoginThrottle>,
+    /// D49: failed password-recovery attempts, counted apart from sign-in failures.
+    pub recovery_throttle: Arc<LoginThrottle>,
     /// When false, only loopback `Host` headers are accepted (DNS-rebinding defence).
     pub lan_enabled: bool,
     pub port: u16,
@@ -25,6 +27,8 @@ pub struct AppState {
     pub updater: Option<Arc<dyn crate::updates::Updater>>,
     /// D47: a Microsoft Store copy is updated by the Store, never by our updater.
     pub update_channel: crate::updates::UpdateChannel,
+    /// D49: the desktop shell's Windows verification; `None` when the server runs on its own.
+    pub windows_verifier: Option<Arc<dyn crate::local_verify::WindowsVerifier>>,
 }
 
 impl AppState {
@@ -34,6 +38,7 @@ impl AppState {
             files,
             jwt,
             throttle: Arc::new(LoginThrottle::default()),
+            recovery_throttle: Arc::new(LoginThrottle::default()),
             lan_enabled,
             port,
             lan_allowed: Arc::new(DEFAULT_LAN_NETWORKS.iter().filter_map(|n| Network::parse(n)).collect()),
@@ -41,6 +46,7 @@ impl AppState {
             data_dir: None,
             updater: None,
             update_channel: crate::updates::UpdateChannel::Direct,
+            windows_verifier: None,
         }
     }
 
@@ -56,6 +62,11 @@ impl AppState {
     ) -> Self {
         self.updater = updater;
         self.update_channel = channel;
+        self
+    }
+
+    pub fn with_windows_verifier(mut self, verifier: Option<Arc<dyn crate::local_verify::WindowsVerifier>>) -> Self {
+        self.windows_verifier = verifier;
         self
     }
 

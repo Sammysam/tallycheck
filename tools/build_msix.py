@@ -128,7 +128,8 @@ def main() -> int:
         shutil.rmtree(layout)
     (layout / "Assets").mkdir(parents=True)
     shutil.copy2(TARGET / "release" / "accounting-desktop.exe", layout / "TallyCheck.exe")
-    shutil.copy2(TARGET / "release" / "cenango-mcp.exe", layout / "cenango-mcp.exe")
+    for mcp in ("tallycheck-mcp.exe", "cenango-mcp.exe"):
+        shutil.copy2(TARGET / "release" / mcp, layout / mcp)
     shutil.copytree(dist, layout / "frontend")
     for src, dst in [("LICENSE-MIT", "LICENSE-MIT.txt"), ("LICENSE-APACHE", "LICENSE-APACHE.txt"),
                      ("NOTICE", "NOTICE.txt"), ("THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-NOTICES.txt")]:

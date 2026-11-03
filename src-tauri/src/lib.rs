@@ -5,6 +5,7 @@
 
 #[cfg(not(feature = "store"))]
 mod updates;
+mod windows_verify;
 
 use api_server::ServerHandle;
 use app_core::config::AppConfig;
@@ -40,7 +41,11 @@ fn start_server(app: &tauri::App) -> anyhow::Result<String> {
         }),
         api_server::updates::UpdateChannel::Direct,
     );
-    let handle = tauri::async_runtime::block_on(api_server::start_with_updater(&config, updater, channel))?;
+    // D49: "Forgot password? → Reset using Windows sign-in" on this PC.
+    let verifier: std::sync::Arc<dyn api_server::local_verify::WindowsVerifier> =
+        std::sync::Arc::new(windows_verify::WindowsSignIn { app: app.handle().clone() });
+    let handle =
+        tauri::async_runtime::block_on(api_server::start_with_shell(&config, updater, channel, Some(verifier)))?;
     // Always open the loopback address, even when LAN access binds 0.0.0.0.
     let url = format!("http://127.0.0.1:{}/", handle.addr.port());
     app.manage(Server(Mutex::new(Some(handle))));
@@ -75,6 +80,12 @@ pub(crate) fn stop_server(handle: &tauri::AppHandle) {
     }
 }
 
+/// True for the server's own pages (`http://127.0.0.1:<port>/…`) and for `blob:` URLs the page
+/// made itself (downloads, PDFs), whose origin is that same server.
+fn same_origin_navigation(to: &tauri::Url, home: &tauri::Url) -> bool {
+    matches!(to.scheme(), "http" | "blob") && to.origin() == home.origin()
+}
+
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(not(feature = "store"))]
@@ -87,9 +98,19 @@ pub fn run() {
                 e
             })?;
             let base: tauri::Url = url.parse()?;
+            let home = base.clone();
             // The page draws its own menu bar, toolbar and status bar (File, Edit, View, …), so
             // the window has no native menu.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(base))
+                // The window only ever shows this PC's own server: a link or script that tries
+                // to take it anywhere else is refused (the app has no outside links of its own).
+                .on_navigation(move |to| {
+                    let allowed = same_origin_navigation(to, &home);
+                    if !allowed {
+                        tracing::warn!(scheme = to.scheme(), "blocked a navigation away from the app");
+                    }
+                    allowed
+                })
                 .title("TallyCheck")
                 .inner_size(1366.0, 860.0)
                 .min_inner_size(1024.0, 700.0)
@@ -112,4 +133,27 @@ pub fn run() {
             stop_server(handle);
         }
     });
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::same_origin_navigation;
+
+    #[test]
+    fn only_the_server_origin_is_allowed() {
+        let home: tauri::Url = "http://127.0.0.1:47800/".parse().unwrap();
+        let ok = |s: &str| same_origin_navigation(&s.parse().unwrap(), &home);
+        assert!(ok("http://127.0.0.1:47800/invoices?x=1"));
+        assert!(ok("blob:http://127.0.0.1:47800/3f1c6c1e-0000-4000-8000-000000000000"));
+        assert!(!ok("http://127.0.0.1:47801/"));
+        assert!(!ok("http://localhost:47800/"));
+        assert!(!ok("https://127.0.0.1:47800/"));
+        assert!(!ok("https://github.com/Sammysam/tallycheck"));
+        assert!(!ok("blob:https://example.com/abc"));
+        assert!(!ok("file:///C:/Windows/win.ini"));
+        assert!(!ok("javascript:alert(1)"));
+        assert!(!ok("data:text/html,<p>x</p>"));
+        assert!(!ok("about:blank"));
+    }
 }

@@ -6,14 +6,13 @@ use crate::body::JsonBody;
 use crate::extract::CurrentUser;
 use crate::state::AppState;
 use app_core::{AppError, AppResult};
-use axum::extract::{ConnectInfo, FromRequestParts, State};
+use axum::extract::{FromRequestParts, State};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::Json;
 use backup::restore::{cancel_staged_restore, key_for, staged_manifest, BackupKey};
 use backup::{keys, schedule, BackupError, Kek, KeyError};
 use serde_json::{json, Value};
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 /// An Administrator connected from this PC.
@@ -24,7 +23,7 @@ impl FromRequestParts<AppState> for LocalAdmin {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
         let current = CurrentUser::from_request_parts(parts, state).await?;
-        let local = parts.extensions.get::<ConnectInfo<SocketAddr>>().is_some_and(|c| c.0.ip().is_loopback());
+        let local = crate::extract::from_this_pc(parts);
         if !current.user.is_admin() || !local {
             return Err(AppError::Forbidden(
                 "Backup and restore are only available to an Administrator on the main PC".into(),
@@ -63,6 +62,34 @@ fn backup_error(e: BackupError) -> AppError {
 
 fn text(body: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
     body.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+/// A folder or file on another computer (`\\server\share`, `//server/share`, `\\?\UNC\…`,
+/// device paths). Opening one makes Windows sign in to that computer with this user's
+/// credentials, so backups and restores use local (or mapped) drives only.
+pub fn is_unc_path(text: &str) -> bool {
+    let t = text.trim();
+    let b = t.as_bytes();
+    let sep = |c: u8| c == b'\\' || c == b'/';
+    if b.len() >= 2 && sep(b[0]) && sep(b[1]) {
+        // `\\?\C:\…` is a local drive written the long way.
+        let verbatim_local = b.len() >= 6 && b[2] == b'?' && sep(b[3]) && b[4].is_ascii_alphabetic() && b[5] == b':';
+        return !verbatim_local;
+    }
+    matches!(
+        Path::new(t).components().next(),
+        Some(std::path::Component::Prefix(p))
+            if !matches!(p.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_))
+    )
+}
+
+fn local_only(path: &str) -> AppResult<()> {
+    if is_unc_path(path) {
+        return Err(AppError::bad_request(
+            "Choose a folder on this PC (a drive letter such as C: or D:), not a network address",
+        ));
+    }
+    Ok(())
 }
 
 /// `Documents\Cenango Backups` of the Windows user running the app.
@@ -114,6 +141,9 @@ pub async fn update_settings(State(s): State<AppState>, _a: LocalAdmin, body: Js
     }
     if b.contains_key("folder") {
         settings.folder = text(&b, "folder");
+        if let Some(f) = &settings.folder {
+            local_only(f)?;
+        }
     }
     if let Some(v) = b.get("keep") {
         let keep = v.as_u64().filter(|k| (1..=365).contains(k));
@@ -133,6 +163,7 @@ pub async fn run(State(s): State<AppState>, _a: LocalAdmin, body: JsonBody) -> A
     let dir = data_dir(&s)?.to_path_buf();
     let folder =
         text(&body.object(), "folder").ok_or_else(|| AppError::bad_request("Choose a folder for the backup"))?;
+    local_only(&folder)?;
     let kek = keys::load(&dir.join("secrets"))
         .map_err(|e| backup_error(e.into()))?
         .ok_or_else(|| backup_error(KeyError::NotSet.into()))?;
@@ -145,7 +176,9 @@ pub async fn run(State(s): State<AppState>, _a: LocalAdmin, body: JsonBody) -> A
 
 fn restore_key(s: &AppState, body: &serde_json::Map<String, Value>) -> AppResult<(PathBuf, BackupKey)> {
     let dir = data_dir(s)?;
-    let file = PathBuf::from(text(body, "file").ok_or_else(|| AppError::bad_request("Choose a backup file"))?);
+    let file = text(body, "file").ok_or_else(|| AppError::bad_request("Choose a backup file"))?;
+    local_only(&file)?;
+    let file = PathBuf::from(file);
     let key = key_for(&file, &dir.join("secrets"), text(body, "password")).map_err(|e| match e {
         BackupError::Key(KeyError::WrongPassword) => {
             AppError::bad_request("This backup was made with a different backup password; enter that password")
@@ -184,4 +217,26 @@ pub async fn cancel(State(s): State<AppState>, _a: LocalAdmin) -> AppResult<Stat
 /// D36: backup and restore now live in Settings → Backup & restore; the old address forwards.
 pub async fn page() -> axum::response::Redirect {
     axum::response::Redirect::to("/settings?tab=backup")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_unc_path;
+
+    #[test]
+    fn network_paths_are_recognised() {
+        for unc in [
+            r"\\server\share\backups",
+            "//server/share",
+            r"\\?\UNC\server\share",
+            r"\\.\pipe\x",
+            r"\/server/share",
+            r"  \\10.0.0.5\c$",
+        ] {
+            assert!(is_unc_path(unc), "{unc}");
+        }
+        for local in [r"C:\Users\me\Documents\Backups", r"D:\backup.cbk", r"\\?\C:\Backups"] {
+            assert!(!is_unc_path(local), "{local}");
+        }
+    }
 }

@@ -204,6 +204,9 @@ pub fn parse_amount(text: &str) -> Result<Option<Money>, String> {
         _ => body.to_string(),
     };
     let m = Money::parse_decimal(&body).ok_or_else(|| format!("\"{original}\" is not an amount"))?;
+    if m.cents() > app_core::money::MAX_NUMERIC_15_2_CENTS {
+        return Err(format!("\"{original}\" is too large"));
+    }
     if !m.fits_currency() {
         return Err(format!("\"{original}\" is too large"));
     }
@@ -221,6 +224,9 @@ pub struct Request {
     pub date_order: DateOrder,
     /// Each row: our field name → the text in the mapped column.
     pub rows: Vec<HashMap<String, String>>,
+    /// INVOICES: whether the person may create customers (Admin or `customers`). Without it an
+    /// invoice for an unknown customer is reported as an error instead of creating one.
+    pub may_create_customers: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -723,6 +729,11 @@ async fn invoice(
             let new_customer = existing.is_none();
             let customer_id = match existing {
                 Some(id) => id,
+                None if !req.may_create_customers => {
+                    return Err(AppError::bad_request(format!(
+                        "Customer {customer} does not exist; you need the Customers permission to create customers"
+                    )));
+                }
                 None => {
                     let p = parties::create_in(
                         tx,
@@ -836,6 +847,9 @@ pub struct ImportRecord {
     pub skipped: i64,
     pub status: String,
     pub created_by: Option<String>,
+    /// The user who made it (for the `invoices:all` scope); not sent to the screen.
+    #[serde(skip)]
+    pub created_by_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     /// For the activity log's detail.
@@ -844,7 +858,7 @@ pub struct ImportRecord {
 
 const RECORD_SQL: &str = r#"SELECT i."id", i."kind", i."source", i."fileName", i."accountId",
        CASE WHEN a."id" IS NULL THEN NULL ELSE a."code" || ' ' || a."name" END AS "accountName",
-       i."created", i."skipped", i."status", u."username", i."createdAt", i."updatedAt"
+       i."created", i."skipped", i."status", u."username", i."createdById", i."createdAt", i."updatedAt"
   FROM "imports" i LEFT JOIN "accounts" a ON a."id" = i."accountId" LEFT JOIN "users" u ON u."id" = i."createdById""#;
 
 fn record(r: &sqlx::sqlite::SqliteRow) -> AppResult<ImportRecord> {
@@ -863,6 +877,7 @@ fn record(r: &sqlx::sqlite::SqliteRow) -> AppResult<ImportRecord> {
         skipped: r.try_get("skipped")?,
         status: r.try_get("status")?,
         created_by: r.try_get("username")?,
+        created_by_id: r.try_get("createdById")?,
         created_at: r.try_get("createdAt")?,
         updated_at: r.try_get("updatedAt")?,
     })
@@ -1038,6 +1053,13 @@ mod tests {
         assert_eq!(d("13/13/2026", DateOrder::Mdy), None);
         assert_eq!(d("yesterday", DateOrder::Dmy), None);
         assert_eq!(d("", DateOrder::Dmy), None);
+    }
+
+    #[test]
+    fn amounts_beyond_numeric_15_2_are_refused() {
+        assert!(parse_amount("999999999999.99").is_ok());
+        assert!(parse_amount("1000000000000").expect_err("too large").contains("too large"));
+        assert!(parse_amount("-1,000,000,000,000.00").expect_err("too large").contains("too large"));
     }
 
     #[test]

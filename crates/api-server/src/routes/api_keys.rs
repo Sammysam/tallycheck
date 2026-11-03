@@ -60,7 +60,17 @@ pub async fn revoke(
 
 /// Where the connector program is, and the address it should call, for the setup instructions.
 pub async fn setup(State(s): State<AppState>, _auth: Authorized<perm::Settings>) -> AppResult<Json<Value>> {
-    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("cenango-mcp.exe")));
+    // `tallycheck-mcp.exe`; an installation from before it shipped has only `cenango-mcp.exe`.
+    let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+    let exe = dir.map(|d| {
+        let new = d.join("tallycheck-mcp.exe");
+        let old = d.join("cenango-mcp.exe");
+        if !new.exists() && old.exists() {
+            old
+        } else {
+            new
+        }
+    });
     Ok(Json(json!({
         "mcpPath": exe.as_ref().map(|p| p.display().to_string()),
         "mcpFound": exe.as_ref().is_some_and(|p| p.exists()),

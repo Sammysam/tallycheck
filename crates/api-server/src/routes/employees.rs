@@ -7,7 +7,7 @@ use crate::extract::{parse_uuid, perm, Authorized};
 use crate::state::AppState;
 use crate::upload::{DocumentForm, PhotoForm};
 use crate::validate::{hr, query_map};
-use app_core::AppResult;
+use app_core::{AppError, AppResult};
 use auth::User;
 use axum::extract::{Path, Query, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE};
@@ -105,7 +105,11 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     parse_uuid(&id)?;
-    Ok(Json(shown_to(a.user(), &records::profile(&s.db, &id).await?)))
+    let mut profile = records::profile(&s.db, &id).await?;
+    if !may_see_payslips(a.user()) {
+        profile.documents.retain(|d| d.category != PAYSLIP);
+    }
+    Ok(Json(shown_to(a.user(), &profile)))
 }
 
 pub async fn update(
@@ -162,13 +166,45 @@ pub async fn photo_remove(
 
 // ─── Documents ──────────────────────────────────────────────────────────────
 
+/// Payslips are pay records: they need the `payroll` permission as well as `employees`.
+const PAYSLIP: &str = "PAYSLIP";
+
+fn may_see_payslips(user: &User) -> bool {
+    user.has_permission("payroll")
+}
+
+/// Filing a document as a payslip needs `payroll` too.
+fn check_category(user: &User, category: Option<&str>) -> AppResult<()> {
+    if category == Some(PAYSLIP) && !may_see_payslips(user) {
+        return Err(AppError::Forbidden("Insufficient permissions".into()));
+    }
+    Ok(())
+}
+
+/// Without `payroll` an existing payslip is treated as not there (404, as an unknown id).
+async fn check_existing(s: &AppState, user: &User, id: &str, doc_id: &str) -> AppResult<()> {
+    if may_see_payslips(user) {
+        return Ok(());
+    }
+    let mut c = s.db.read().acquire().await?;
+    let doc = docs::get_document(&mut c, id, doc_id).await?;
+    if doc.category == PAYSLIP {
+        return Err(AppError::NotFound(format!("Document {doc_id} not found")));
+    }
+    Ok(())
+}
+
 pub async fn docs_list(
     State(s): State<AppState>,
-    _a: Authorized<perm::Employees>,
+    a: Authorized<perm::Employees>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Vec<docs::Document>>> {
     parse_uuid(&id)?;
-    Ok(Json(docs::list(&s.db, &id).await?))
+    let mut list = docs::list(&s.db, &id).await?;
+    if !may_see_payslips(a.user()) {
+        list.retain(|d| d.category != PAYSLIP);
+    }
+    Ok(Json(list))
 }
 
 pub async fn docs_add(
@@ -179,6 +215,7 @@ pub async fn docs_add(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     parse_uuid(&id)?;
     let f = hr::document(form.fields)?;
+    check_category(a.user(), f.category.as_deref())?;
     let doc = docs::add(&s.db, &s.files, &id, f, form.file, &actor(a.user())).await?;
     Ok((StatusCode::CREATED, Json(doc.created_json())))
 }
@@ -192,31 +229,36 @@ pub async fn docs_replace(
     parse_uuid(&id)?;
     parse_uuid(&doc_id)?;
     let f = hr::document_replace(form.fields)?;
+    check_existing(&s, a.user(), &id, &doc_id).await?;
+    check_category(a.user(), f.category.as_deref())?;
     let doc = docs::replace(&s.db, &s.files, &id, &doc_id, f, form.file, &actor(a.user())).await?;
     Ok((StatusCode::CREATED, Json(doc.created_json())))
 }
 
 pub async fn docs_update(
     State(s): State<AppState>,
-    _a: Authorized<perm::Employees>,
+    a: Authorized<perm::Employees>,
     Path((id, doc_id)): Path<(String, String)>,
     body: JsonBody,
 ) -> AppResult<Json<docs::Document>> {
     parse_uuid(&id)?;
     parse_uuid(&doc_id)?;
     let f = hr::document_patch(body.object())?;
+    check_existing(&s, a.user(), &id, &doc_id).await?;
+    check_category(a.user(), f.category.as_deref())?;
     Ok(Json(docs::update(&s.db, &id, &doc_id, f).await?))
 }
 
 /// `?inline=1` opens it in the browser (PDFs, images); otherwise it downloads.
 pub async fn docs_download(
     State(s): State<AppState>,
-    _a: Authorized<perm::Employees>,
+    a: Authorized<perm::Employees>,
     Path((id, doc_id)): Path<(String, String)>,
     Query(q): Pairs,
 ) -> AppResult<Response> {
     parse_uuid(&id)?;
     parse_uuid(&doc_id)?;
+    check_existing(&s, a.user(), &id, &doc_id).await?;
     let inline = q.iter().find(|(k, _)| k == "inline").is_some_and(|(_, v)| v == "1");
     let (doc, file) = docs::open(&s.db, &s.files, &id, &doc_id).await?;
     Ok(send(file, Some(&doc.original_name), inline))
@@ -224,11 +266,12 @@ pub async fn docs_download(
 
 pub async fn docs_remove(
     State(s): State<AppState>,
-    _a: Authorized<perm::Employees>,
+    a: Authorized<perm::Employees>,
     Path((id, doc_id)): Path<(String, String)>,
 ) -> AppResult<StatusCode> {
     parse_uuid(&id)?;
     parse_uuid(&doc_id)?;
+    check_existing(&s, a.user(), &id, &doc_id).await?;
     docs::remove(&s.db, &s.files, &id, &doc_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

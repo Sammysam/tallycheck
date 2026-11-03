@@ -6,12 +6,11 @@
 use crate::extract::CurrentUser;
 use crate::state::AppState;
 use app_core::{AppError, AppResult};
-use axum::extract::{ConnectInfo, FromRequestParts, State};
+use axum::extract::{FromRequestParts, State};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
-use std::net::SocketAddr;
 
 /// This build's version (the workspace version, the same as the installer's).
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -24,7 +23,7 @@ impl FromRequestParts<AppState> for UpdateAdmin {
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
         let current = CurrentUser::from_request_parts(parts, state).await?;
-        let local = parts.extensions.get::<ConnectInfo<SocketAddr>>().is_some_and(|c| c.0.ip().is_loopback());
+        let local = crate::extract::from_this_pc(parts);
         if !current.user.is_admin() || !local {
             return Err(AppError::Forbidden("Updates are installed by an Administrator on the main PC".into()));
         }

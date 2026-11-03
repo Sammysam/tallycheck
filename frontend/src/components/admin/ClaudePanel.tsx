@@ -73,12 +73,12 @@ export default function ClaudePanel({ onBack }: { onBack: () => void }) {
     setRevoking(null);
   };
 
-  const exe = setup?.mcpPath ?? 'C:\\Users\\<you>\\AppData\\Local\\TallyCheck\\cenango-mcp.exe';
+  const exe = setup?.mcpPath ?? 'C:\\Users\\<you>\\AppData\\Local\\TallyCheck\\tallycheck-mcp.exe';
   const desktopConfig = (key: string) => JSON.stringify({
-    mcpServers: { 'cenango-accounting': { command: exe, env: { CENANGO_API_KEY: key, CENANGO_API_URL: setup?.apiUrl ?? 'http://127.0.0.1:47800' } } },
+    mcpServers: { tallycheck: { command: exe, env: { TALLYCHECK_API_KEY: key, TALLYCHECK_API_URL: setup?.apiUrl ?? 'http://127.0.0.1:47800' } } },
   }, null, 2);
   const codeCommand = (key: string) =>
-    `claude mcp add cenango-accounting -e CENANGO_API_KEY=${key} -e CENANGO_API_URL=${setup?.apiUrl ?? 'http://127.0.0.1:47800'} -- "${exe}"`;
+    `claude mcp add tallycheck -e TALLYCHECK_API_KEY=${key} -e TALLYCHECK_API_URL=${setup?.apiUrl ?? 'http://127.0.0.1:47800'} -- "${exe}"`;
   const live = keys.filter((k) => !k.revokedAt);
 
   return (
@@ -125,7 +125,7 @@ export default function ClaudePanel({ onBack }: { onBack: () => void }) {
             </tbody>
           </table>
         )}
-        {live.length > 0 && !setup?.mcpFound && <p className="text-[11px] text-amber-800 mt-2">The Claude connector program (cenango-mcp.exe) was not found next to the app. It is installed with the next version of the app.</p>}
+        {live.length > 0 && !setup?.mcpFound && <p className="text-[11px] text-amber-800 mt-2">The Claude connector program (tallycheck-mcp.exe) was not found next to the app. It is installed with the next version of the app.</p>}
       </section>
 
       {creating && (
