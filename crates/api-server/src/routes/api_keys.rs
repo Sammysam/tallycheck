@@ -10,8 +10,23 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde_json::{json, Value};
 
-pub async fn list(State(s): State<AppState>, _auth: Authorized<perm::Settings>) -> AppResult<Json<Vec<ApiKey>>> {
-    Ok(Json(api_keys::list(&s.db).await?))
+/// D52: an Administrator sees and manages every key; anyone else only their own.
+pub async fn list(State(s): State<AppState>, auth: Authorized<perm::Settings>) -> AppResult<Json<Vec<ApiKey>>> {
+    let me = auth.user();
+    Ok(Json(api_keys::list(&s.db).await?.into_iter().filter(|k| me.is_admin() || k.user_id == me.id).collect()))
+}
+
+/// Someone else's key is "not found" to a user who is not an Administrator.
+async fn own_key(s: &AppState, me: &auth::User, id: &str) -> AppResult<()> {
+    if me.is_admin() {
+        return Ok(());
+    }
+    let mine = api_keys::list(&s.db).await?.into_iter().any(|k| k.id == id && k.user_id == me.id);
+    if mine {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(format!("Key with ID {id} not found")))
+    }
 }
 
 /// Creates a key acting as the signed-in user. The key text is in this answer only.
@@ -35,11 +50,12 @@ pub async fn create(
 
 pub async fn update(
     State(s): State<AppState>,
-    _auth: Authorized<perm::Settings>,
+    auth: Authorized<perm::Settings>,
     Path(id): Path<String>,
     body: JsonBody,
 ) -> AppResult<Json<ApiKey>> {
     parse_uuid(&id)?;
+    own_key(&s, auth.user(), &id).await?;
     let m = body.object();
     let can_write = match m.get("canWrite") {
         None => None,
@@ -51,10 +67,11 @@ pub async fn update(
 
 pub async fn revoke(
     State(s): State<AppState>,
-    _auth: Authorized<perm::Settings>,
+    auth: Authorized<perm::Settings>,
     Path(id): Path<String>,
 ) -> AppResult<Json<ApiKey>> {
     parse_uuid(&id)?;
+    own_key(&s, auth.user(), &id).await?;
     Ok(Json(api_keys::revoke(&s.db, &id).await?))
 }
 

@@ -1,0 +1,19 @@
+# CI on Bitbucket: on every push, run tools/ci.ps1 (formatting, frontend build, npm advisories,
+# clippy, all tests). The app is Windows-only and Bitbucket's own machines are Linux, so the step
+# runs on a self-hosted Windows runner (setup: docs/ci-cd.md). Needs no secrets or variables.
+#
+# The runner's PC needs: Git, rustup (the toolchain comes from rust-toolchain.toml), Node.js 24,
+# the Visual Studio C++ build tools and the WebView2 runtime. CARGO_TARGET_DIR points outside the
+# clone, which the runner deletes after each build, so later builds reuse compiled dependencies.
+
+pipelines:
+  default:
+    - step:
+        name: Checks (Windows)
+        runs-on:
+          - self.hosted
+          - windows
+        max-time: 90
+        script:
+          # One line, so the variable is certainly set for the script it starts.
+          - $env:CARGO_TARGET_DIR = "$env:USERPROFILE\tallycheck-ci-target"; powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci.ps1; exit $LASTEXITCODE

@@ -241,6 +241,7 @@ pub async fn update_user(db: &Db, id: &str, dto: UpdateUser) -> AppResult<User> 
     // later does not bring back a key that may have left with them.
     if user.is_active && !is_active {
         crate::recovery::revoke_in(&mut tx, id).await?;
+        crate::sessions::end_all_in(&mut tx, id).await?;
     }
     let updated = require(&mut tx, id).await?;
     tx.commit().await?;
@@ -274,6 +275,8 @@ pub async fn reset_password(db: &Db, id: &str, new_password: &str) -> AppResult<
     // D49: an administrator's reset cancels the user's recovery key (it may be why the reset
     // was needed, e.g. a leaked printout); the user makes a new one under File.
     crate::recovery::revoke_in(&mut tx, id).await?;
+    // D52: whoever was signed in as this user is signed out.
+    crate::sessions::end_all_in(&mut tx, id).await?;
     let user = require(&mut tx, id).await?;
     tx.commit().await?;
     Ok(user)
@@ -308,6 +311,8 @@ pub async fn reset_two_factor(db: &Db, id: &str) -> AppResult<User> {
     .bind(id)
     .execute(&mut *tx)
     .await?;
+    // D52: sessions made with the old second factor end too.
+    crate::sessions::end_all_in(&mut tx, id).await?;
     let user = require(&mut tx, id).await?;
     tx.commit().await?;
     Ok(user)

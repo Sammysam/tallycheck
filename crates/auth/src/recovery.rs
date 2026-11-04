@@ -112,6 +112,7 @@ pub async fn reset_with_key(
         return Ok(None);
     }
     crate::users::set_password_hash_in(&mut tx, &user.id, &hash).await?;
+    crate::sessions::end_all_in(&mut tx, &user.id).await?;
     let next = issue_in(&mut tx, &user.id).await?;
     let user = crate::users::require(&mut tx, &user.id).await?;
     tx.commit().await?;
@@ -130,6 +131,7 @@ pub async fn reset_for_windows_owner(
     let mut tx = db.begin().await?;
     let Some(user) = crate::users::find_by_username(&mut tx, username).await? else { return Ok(None) };
     crate::users::set_password_hash_in(&mut tx, &user.id, &hash).await?;
+    crate::sessions::end_all_in(&mut tx, &user.id).await?;
     let next = issue_in(&mut tx, &user.id).await?;
     let user = crate::users::require(&mut tx, &user.id).await?;
     tx.commit().await?;

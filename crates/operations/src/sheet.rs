@@ -216,7 +216,8 @@ macro_rules! stream_sheets {
     }};
 }
 
-/// Rows of a sheet read as a whole range (XLS, whose grid is at most 65,536 × 256, and ODS).
+/// Rows of a sheet read as a whole range (XLS and ODS, both checked first: [`check_xls`],
+/// [`check_ods_grid`]).
 fn from_range(name: String, range: &calamine::Range<Data>) -> AppResult<Sheet> {
     let mut c = Collector::new();
     let (r0, c0) = range.start().unwrap_or((0, 0));
@@ -315,9 +316,373 @@ fn ods_grid_cells(xml: &str) -> Vec<u64> {
     out
 }
 
+/// An old Excel (.xls) file is checked before calamine opens it. calamine 0.38 offers no way to
+/// learn a sheet's size first: opening the file already expands every sheet into a full grid
+/// (values and formulas), reserves room for the cell count its DIMENSIONS record claims, and
+/// follows the compound file's sector chains without stopping at a loop. A few kilobytes could
+/// claim gigabytes, so [`xls_guard`] walks the same structures the way calamine does, without
+/// expanding anything, and the file is refused when calamine would allocate more than
+/// [`MAX_GRID_CELLS`] cells in all, keep values beyond [`MAX_COLUMNS`], or meet a malformed
+/// structure that would make it loop or panic. Rows are not refused: an .xls holds at most
+/// 65,536, and as for the other formats only the first [`MAX_ROWS`] are kept.
+fn check_xls(bytes: &[u8]) -> AppResult<()> {
+    match xls_guard::check(bytes) {
+        Ok(()) => Ok(()),
+        Err(xls_guard::Problem::Unreadable) => Err(unreadable("Excel")),
+        Err(xls_guard::Problem::TooBig) => Err(too_big()),
+        Err(xls_guard::Problem::TooWide) => Err(AppError::bad_request(format!(
+            "This sheet has values beyond column {MAX_COLUMNS}. Copy the columns you need into a new sheet and try again."
+        ))),
+    }
+}
+
+/// The OLE compound file signature that every .xls starts with.
+const OLE_SIGNATURE: &[u8; 8] = b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
+
+/// Mirrors what calamine 0.38 (`src/cfb.rs`, `src/xls.rs`) reads from an .xls, counting instead
+/// of allocating. Where the two could see the file differently (malformed files only), the
+/// difference ends in a refusal or in harmless zero bytes.
+mod xls_guard {
+    use super::{MAX_COLUMNS, MAX_GRID_CELLS};
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum Problem {
+        Unreadable,
+        TooBig,
+        TooWide,
+    }
+
+    type R<T> = Result<T, Problem>;
+
+    const RESERVED_SECTORS: u32 = 0xFFFF_FFFA;
+    const DIFSECT: u32 = 0xFFFF_FFFC;
+    const ENDOFCHAIN: u32 = 0xFFFF_FFFE;
+
+    fn u16_at(b: &[u8], i: usize) -> R<u16> {
+        b.get(i..i + 2).map(|s| u16::from_le_bytes([s[0], s[1]])).ok_or(Problem::Unreadable)
+    }
+
+    fn u32_at(b: &[u8], i: usize) -> R<u32> {
+        b.get(i..i + 4).map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]])).ok_or(Problem::Unreadable)
+    }
+
+    fn u32s(b: &[u8]) -> R<impl Iterator<Item = u32> + '_> {
+        if !b.len().is_multiple_of(4) {
+            // calamine asserts on this (a panic).
+            return Err(Problem::Unreadable);
+        }
+        Ok(b.as_chunks::<4>().0.iter().map(|s| u32::from_le_bytes(*s)))
+    }
+
+    struct Sectors<'a> {
+        data: &'a [u8],
+        size: usize,
+        maxid: u32,
+        /// The mini stream: a sector past its end is refused (calamine would read it from
+        /// wherever the file reader happens to be).
+        strict: bool,
+    }
+
+    impl Sectors<'_> {
+        fn get(&self, id: u32) -> R<&[u8]> {
+            if self.maxid < id {
+                return Err(Problem::Unreadable);
+            }
+            let start = id as usize * self.size;
+            let end = start + self.size;
+            if end > self.data.len() && self.strict {
+                return Err(Problem::Unreadable);
+            }
+            Ok(self.data.get(start..end.min(self.data.len())).unwrap_or(&[]))
+        }
+
+        /// A sector chain as calamine reads it, except that a chain visiting more sectors than
+        /// the file has (a loop) is refused instead of being followed until `len` bytes.
+        fn chain(&self, mut id: u32, fats: &[u32], len: usize) -> R<Vec<u8>> {
+            let mut out = Vec::new();
+            let mut steps: u64 = 0;
+            while id != ENDOFCHAIN {
+                steps += 1;
+                if steps > u64::from(self.maxid) + 2 {
+                    return Err(Problem::Unreadable);
+                }
+                let sector = self.get(id)?;
+                let take = sector.len().min(len - out.len());
+                out.extend_from_slice(&sector[..take]);
+                if out.len() >= len {
+                    break;
+                }
+                id = *fats.get(id as usize).ok_or(Problem::Unreadable)?;
+            }
+            Ok(out)
+        }
+    }
+
+    struct Dir {
+        name: String,
+        start: u32,
+        len: usize,
+    }
+
+    /// The `Workbook` (or older `Book`) stream, read like calamine's `Cfb::new` + `get_stream`.
+    fn workbook_stream(bytes: &[u8]) -> R<Vec<u8>> {
+        if bytes.len() < 512 || &bytes[..8] != super::OLE_SIGNATURE {
+            return Err(Problem::Unreadable);
+        }
+        let version = u16_at(bytes, 26)?;
+        let (size, header_len) = match u16_at(bytes, 30)? {
+            0x0009 => (512usize, 512usize),
+            0x000C => (4096, 4096),
+            _ => return Err(Problem::Unreadable),
+        };
+        if bytes.len() < header_len || u16_at(bytes, 32)? != 0x0006 {
+            return Err(Problem::Unreadable);
+        }
+        let dir_start = u32_at(bytes, 48)?;
+        let mini_fat_start = u32_at(bytes, 60)?;
+        let mini_fat_len = u32_at(bytes, 64)? as usize;
+        let difat_start = u32_at(bytes, 68)?;
+        let mut difat: Vec<u32> = u32s(&bytes[76..512])?.collect();
+        let maxid = bytes.len() / size;
+        let sectors = Sectors { data: &bytes[header_len..], size, maxid: maxid as u32, strict: false };
+
+        let mut sector_id = difat_start;
+        let mut difat_sectors = 0usize;
+        while sector_id < RESERVED_SECTORS {
+            difat_sectors += 1;
+            if difat_sectors > maxid.saturating_add(1) {
+                return Err(Problem::Unreadable);
+            }
+            difat.extend(u32s(sectors.get(sector_id)?)?);
+            sector_id = difat.pop().ok_or(Problem::Unreadable)?;
+        }
+        // A file cannot hold more FAT sectors than sectors; calamine would load each listed one,
+        // repeats included.
+        let fat_ids: Vec<u32> = difat.into_iter().filter(|id| *id < DIFSECT).collect();
+        if fat_ids.len() > maxid.saturating_add(1) {
+            return Err(Problem::Unreadable);
+        }
+        let mut fats = Vec::new();
+        for id in fat_ids {
+            fats.extend(u32s(sectors.get(id)?)?);
+        }
+
+        let dir_bytes = sectors.chain(dir_start, &fats, usize::MAX)?;
+        let mut dirs = Vec::new();
+        for c in dir_bytes.as_chunks::<128>().0 {
+            let mut name = encoding_rs::UTF_16LE.decode(&c[..64]).0.into_owned();
+            if let Some(l) = name.as_bytes().iter().position(|b| *b == 0) {
+                name.truncate(l);
+            }
+            let start = u32_at(c, 116)?;
+            let len = if size == 512 {
+                u32_at(c, 120)? as usize
+            } else {
+                usize::try_from(u64::from(u32_at(c, 120)?) | (u64::from(u32_at(c, 124)?) << 32))
+                    .map_err(|_| Problem::Unreadable)?
+            };
+            dirs.push(Dir { name, start, len });
+        }
+        if dirs.is_empty() || (version != 3 && dirs[0].start == ENDOFCHAIN) {
+            return Err(Problem::Unreadable);
+        }
+        let (mini_fats, ministream) = if mini_fat_len > 0 {
+            let ministream = sectors.chain(dirs[0].start, &fats, dirs[0].len)?;
+            let minifat = sectors.chain(mini_fat_start, &fats, mini_fat_len.saturating_mul(size))?;
+            let mini_fats: Vec<u32> = u32s(&minifat)?.collect();
+            (mini_fats, ministream)
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        let mini = Sectors { data: &ministream, size: 64, maxid: (maxid * 8) as u32, strict: true };
+
+        for wanted in ["Workbook", "Book"] {
+            if let Some(d) = dirs.iter().find(|d| d.name.as_bytes().eq_ignore_ascii_case(wanted.as_bytes())) {
+                // Any failure here is a refusal: calamine would fall back to "Book" and the two
+                // readers could then look at different streams.
+                return if d.len < 4096 {
+                    mini.chain(d.start, &mini_fats, d.len)
+                } else {
+                    sectors.chain(d.start, &fats, d.len)
+                };
+            }
+        }
+        Err(Problem::Unreadable)
+    }
+
+    /// BIFF records: (type, data). Continue records come out as records of their own; nothing
+    /// below looks at them, as calamine merges them into the record before.
+    fn records(mut s: &[u8]) -> impl Iterator<Item = R<(u16, &[u8])>> {
+        std::iter::from_fn(move || {
+            if s.is_empty() {
+                return None;
+            }
+            if s.len() < 4 {
+                s = &[];
+                return Some(Err(Problem::Unreadable));
+            }
+            let typ = u16::from_le_bytes([s[0], s[1]]);
+            let len = u16::from_le_bytes([s[2], s[3]]) as usize;
+            if s.len() < len + 4 {
+                s = &[];
+                return Some(Err(Problem::Unreadable));
+            }
+            let data = &s[4..len + 4];
+            s = &s[len + 4..];
+            Some(Ok((typ, data)))
+        })
+    }
+
+    /// The smallest rectangle around a set of cells, as `Range::from_sparse` builds it.
+    #[derive(Default)]
+    struct Bounds(Option<(u32, u32, u32, u32)>);
+
+    impl Bounds {
+        fn add(&mut self, row: u32, col: u32) {
+            self.0 = Some(match self.0 {
+                None => (row, row, col, col),
+                Some((r0, r1, c0, c1)) => (r0.min(row), r1.max(row), c0.min(col), c1.max(col)),
+            });
+        }
+
+        fn add_pos(&mut self, (row, col): (u32, u32)) {
+            self.add(row, col);
+        }
+
+        fn cells(&self) -> u64 {
+            self.0.map_or(0, |(r0, r1, c0, c1)| u64::from(r1 - r0 + 1) * u64::from(c1 - c0 + 1))
+        }
+
+        fn last_col(&self) -> Option<u32> {
+            self.0.map(|(_, _, _, c1)| c1)
+        }
+    }
+
+    fn pos(data: &[u8], min_len: usize) -> R<(u32, u32)> {
+        if data.len() < min_len {
+            return Err(Problem::Unreadable);
+        }
+        Ok((u32::from(u16_at(data, 0)?), u32::from(u16_at(data, 2)?)))
+    }
+
+    /// The cells calamine would allocate for the sheet substream at `pos`, and the bytes read.
+    fn sheet(stream: &[u8], at: usize) -> R<(u64, usize)> {
+        let sub = stream.get(at..).ok_or(Problem::Unreadable)?;
+        let (mut values, mut formulas) = (Bounds::default(), Bounds::default());
+        let (mut fmla_pos, mut seen_bof, mut depth, mut read) = ((0u32, 0u32), false, 0usize, 0usize);
+        for record in records(sub) {
+            let (typ, data) = record?;
+            read += data.len() + 4;
+            if depth > 0 {
+                match typ {
+                    0x0809 => depth += 1,
+                    0x000A => depth -= 1,
+                    _ => {}
+                }
+                continue;
+            }
+            match typ {
+                0x0809 if seen_bof => depth += 1,
+                0x0809 => seen_bof = true,
+                0x0200 => {
+                    let (rf, rl, mut cf, cl) = match data.len() {
+                        10 => (
+                            u32::from(u16_at(data, 0)?),
+                            u32::from(u16_at(data, 2)?),
+                            u32::from(u16_at(data, 4)?),
+                            u32::from(u16_at(data, 6)?),
+                        ),
+                        14 | 16 => (
+                            u32_at(data, 0)?,
+                            u32_at(data, 4)?,
+                            u32::from(u16_at(data, 8)?),
+                            u32::from(u16_at(data, 10)?),
+                        ),
+                        _ => return Err(Problem::Unreadable),
+                    };
+                    if 0xFF < cf || cl < cf {
+                        cf = 0;
+                    }
+                    let ((r0, c0), (r1, c1)) =
+                        if 1 <= rl && 1 <= cl { ((rf, cf), (rl - 1, cl - 1)) } else { ((rf, cf), (rf, cf)) };
+                    // calamine subtracts these without checking: an end before the start would
+                    // overflow (a panic, or a reservation of billions of cells).
+                    if r1 < r0 || c1 < c0 {
+                        return Err(Problem::Unreadable);
+                    }
+                    if u64::from(r1 - r0 + 1) * u64::from(c1 - c0 + 1) > MAX_GRID_CELLS {
+                        return Err(Problem::TooBig);
+                    }
+                }
+                0x0203 => values.add_pos(pos(data, 14)?),
+                0x0204 | 0x00D6 => values.add_pos(pos(data, 6)?),
+                0x0205 => values.add_pos(pos(data, 8)?),
+                0x027E | 0x00FD => values.add_pos(pos(data, 10)?),
+                0x0207 => values.add_pos(fmla_pos),
+                0x00BD => {
+                    let (row, first) = pos(data, 6)?;
+                    let last = u32::from(u16_at(data, data.len() - 2)?);
+                    if last < first || data.len() != 6 + 6 * (last - first + 1) as usize {
+                        return Err(Problem::Unreadable);
+                    }
+                    values.add(row, first);
+                    values.add(row, last);
+                }
+                0x0006 => {
+                    fmla_pos = pos(data, 20)?;
+                    values.add_pos(fmla_pos);
+                    formulas.add_pos(fmla_pos);
+                }
+                0x000A => break,
+                _ => {}
+            }
+        }
+        if values.last_col().is_some_and(|c| c >= MAX_COLUMNS) {
+            return Err(Problem::TooWide);
+        }
+        Ok((values.cells().saturating_add(formulas.cells()), read))
+    }
+
+    pub fn check(bytes: &[u8]) -> R<()> {
+        let stream = workbook_stream(bytes)?;
+        let mut sheets = Vec::new();
+        for record in records(&stream) {
+            let (typ, data) = record?;
+            match typ {
+                0x0085 => {
+                    if data.len() < 6 {
+                        return Err(Problem::Unreadable);
+                    }
+                    sheets.push(u32_at(data, 0)? as usize);
+                }
+                0x000A => break,
+                _ => {}
+            }
+        }
+        let (mut cells, mut read) = (0u64, 0usize);
+        for at in sheets {
+            let (c, r) = sheet(&stream, at)?;
+            cells = cells.saturating_add(c);
+            read = read.saturating_add(r);
+            if cells > MAX_GRID_CELLS {
+                return Err(Problem::TooBig);
+            }
+            // Sheets are separate parts of the stream; many sheets pointing at one long part
+            // would make the reader go over it again and again.
+            if read > stream.len() {
+                return Err(Problem::TooBig);
+            }
+        }
+        Ok(())
+    }
+}
+
 fn read_workbook(bytes: &[u8]) -> AppResult<Vec<Sheet>> {
     if bytes.starts_with(b"PK") {
         check_zip(bytes)?;
+    }
+    if bytes.starts_with(OLE_SIGNATURE) {
+        check_xls(bytes)?;
     }
     let book = calamine::open_workbook_auto_from_rs(Cursor::new(bytes.to_vec())).map_err(|_| unreadable("Excel"))?;
     let sheets = match book {
@@ -460,6 +825,154 @@ mod tests {
         assert_eq!(ods_grid_cells(huge), vec![1_000_000_000]);
         let corner = r#"<table:table table:name="S"><table:table-row><table:table-cell office:value-type="float"/></table:table-row><table:table-row table:number-rows-repeated="1000000"><table:table-cell/></table:table-row><table:table-row><table:table-cell table:number-columns-repeated="16000"/><table:table-cell office:value-type="float"/></table:table-row></table:table>"#;
         assert!(ods_grid_cells(corner)[0] > MAX_GRID_CELLS);
+    }
+
+    fn record(typ: u16, data: &[u8]) -> Vec<u8> {
+        let mut r = typ.to_le_bytes().to_vec();
+        r.extend((data.len() as u16).to_le_bytes());
+        r.extend(data);
+        r
+    }
+
+    fn number(row: u16, col: u16, v: f64) -> Vec<u8> {
+        let mut d = row.to_le_bytes().to_vec();
+        d.extend(col.to_le_bytes());
+        d.extend(0u16.to_le_bytes());
+        d.extend(v.to_le_bytes());
+        record(0x0203, &d)
+    }
+
+    /// A minimal BIFF8 .xls (one compound-file stream "Workbook", one sheet "Sheet1") holding
+    /// `sheet_records` after the sheet's BOF. With `cyclic`, the stream's last sector points
+    /// back to its first and the stream claims a gigabyte.
+    fn xls(sheet_records: &[Vec<u8>], cyclic: bool) -> Vec<u8> {
+        let bof = |dt: u16| {
+            let mut d = 0x0600u16.to_le_bytes().to_vec();
+            d.extend(dt.to_le_bytes());
+            d.extend([0u8; 12]);
+            record(0x0809, &d)
+        };
+        let boundsheet = |at: u32| {
+            let mut d = at.to_le_bytes().to_vec();
+            d.extend([0, 0, 6, 0]);
+            d.extend(b"Sheet1");
+            record(0x0085, &d)
+        };
+        let globals_len = (bof(5).len() + boundsheet(0).len() + 4) as u32;
+        let mut stream = bof(5);
+        stream.extend(boundsheet(globals_len));
+        stream.extend(record(0x000A, &[]));
+        stream.extend(bof(0x10));
+        for r in sheet_records {
+            stream.extend(r);
+        }
+        stream.extend(record(0x000A, &[]));
+        let stream_len = stream.len().max(4096);
+        stream.resize(stream_len.div_ceil(512) * 512, 0);
+        let n = (stream.len() / 512) as u32;
+
+        const END: u32 = 0xFFFF_FFFE;
+        let mut file = vec![0u8; 512];
+        file[..8].copy_from_slice(OLE_SIGNATURE);
+        let mut put = |at: usize, v: u32| file[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        put(24, 0x0003_003E); // minor version 0x3E, major version 3
+        put(28, 0x0009_FFFE); // byte order, sector shift 9
+        put(32, 0x0006); // mini sector shift 6
+        put(44, 1); // one FAT sector
+        put(48, 1); // directory in sector 1
+        put(56, 4096); // mini stream cutoff
+        put(60, END);
+        put(68, END);
+        for i in 0..109 {
+            put(76 + 4 * i, if i == 0 { 0 } else { u32::MAX });
+        }
+        let mut fat = vec![u32::MAX; 128];
+        fat[0] = 0xFFFF_FFFD;
+        fat[1] = END;
+        for i in 0..n {
+            fat[2 + i as usize] = if i + 1 == n {
+                if cyclic {
+                    2
+                } else {
+                    END
+                }
+            } else {
+                3 + i
+            };
+        }
+        file.extend(fat.iter().flat_map(|v| v.to_le_bytes()));
+        let entry = |name: &str, typ: u8, start: u32, len: u32| {
+            let mut e = vec![0u8; 128];
+            for (i, u) in name.encode_utf16().enumerate() {
+                e[2 * i..2 * i + 2].copy_from_slice(&u.to_le_bytes());
+            }
+            e[64..66].copy_from_slice(&((name.len() as u16 + 1) * 2).to_le_bytes());
+            e[66] = typ;
+            e[116..120].copy_from_slice(&start.to_le_bytes());
+            e[120..124].copy_from_slice(&len.to_le_bytes());
+            e
+        };
+        file.extend(entry("Root Entry", 5, END, 0));
+        file.extend(entry("Workbook", 2, 2, if cyclic { 1 << 30 } else { stream_len as u32 }));
+        file.extend([0u8; 256]);
+        file.extend(stream);
+        file
+    }
+
+    fn refused_with(file: &str, bytes: &[u8], words: &str) {
+        match read(file, bytes) {
+            Err(AppError::BadRequest(m)) => assert!(format!("{m:?}").contains(words), "{m:?}"),
+            other => panic!("expected a 400, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_small_xls_reads() {
+        let bytes = xls(&[number(0, 0, 1234.5), number(1, 2, 7.0)], false);
+        assert_eq!(xls_guard::check(&bytes), Ok(()));
+        let s = read("old.xls", &bytes).expect("reads");
+        assert_eq!(s[0].name, "Sheet1");
+        assert_eq!(s[0].rows, vec![vec!["1234.5"], vec!["", "", "7"]]);
+    }
+
+    #[test]
+    fn an_xls_whose_grid_is_too_large_is_refused_before_reading() {
+        // A1 and the last row at column 200: a 65,536 × 200 grid from a 5 KB file.
+        let bytes = xls(&[number(0, 0, 1.0), number(u16::MAX, 199, 2.0)], false);
+        assert!(bytes.len() < 8192);
+        assert_eq!(xls_guard::check(&bytes), Err(xls_guard::Problem::TooBig));
+        refused_with("corner.xls", &bytes, "too large");
+        // Within the limit (65,536 × 50 cells): read, only two rows kept.
+        let s = read("deep.xls", &xls(&[number(0, 0, 1.0), number(u16::MAX, 49, 2.0)], false)).expect("reads");
+        assert_eq!(s[0].rows.len(), 2);
+    }
+
+    #[test]
+    fn an_xls_with_values_beyond_the_column_limit_is_refused() {
+        let bytes = xls(&[number(0, 0, 1.0), number(0, MAX_COLUMNS as u16, 2.0)], false);
+        refused_with("wide.xls", &bytes, "beyond column 200");
+    }
+
+    #[test]
+    fn an_xls_dimensions_record_cannot_reserve_billions_of_cells() {
+        let mut d = 0u32.to_le_bytes().to_vec();
+        d.extend(1_000_000_000u32.to_le_bytes());
+        d.extend([0, 0, 10, 0, 0, 0]);
+        let bytes = xls(&[record(0x0200, &d), number(0, 0, 1.0)], false);
+        refused_with("dims.xls", &bytes, "too large");
+        // An end before the start would overflow inside calamine.
+        let mut d = 10u32.to_le_bytes().to_vec();
+        d.extend(5u32.to_le_bytes());
+        d.extend([0, 0, 1, 0, 0, 0]);
+        let bytes = xls(&[record(0x0200, &d)], false);
+        assert_eq!(xls_guard::check(&bytes), Err(xls_guard::Problem::Unreadable));
+    }
+
+    #[test]
+    fn an_xls_whose_sector_chain_loops_is_refused() {
+        let bytes = xls(&[number(0, 0, 1.0)], true);
+        assert_eq!(xls_guard::check(&bytes), Err(xls_guard::Problem::Unreadable));
+        refused_with("loop.xls", &bytes, "Could not read");
     }
 
     #[test]

@@ -120,6 +120,10 @@ impl FromRequestParts<AppState> for CurrentUser {
             return Err(AppError::Unauthorized("Full authentication required".into()));
         }
         let user = users::get_by_id(&state.db, &claims.sub).await?.ok_or_else(AppError::unauthorized_default)?;
+        // D52: sign-ins made before a password / 2FA reset or switch-off have ended.
+        if !auth::sessions::still_valid(&state.db, &user.id, claims.iat).await? {
+            return Err(AppError::unauthorized_default());
+        }
         if !user.is_active {
             return Err(AppError::Forbidden("Account is inactive".into()));
         }

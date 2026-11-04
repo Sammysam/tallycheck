@@ -162,7 +162,11 @@ async fn full_login_and_two_factor_flow() -> TestResult {
         .await?;
     assert_eq!(again.body["requiresTwoFactor"], json!(true));
     let temp2 = again.body["tempToken"].as_str().ok_or("tempToken")?.to_string();
-    let verified = app.call(Method::POST, "/api/auth/2fa/verify", Some(&temp2), Some(json!({"code": code}))).await?;
+    // D52: the code that turned 2FA on cannot be used again; the next one works.
+    let replay = app.call(Method::POST, "/api/auth/2fa/verify", Some(&temp2), Some(json!({"code": code}))).await?;
+    assert_eq!(replay.status, StatusCode::UNAUTHORIZED, "{}", replay.body);
+    let next = auth::totp::next_code(&secret).ok_or("code")?;
+    let verified = app.call(Method::POST, "/api/auth/2fa/verify", Some(&temp2), Some(json!({"code": next}))).await?;
     assert_eq!(verified.status, StatusCode::OK);
     assert!(verified.body["accessToken"].is_string());
 
@@ -4785,6 +4789,196 @@ async fn an_admin_password_reset_cancels_the_users_recovery_key() -> TestResult 
         )
         .await?;
     assert_eq!(owner.status, StatusCode::OK, "{}", owner.body);
+    Ok(())
+}
+
+// ---- D52 (2026-11-04): rights limits, ending sign-ins, one-use 2FA codes ----
+
+async fn user_id(app: &App, admin: &str, username: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let list = app.call(Method::GET, "/api/users", Some(admin), None).await?;
+    let found = list.body.as_array().ok_or("users")?.iter().find(|u| u["username"] == username).ok_or("user")?;
+    Ok(found["id"].as_str().ok_or("id")?.to_string())
+}
+
+async fn role_id(app: &App, admin: &str, name: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let list = app.call(Method::GET, "/api/roles", Some(admin), None).await?;
+    let found = list.body.as_array().ok_or("roles")?.iter().find(|r| r["name"] == name).ok_or("role")?;
+    Ok(found["id"].as_str().ok_or("id")?.to_string())
+}
+
+#[tokio::test]
+async fn the_users_permission_only_gives_rights_its_holder_has() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let manager = app.with_permissions(&admin, "manager", &["users", "invoices"]).await?;
+    let admin_role = role_id(&app, &admin, "Admin").await?;
+    let accountant = role_id(&app, &admin, "Accountant").await?;
+    let beyond = "Only an administrator can give or manage rights you don't have yourself";
+
+    // No Admin role, no role with rights the manager lacks, for new users or for themselves.
+    for role in [&admin_role, &accountant] {
+        let r = app
+            .call(
+                Method::POST,
+                "/api/users",
+                Some(&manager),
+                Some(json!({"username": "newbie", "password": "newbie-pass", "roleId": role})),
+            )
+            .await?;
+        assert_nest_error(&r, 403, json!(beyond), "/api/users");
+    }
+    let me = user_id(&app, &admin, "manager").await?;
+    let up = app
+        .call(Method::PATCH, &format!("/api/users/{me}"), Some(&manager), Some(json!({"roleId": admin_role})))
+        .await?;
+    assert_eq!(up.status, StatusCode::FORBIDDEN, "cannot make themselves Admin");
+
+    // No roles stronger than their own, and the Admin role is untouchable.
+    let strong = app
+        .call(Method::POST, "/api/roles", Some(&manager), Some(json!({"name": "Strong", "permissions": ["payroll"]})))
+        .await?;
+    assert_eq!(strong.status, StatusCode::FORBIDDEN);
+    let own_role = role_id(&app, &admin, "Role of manager").await?;
+    let grow = app
+        .call(
+            Method::PATCH,
+            &format!("/api/roles/{own_role}"),
+            Some(&manager),
+            Some(json!({"permissions": ["users", "invoices", "payroll"]})),
+        )
+        .await?;
+    assert_eq!(grow.status, StatusCode::FORBIDDEN, "cannot grow their own role");
+    let admin_edit = app
+        .call(Method::PATCH, &format!("/api/roles/{admin_role}"), Some(&manager), Some(json!({"name": "X"})))
+        .await?;
+    assert_eq!(admin_edit.status, StatusCode::FORBIDDEN);
+
+    // No password or 2FA reset of an Admin or of a stronger user.
+    let boss = user_id(&app, &admin, "boss").await?;
+    let reset = app
+        .call(
+            Method::POST,
+            &format!("/api/users/{boss}/reset-password"),
+            Some(&manager),
+            Some(json!({"password": "taken-over"})),
+        )
+        .await?;
+    assert_eq!(reset.status, StatusCode::FORBIDDEN, "cannot take over the Admin");
+    let tfa = app.call(Method::POST, &format!("/api/users/{boss}/reset-2fa"), Some(&manager), None).await?;
+    assert_eq!(tfa.status, StatusCode::FORBIDDEN);
+
+    // Within their own rights they still manage users and roles.
+    let small = app
+        .call(Method::POST, "/api/roles", Some(&manager), Some(json!({"name": "Sales", "permissions": ["invoices"]})))
+        .await?;
+    assert_eq!(small.status, StatusCode::CREATED, "{}", small.body);
+    let made = app
+        .call(
+            Method::POST,
+            "/api/users",
+            Some(&manager),
+            Some(json!({"username": "seller", "password": "seller-pass", "roleId": small.body["id"]})),
+        )
+        .await?;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    let seller = made.body["id"].as_str().ok_or("id")?;
+    let ok = app
+        .call(
+            Method::POST,
+            &format!("/api/users/{seller}/reset-password"),
+            Some(&manager),
+            Some(json!({"password": "new-pass-1"})),
+        )
+        .await?;
+    assert_eq!(ok.status, StatusCode::CREATED, "{}", ok.body);
+    Ok(())
+}
+
+#[tokio::test]
+async fn keys_are_managed_only_by_their_owner_or_an_admin() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let a = app.with_permissions(&admin, "alice", &["settings"]).await?;
+    let b = app.with_permissions(&admin, "bob", &["settings"]).await?;
+    let made = app.call(Method::POST, "/api/api-keys", Some(&a), Some(json!({"name": "Alice's Claude"}))).await?;
+    let id = made.body["id"].as_str().ok_or("id")?.to_string();
+
+    let bobs_list = app.call(Method::GET, "/api/api-keys", Some(&b), None).await?;
+    assert_eq!(bobs_list.body.as_array().map(Vec::len), Some(0), "Bob doesn't see Alice's key");
+    let revoke = app.call(Method::DELETE, &format!("/api/api-keys/{id}"), Some(&b), None).await?;
+    assert_eq!(revoke.status, StatusCode::NOT_FOUND);
+    let rename =
+        app.call(Method::PATCH, &format!("/api/api-keys/{id}"), Some(&b), Some(json!({"canWrite": true}))).await?;
+    assert_eq!(rename.status, StatusCode::NOT_FOUND, "Bob cannot give Alice's key write access");
+
+    let all = app.call(Method::GET, "/api/api-keys", Some(&admin), None).await?;
+    assert_eq!(all.body.as_array().map(Vec::len), Some(1), "an Admin sees every key");
+    let own = app.call(Method::DELETE, &format!("/api/api-keys/{id}"), Some(&a), None).await?;
+    assert!(own.status.is_success(), "{} {}", own.status, own.body);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_reset_or_switch_off_ends_the_users_sign_ins() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    // A user without 2FA, so a password alone signs in.
+    let made = app
+        .call(Method::POST, "/api/users", Some(&admin), Some(json!({"username": "clerk", "password": "first-pass-1"})))
+        .await?;
+    let clerk = made.body["id"].as_str().ok_or("id")?.to_string();
+    let first = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "clerk", "password": "first-pass-1"})))
+        .await?;
+    let old = first.body["accessToken"].as_str().ok_or("token")?.to_string();
+    assert_eq!(app.call(Method::GET, "/api/auth/me", Some(&old), None).await?.status, StatusCode::OK);
+
+    // Tokens carry whole seconds: wait so the old one is clearly from before the reset.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let reset = app
+        .call(
+            Method::POST,
+            &format!("/api/users/{clerk}/reset-password"),
+            Some(&admin),
+            Some(json!({"password": "fresh-pass-1"})),
+        )
+        .await?;
+    assert_eq!(reset.status, StatusCode::CREATED, "{}", reset.body);
+    assert_eq!(app.call(Method::GET, "/api/auth/me", Some(&old), None).await?.status, StatusCode::UNAUTHORIZED);
+
+    let login = app
+        .call(Method::POST, "/api/auth/login", None, Some(json!({"username": "clerk", "password": "fresh-pass-1"})))
+        .await?;
+    let new = login.body["accessToken"].as_str().ok_or("token")?.to_string();
+    assert_eq!(app.call(Method::GET, "/api/auth/me", Some(&new), None).await?.status, StatusCode::OK);
+
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let off =
+        app.call(Method::PATCH, &format!("/api/users/{clerk}"), Some(&admin), Some(json!({"isActive": false}))).await?;
+    assert_eq!(off.status, StatusCode::OK, "{}", off.body);
+    let on =
+        app.call(Method::PATCH, &format!("/api/users/{clerk}"), Some(&admin), Some(json!({"isActive": true}))).await?;
+    assert_eq!(on.status, StatusCode::OK);
+    assert_eq!(
+        app.call(Method::GET, "/api/auth/me", Some(&new), None).await?.status,
+        StatusCode::UNAUTHORIZED,
+        "switching the user back on does not bring old sessions back"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_failed_sign_in_takes_the_same_minimum_time() -> TestResult {
+    let app = App::new().await?;
+    app.first_admin().await?;
+    for name in ["owner", "nobody"] {
+        let started = std::time::Instant::now();
+        let r = app
+            .call(Method::POST, "/api/auth/login", None, Some(json!({"username": name, "password": "wrong-one"})))
+            .await?;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(800), "{name}: {:?}", started.elapsed());
+    }
     Ok(())
 }
 

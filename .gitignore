@@ -19,3 +19,9 @@
 
 # Archives of local work (e.g. zipped folders) can contain test data or secrets.
 *.zip
+
+# Graphify code map (local, rebuilt with: graphify update .)
+graphify-out/
+
+# Python bytecode
+__pycache__/

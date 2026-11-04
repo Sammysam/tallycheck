@@ -45,9 +45,20 @@ async fn audit_login(state: &AppState, user_id: Option<&str>, username: &str, ac
     .await;
 }
 
+/// D52: a failed sign-in always takes at least this long, whatever the stored hash is (Argon2,
+/// an imported bcrypt hash, or no user at all), so its timing does not tell which usernames
+/// exist or which still have an imported password. Successful sign-ins are not slowed.
+const FAILED_LOGIN_FLOOR: std::time::Duration = std::time::Duration::from_millis(800);
+
 /// The attempt was already counted by `begin`; this only writes the log and the answer.
-async fn reject_login(state: &AppState, user_id: Option<&str>, username: &str) -> AppError {
+async fn reject_login(
+    state: &AppState,
+    started: tokio::time::Instant,
+    user_id: Option<&str>,
+    username: &str,
+) -> AppError {
     audit_login(state, user_id, username, "Failed login", 401).await;
+    tokio::time::sleep_until(started + FAILED_LOGIN_FLOOR).await;
     AppError::Unauthorized("Invalid credentials".into())
 }
 
@@ -64,14 +75,15 @@ pub async fn login(
     }
     let throttle_key = throttle_key("login", local, &username);
     state.throttle.begin(&throttle_key).map_err(throttled)?;
+    let started = tokio::time::Instant::now();
 
     let Some(user) = users::get_by_username(&state.db, &username).await? else {
         users::burn_equivalent_time(&password).await?;
-        return Err(reject_login(&state, None, &username).await);
+        return Err(reject_login(&state, started, None, &username).await);
     };
     let needs_rehash = match users::verify_password(&password, &user.password_hash).await? {
         Verified::Match { needs_rehash } => needs_rehash,
-        Verified::Mismatch => return Err(reject_login(&state, Some(&user.id), &username).await),
+        Verified::Mismatch => return Err(reject_login(&state, started, Some(&user.id), &username).await),
     };
     if !user.is_active {
         audit_login(&state, Some(&user.id), &user.username, "Failed login (account inactive)", 403).await;
@@ -109,6 +121,9 @@ async fn user_from_header(state: &AppState, headers: &HeaderMap) -> AppResult<Us
     }
     let claims = state.jwt.verify(&token).ok_or_else(|| AppError::Unauthorized("Invalid token".into()))?;
     let user = users::get_by_id(&state.db, &claims.sub).await?.ok_or_else(AppError::unauthorized_default)?;
+    if !auth::sessions::still_valid(&state.db, &user.id, claims.iat).await? {
+        return Err(AppError::unauthorized_default());
+    }
     if !user.is_active {
         return Err(AppError::Forbidden("Account is inactive".into()));
     }
@@ -137,15 +152,40 @@ fn code_of(body: &Value) -> String {
     }
 }
 
+/// D52: the last 30-second step each user signed in with, so a code works once (a code seen
+/// over someone's shoulder, or replayed, is refused). In memory: a restart clears it, and codes
+/// are only valid for about a minute anyway.
+static LAST_TOTP_STEP: std::sync::Mutex<Option<std::collections::HashMap<String, u64>>> = std::sync::Mutex::new(None);
+
+/// Records `step` for the user unless it is not newer than the last one used.
+fn first_use_of_step(user_id: &str, step: u64) -> bool {
+    let mut guard = LAST_TOTP_STEP.lock().unwrap_or_else(|p| p.into_inner());
+    let map = guard.get_or_insert_with(Default::default);
+    if map.len() > auth::throttle::MAX_KEYS {
+        map.clear();
+    }
+    match map.get(user_id) {
+        Some(last) if step <= *last => false,
+        _ => {
+            map.insert(user_id.to_string(), step);
+            true
+        }
+    }
+}
+
 fn check_code(state: &AppState, local: bool, user: &User, secret: &str, code: &str) -> AppResult<()> {
     // Keyed by the user's id, not the typed name, so the keyspace is one entry per real user.
     let key = throttle_key("2fa", local, &user.id);
     state.throttle.begin(&key).map_err(throttled)?;
-    if totp::verify(secret, code) {
-        state.throttle.reset(&key);
-        Ok(())
-    } else {
-        Err(AppError::Unauthorized("Invalid 2FA code".into()))
+    match totp::matching_step(secret, code) {
+        Some(step) if first_use_of_step(&user.id, step) => {
+            state.throttle.reset(&key);
+            Ok(())
+        }
+        Some(_) => Err(AppError::Unauthorized(
+            "This code was already used. Wait for the next code in your authenticator app.".into(),
+        )),
+        None => Err(AppError::Unauthorized("Invalid 2FA code".into())),
     }
 }
 

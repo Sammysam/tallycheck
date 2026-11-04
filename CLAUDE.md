@@ -740,6 +740,22 @@ recommendations without answering each one individually; revisit any of them on 
   `CENANGO_API_URL`. Settings → Integrations → Claude shows the new names. Unchanged: the plugin id
   `cenango-accounting` and its `.mcp.json`, the MCP `serverInfo.name`, the identifier.
 
+- **D52 Remaining security items** (requested by the user 2026-11-04). The `users` permission no
+  longer equals Admin: someone who is not an Admin may only give or manage rights they hold
+  themselves (no Admin role, no Admin user, no user or role with a right they lack; creating,
+  changing and deleting roles likewise) — 403 "Only an administrator can give or manage rights you
+  don't have yourself"; Admins are unchanged. Claude keys: only an Administrator sees and manages
+  every key; others list, change and revoke only their own (someone else's is 404). Ending
+  sign-ins: table `session_cutoffs` (userId, validFrom Unix seconds); tokens with `iat` before it
+  are refused (CurrentUser and the 2FA steps). Set by an administrator's password or 2FA reset, a
+  recovery-key or Windows reset and switching a user off. 2FA codes work once: the last step used
+  per user is kept in memory and an older or equal step is refused ("This code was already used.
+  Wait for the next code…"). A failed sign-in takes at least 800 ms whatever the stored hash, so
+  timing doesn't reveal usernames or imported bcrypt passwords. Scheduled backups refuse a network
+  (UNC) folder saved earlier (`last_error` shown under Settings → Backup). Old .xls files are
+  checked before calamine reads them (≤ 5M cells, < 200 columns, malformed files refused).
+  Not covered on purpose: LAN traffic is plain HTTP and installers are unsigned (§10).
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
@@ -795,6 +811,9 @@ npm ci && npm run installer                       # Windows installer (frontend/
 python tools/release.py --notes "…" --download-base https://…/v{version}  # signed update + latest.json (D45)
 python tools/build_msix.py --identity-name … --publisher "CN=…" --publisher-display-name …  # Store MSIX (D47; --test for a test package)
 ```
+CI: `powershell -ExecutionPolicy Bypass -File tools\ci.ps1` runs fmt, frontend build, npm audit,
+clippy and tests; GitHub Actions (`.github/workflows/ci.yml`) and Bitbucket Pipelines
+(`bitbucket-pipelines.yml`, self-hosted Windows runner) both run it on every push (`docs/ci-cd.md`).
 Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
 UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh, empty database
 (no ADMIN_* variables; the test creates the admin on the first-run screen).

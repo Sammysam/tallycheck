@@ -29,19 +29,43 @@ fn totp_for(secret_base32: &str) -> Option<TOTP> {
 }
 
 pub fn verify(secret_base32: &str, code: &str) -> bool {
+    matching_step(secret_base32, code).is_some()
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// The 30-second step whose code `code` is (current step ±1), or `None`. D52: the caller
+/// remembers the last step each user used, so a code cannot be used a second time.
+pub fn matching_step(secret_base32: &str, code: &str) -> Option<u64> {
     let code = code.trim();
     if code.len() != DIGITS || !code.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
+        return None;
     }
-    match totp_for(secret_base32) {
-        Some(t) => t.check_current(code).unwrap_or(false),
-        None => false,
+    let t = totp_for(secret_base32)?;
+    let now = now_secs();
+    let mut found = None;
+    for time in [now.saturating_sub(STEP), now, now + STEP] {
+        let expected = t.generate(time);
+        // Compare every candidate in constant time and without stopping early.
+        let same = expected.len() == code.len()
+            && expected.bytes().zip(code.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0;
+        if same && found.is_none() {
+            found = Some(time / STEP);
+        }
     }
+    found
 }
 
 /// The current code — for tests and the contract-test harness only.
 pub fn current_code(secret_base32: &str) -> Option<String> {
     totp_for(secret_base32).and_then(|t| t.generate_current().ok())
+}
+
+/// The next step's code (still accepted, ±1 step) — for tests that need a second, unused code.
+pub fn next_code(secret_base32: &str) -> Option<String> {
+    totp_for(secret_base32).map(|t| t.generate(now_secs() + STEP))
 }
 
 /// `otpauth://` URL as speakeasy builds it for `generateSecret({ name })`.

@@ -100,6 +100,9 @@ includes STATE_INCOME_TAX from the start. Account choices are settings (`payroll
 D49 adds `recovery_keys` (one row per user: the SHA-256 of the normalised password recovery key and
 when it was made).
 
+D52 adds `session_cutoffs` (one row per user: sign-in tokens issued before `validFrom`, Unix
+seconds, are refused).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,
