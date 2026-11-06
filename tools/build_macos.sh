@@ -23,11 +23,12 @@ if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then echo "Signing as the Developer ID 
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
 rustup target add "${TARGETS[@]}"
 
-echo "==> Third-party notices"
-python3 tools/third_party_notices.py
-
 echo "==> Frontend"
 (cd frontend && npm ci --ignore-scripts --no-audit --no-fund && npm run build)
+
+# After the frontend packages are installed, so their licenses are listed too.
+echo "==> Third-party notices"
+python3 tools/third_party_notices.py
 
 echo "==> Claude connector (tallycheck-mcp), both processors"
 for t in "${TARGETS[@]}"; do

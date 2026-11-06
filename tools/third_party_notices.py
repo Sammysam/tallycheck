@@ -4,7 +4,10 @@ license and the license text the library ships. Run before building an installer
 
     python tools/third_party_notices.py
 
-Needs `cargo` on PATH and frontend/node_modules installed (npm ci)."""
+Needs `cargo` on PATH and frontend/node_modules installed (npm ci). Works with Python 3.9 (the
+Python that comes with macOS) and later."""
+from __future__ import annotations
+
 import json
 import os
 import subprocess
@@ -13,7 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "THIRD-PARTY-NOTICES.txt"
-TARGET = "x86_64-pc-windows-msvc"
+# The crates of the build this file ships with: the Mac app on macOS (D53), else Windows.
+TARGET = "aarch64-apple-darwin" if sys.platform == "darwin" else "x86_64-pc-windows-msvc"
 APP_ROOTS = {"accounting-desktop", "mcp"}
 LICENSE_NAMES = ("license", "licence", "copying", "notice", "unlicense")
 
@@ -110,7 +114,9 @@ def main() -> int:
             for fname, text in p["texts"]:
                 lines += ["", f"  --- {fname} ---", "", text, ""]
             lines += ["-" * 78, ""]
-    OUT.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    # open() rather than Path.write_text(newline=...), which needs Python 3.10.
+    with open(OUT, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
     missing = [f"{p['name']} {p['version']}" for p in rust + npm if not p["texts"]]
     print(f"wrote {OUT.name}: {len(rust)} crates, {len(npm)} npm packages; {len(missing)} without a license file")
     for m in missing:
