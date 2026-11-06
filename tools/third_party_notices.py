@@ -98,7 +98,7 @@ def main() -> int:
     lines = [
         "TallyCheck — third-party software notices",
         "",
-        "TallyCheck is Copyright (C) 2026 Cenango (Pvt) Ltd and is licensed under the MIT License",
+        "TallyCheck is Copyright (C) 2026 Cenango Financial LLC and is licensed under the MIT License",
         "(LICENSE-MIT) or the Apache License 2.0 (LICENSE-APACHE), at your option; see NOTICE.",
         "It is built with the libraries below, each under its own license, reproduced here as shipped.",
         "",

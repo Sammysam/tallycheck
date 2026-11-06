@@ -107,7 +107,7 @@ node tests/ui/smoke.mjs http://127.0.0.1:47800       # needs a running server wi
 
 ## License
 
-Copyright (C) 2026 Cenango (Pvt) Ltd.
+Copyright (C) 2026 Cenango Financial LLC.
 
 Licensed under either of [MIT](LICENSE-MIT) or [Apache License 2.0](LICENSE-APACHE)
 (`MIT OR Apache-2.0`), at your option. The TallyCheck and Cenango names and logos are not

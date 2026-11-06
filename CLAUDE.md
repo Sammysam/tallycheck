@@ -626,8 +626,8 @@ recommendations without answering each one individually; revisit any of them on 
   and the logo (`frontend/public` icons, `Logo_tallycheck.png` wordmark, `src-tauri/icons/icon.ico`
   from the user's design). Kept on purpose so existing installations keep working: the data folder
   the data folder (see D46), the identifier `lk.cenango.accounting`, `cenango-mcp.exe`,
-  `CENANGO_API_KEY` and the plugin id `cenango-accounting`. The publisher and copyright holder stay
-  Cenango (Pvt) Ltd. Risk raised with the user: "Tally" is Tally Solutions' trademark (TallyPrime);
+  `CENANGO_API_KEY` and the plugin id `cenango-accounting`. The publisher and copyright holder stayed
+  Cenango (Pvt) Ltd until D54. Risk raised with the user: "Tally" is Tally Solutions' trademark (TallyPrime);
   the user chose to go ahead. The installer installs to `%LOCALAPPDATA%\TallyCheck`, so a PC with
   the old "Cenango Accounting" uninstalls that first (its data is kept).
 
@@ -769,6 +769,13 @@ recommendations without answering each one individually; revisit any of them on 
   settings `src-tauri/tauri.macos.json` (the connector ships as the `tallycheck-mcp` sidecar).
   CI runs every check on a Mac too (`checks-macos`). Not yet: in-app updates on macOS, the Mac
   App Store, Touch ID recovery. Windows builds are unchanged.
+
+- **D54 Publisher Cenango Financial LLC** (requested by the user 2026-11-06, after the Mac signing
+  account and the Microsoft Store account turned out to be Cenango Financial LLC's). Copyright
+  holder and publisher everywhere they are shown: `LICENSE-MIT`, `NOTICE`, `PRIVACY.md`, README,
+  `tauri.conf.json` (installer publisher, copyright), Help → About, the notices header and the
+  Claude plugin's owner. The MSIX publisher display name stays what Partner Center reserved
+  ("Cenango"); identifiers and file names that say "cenango" are unchanged (D44, D46).
 
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the

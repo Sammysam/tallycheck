@@ -1,6 +1,6 @@
 {
   "name": "cenango",
-  "owner": { "name": "Cenango (Pvt) Ltd" },
+  "owner": { "name": "Cenango Financial LLC" },
   "plugins": [
     {
       "name": "cenango-accounting",
