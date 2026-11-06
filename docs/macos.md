@@ -28,9 +28,16 @@ Mac apps can only be built on macOS.
 * **On GitHub:** Actions → **macOS app** → Run workflow (or push a tag `v<version>`). The .dmg is
   attached to the run. CI also runs every check on a Mac (`checks-macos` in `ci.yml`).
 
-Without the signing variables the app is **unsigned**: fine for testing, but macOS refuses to open
-it ("cannot be opened because Apple cannot check it") until the user right-clicks it → Open, or
-allows it under System Settings → Privacy & Security.
+Without the signing variables the app is **ad-hoc signed** (not with the company's Developer ID,
+not notarized): fine for testing, but macOS refuses to open it ("cannot be opened because Apple
+cannot check it") until the user allows it under System Settings → Privacy & Security → Open
+Anyway (older macOS: right-click → Open).
+
+While the disk image is made, macOS may ask whether Terminal may control Finder (it arranges the
+.dmg window): click OK. If that step fails, the app itself is still in
+`target/universal-apple-darwin/release/bundle/macos/TallyCheck.app`.
+
+Menus and tooltips show ⌘ and ⌥ on a Mac; every shortcut works with Ctrl or ⌘.
 
 ## Signing and notarization (company Apple Developer account)
 

@@ -4,6 +4,7 @@ import { KeyRound, MonitorCheck } from 'lucide-react';
 import AuthShell, { PasswordInput } from '../components/AuthShell';
 import RecoveryKeyCard from '../components/RecoveryKeyCard';
 import api, { errMsg } from '../api/client';
+import { isMac } from '../lib/platform';
 
 type Way = 'key' | 'windows';
 
@@ -131,7 +132,7 @@ export default function ForgotPassword() {
 
       <p className="text-xs text-gray-500 mt-4">
         No recovery key? Another administrator can reset your password under Administration → Users.
-        {!windowsOk && ' On the main PC, the TallyCheck desktop app can also reset it with your Windows sign-in.'}
+        {!windowsOk && !isMac && ' On the main PC, the TallyCheck desktop app can also reset it with your Windows sign-in.'}
       </p>
       <button type="button" onClick={() => navigate('/login')} className="mt-3 text-xs text-orange-700 hover:underline">
         ← Back to sign in

@@ -18,7 +18,14 @@ cd "$(dirname "$0")/.."
 for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH; do
   if [ -z "${!v:-}" ]; then unset "$v"; fi
 done
-if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then echo "Signing as the Developer ID in APPLE_SIGNING_IDENTITY"; else echo "Unsigned build"; fi
+if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  echo "Signing as the Developer ID in APPLE_SIGNING_IDENTITY"
+else
+  # Ad-hoc signature ("-"): no Developer ID, but Apple-silicon Macs need every app signed somehow.
+  # Gatekeeper still asks once (System Settings → Privacy & Security → Open Anyway).
+  echo "Test build: ad-hoc signed, not notarized"
+  export APPLE_SIGNING_IDENTITY="-"
+fi
 
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
 rustup target add "${TARGETS[@]}"

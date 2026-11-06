@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { keyLabel } from '../../lib/platform';
 
 export type MenuEntry =
   | { label: string; shortcut?: string; onSelect: () => void; disabled?: boolean }
@@ -61,8 +62,10 @@ export default function MenuBar({ menus }: { menus: Menu[] }) {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'Alt') setAltHeld(true);
-      if (e.altKey && !e.ctrlKey && /^[a-z]$/i.test(e.key)) {
-        const m = menus.findIndex((menu, i) => keys[i] >= 0 && menu.label[keys[i]].toLowerCase() === e.key.toLowerCase());
+      // On a Mac, ⌥+letter types a symbol (⌥F is ƒ), so the key's position decides the letter.
+      const letter = /^Key[A-Z]$/.test(e.code) ? e.code.slice(3) : e.key;
+      if (e.altKey && !e.ctrlKey && /^[a-z]$/i.test(letter)) {
+        const m = menus.findIndex((menu, i) => keys[i] >= 0 && menu.label[keys[i]].toLowerCase() === letter.toLowerCase());
         if (m >= 0) {
           e.preventDefault();
           openMenu(m, true);
@@ -152,7 +155,7 @@ export default function MenuBar({ menus }: { menus: Menu[] }) {
                     onClick={() => run(entry)}
                   >
                     <span>{entry.label}</span>
-                    {entry.shortcut && <span className="desk-menu-key">{entry.shortcut}</span>}
+                    {entry.shortcut && <span className="desk-menu-key">{keyLabel(entry.shortcut)}</span>}
                   </button>
                 ),
               )}

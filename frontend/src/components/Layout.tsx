@@ -31,6 +31,7 @@ import { exportScreen } from '../lib/exportCsv';
 import { companyIsSetUp, region, SETUP_LATER, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
 import api from '../api/client';
 import ToastHost from './ToastHost';
+import { keyLabel } from '../lib/platform';
 
 declare const __APP_VERSION__: string;
 
@@ -302,8 +303,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   // ── Toolbar ────────────────────────────────────────────────────────────
   const tool = (permission: string, b: ToolbarButton) => (hasPermission(permission) ? [b] : []);
   const toolbar: (ToolbarButton | null)[] = [
-    { label: 'Back', title: 'Back (Alt+Left)', icon: ArrowLeft, onClick: () => navigate(-1) },
-    { label: 'Forward', title: 'Forward (Alt+Right)', icon: ArrowRight, onClick: () => navigate(1) },
+    { label: 'Back', title: keyLabel('Back (Alt+Left)'), icon: ArrowLeft, onClick: () => navigate(-1) },
+    { label: 'Forward', title: keyLabel('Forward (Alt+Right)'), icon: ArrowRight, onClick: () => navigate(1) },
     ...tool('dashboard', { label: 'Home', title: 'Dashboard', icon: Home, onClick: go('/') }),
     null,
     ...tool('invoices', { label: 'Invoice', title: 'Create an invoice', icon: FileText, onClick: () => openNew('/invoices') }),
@@ -317,8 +318,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     ...tool('reports', { label: 'Reports', title: 'Profit & Loss', icon: BarChart2, onClick: go('/reports/profit-loss') }),
     null,
     { label: 'Refresh', title: 'Refresh (F5)', icon: RefreshCw, onClick: refresh },
-    { label: 'Print', title: 'Print (Ctrl+P)', icon: Printer, onClick: () => window.print() },
-    { label: 'Export', title: 'Export the tables on this screen to Excel (Ctrl+E)', icon: FileSpreadsheet, onClick: exportTables },
+    { label: 'Print', title: keyLabel('Print (Ctrl+P)'), icon: Printer, onClick: () => window.print() },
+    { label: 'Export', title: keyLabel('Export the tables on this screen to Excel (Ctrl+E)'), icon: FileSpreadsheet, onClick: exportTables },
   ];
   // No divider twice in a row when a whole group is hidden by permissions.
   const tools = toolbar.filter((b, i, all) => b !== null || (i > 0 && all[i - 1] !== null));
@@ -364,7 +365,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             <tbody>
               {SHORTCUTS.map(([keys, what]) => (
                 <tr key={keys} className="border-b border-gray-100 last:border-0">
-                  <td className="py-1.5 pr-4 whitespace-nowrap"><kbd className="desk-kbd">{keys}</kbd></td>
+                  <td className="py-1.5 pr-4 whitespace-nowrap"><kbd className="desk-kbd">{keyLabel(keys)}</kbd></td>
                   <td className="py-1.5 text-gray-700">{what}</td>
                 </tr>
               ))}

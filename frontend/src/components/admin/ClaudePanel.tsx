@@ -5,6 +5,7 @@ import ConfirmDialog from '../ConfirmDialog';
 import Dialog from '../desktop/Dialog';
 import { toast } from '../../lib/toast';
 import { fmtDate } from '../../lib/region';
+import { keyLabel } from '../../lib/platform';
 
 /**
  * D41: Claude (MCP). A key lets Claude, on this PC, read the books as the user who made it —
@@ -23,7 +24,7 @@ async function copy(text: string, what: string) {
     await navigator.clipboard.writeText(text);
     toast(`${what} copied.`);
   } catch {
-    toast('Select the text and press Ctrl+C to copy it.', 'info');
+    toast(keyLabel('Select the text and press Ctrl+C to copy it.'), 'info');
   }
 }
 
