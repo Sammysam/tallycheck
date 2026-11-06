@@ -60,6 +60,9 @@ qrcode = { version = "0.14", default-features = false, features = ["image"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# D53: macOS only (Keychain, statfs); already in the tree through reqwest / rustls.
+security-framework = "3"
+libc = "0.2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tempfile = "3"
 thiserror = "2"

@@ -80,8 +80,9 @@ pub async fn setup(State(s): State<AppState>, _auth: Authorized<perm::Settings>)
     // `tallycheck-mcp.exe`; an installation from before it shipped has only `cenango-mcp.exe`.
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(std::path::Path::to_path_buf));
     let exe = dir.map(|d| {
-        let new = d.join("tallycheck-mcp.exe");
-        let old = d.join("cenango-mcp.exe");
+        let exe = std::env::consts::EXE_SUFFIX;
+        let new = d.join(format!("tallycheck-mcp{exe}"));
+        let old = d.join(format!("cenango-mcp{exe}"));
         if !new.exists() && old.exists() {
             old
         } else {

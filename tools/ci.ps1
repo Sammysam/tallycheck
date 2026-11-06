@@ -3,7 +3,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File tools\ci.ps1
 #
-# Windows only (DPAPI, Tauri). Works in Windows PowerShell 5.1 and PowerShell 7.
+# Windows (Windows PowerShell 5.1 or PowerShell 7) and macOS (PowerShell 7, `pwsh tools/ci.ps1`, D53).
 # It never touches the real data folder: the tests make their own temporary folders.
 # Keep this file ASCII: Windows PowerShell 5.1 reads files without a BOM as the ANSI code page.
 

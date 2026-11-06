@@ -25,7 +25,6 @@ impl WindowsVerifier for WindowsSignIn {
     }
 }
 
-#[cfg(windows)]
 #[allow(unsafe_code)]
 mod imp {
     use api_server::local_verify::Verification;
@@ -221,14 +220,5 @@ mod imp {
             sid
         };
         matches!((mine, sid_of(token)), (Some(a), Some(b)) if a == b)
-    }
-}
-
-#[cfg(not(windows))]
-mod imp {
-    use api_server::local_verify::Verification;
-
-    pub fn verify(_hwnd: isize, _message: &str) -> Verification {
-        Verification::Unavailable("Windows sign-in is only available on Windows".into())
     }
 }

@@ -1,9 +1,10 @@
 //! Installation secrets (JWT signing key now; the file-encryption key in W4), stored
 //! encrypted with the Windows Data Protection API (DPAPI, current-user scope) so the raw key
-//! never sits on disk next to the database.
+//! never sits on disk next to the database. On macOS (D53) the files are encrypted with
+//! AES-256-GCM under a key kept in the user's login Keychain instead.
 //!
-//! DPAPI ties the ciphertext to the Windows user account: a copied file cannot be decrypted on
-//! another PC or by another user. Keys that must survive a reinstall or a new PC (the W4
+//! DPAPI (and the Keychain) ties the ciphertext to the user account: a copied file cannot be
+//! decrypted on another PC or by another user. Keys that must survive a reinstall or a new PC (the W4
 //! file-encryption key) additionally need an offline recovery copy — that is handled by the
 //! backup design, not here.
 
@@ -19,6 +20,10 @@ pub enum SecretError {
     Random(String),
     #[error("DPAPI failed: {0}")]
     Dpapi(String),
+    #[error("macOS Keychain failed: {0}")]
+    Keychain(String),
+    #[error("secret file is damaged or was made on another computer")]
+    Damaged,
     #[error("secret file has the wrong length (expected {expected} bytes, got {actual})")]
     WrongLength { expected: usize, actual: usize },
 }
@@ -41,7 +46,7 @@ pub fn random_bytes(len: usize) -> Result<Vec<u8>, SecretError> {
 pub fn load_or_create(path: &Path, len: usize) -> Result<Vec<u8>, SecretError> {
     if path.exists() {
         let blob = fs::read(path)?;
-        let secret = dpapi::unprotect(&blob, ENTROPY)?;
+        let secret = dpapi::unprotect(&blob, ENTROPY, dir_of(path))?;
         if secret.len() != len {
             return Err(SecretError::WrongLength { expected: len, actual: secret.len() });
         }
@@ -58,7 +63,7 @@ pub fn load(path: &Path) -> Result<Option<Vec<u8>>, SecretError> {
         return Ok(None);
     }
     let blob = fs::read(path)?;
-    Ok(Some(dpapi::unprotect(&blob, ENTROPY)?))
+    Ok(Some(dpapi::unprotect(&blob, ENTROPY, dir_of(path))?))
 }
 
 /// D39: forgets a stored secret (disconnecting an integration).
@@ -72,15 +77,20 @@ pub fn remove(path: &Path) -> Result<(), SecretError> {
 /// Protects `secret` with DPAPI and writes it to `path`, replacing any existing file
 /// (used when an administrator restores a key from its offline recovery copy).
 pub fn store(path: &Path, secret: &[u8]) -> Result<(), SecretError> {
-    let blob = dpapi::protect(secret, ENTROPY)?;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
+    let blob = dpapi::protect(secret, ENTROPY, dir_of(path))?;
     // Write then rename so a crash never leaves a truncated key file behind.
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, &blob)?;
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// The folder holding the secret files (`<data_dir>/secrets`).
+fn dir_of(path: &Path) -> &Path {
+    path.parent().unwrap_or_else(|| Path::new("."))
 }
 
 #[cfg(windows)]
@@ -114,7 +124,7 @@ mod dpapi {
         }
     }
 
-    pub fn protect(data: &[u8], entropy: &[u8]) -> Result<Vec<u8>, SecretError> {
+    pub fn protect(data: &[u8], entropy: &[u8], _dir: &std::path::Path) -> Result<Vec<u8>, SecretError> {
         let input = blob(data)?;
         let ent = blob(entropy)?;
         let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: ptr::null_mut() };
@@ -129,7 +139,7 @@ mod dpapi {
         Ok(take(out))
     }
 
-    pub fn unprotect(data: &[u8], entropy: &[u8]) -> Result<Vec<u8>, SecretError> {
+    pub fn unprotect(data: &[u8], entropy: &[u8], _dir: &std::path::Path) -> Result<Vec<u8>, SecretError> {
         let input = blob(data)?;
         let ent = blob(entropy)?;
         let mut out = CRYPT_INTEGER_BLOB { cbData: 0, pbData: ptr::null_mut() };
@@ -152,20 +162,100 @@ mod dpapi {
     }
 }
 
-#[cfg(not(windows))]
+/// D53, macOS: AES-256-GCM under a 32-byte key in the login Keychain (generic password, service
+/// `KEYCHAIN_SERVICE`). Each data folder has its own Keychain item, named by a random id kept in
+/// `secrets/keychain-id`, so moving the folder keeps working while a copy on another Mac (or for
+/// another user) cannot be opened, as with DPAPI. File: `TCK1` | nonce(12) | ciphertext+tag;
+/// the entropy is the associated data.
+#[cfg(target_os = "macos")]
 mod dpapi {
-    use super::SecretError;
+    use super::{random_bytes, SecretError};
+    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    use aes_gcm::{Aes256Gcm, Nonce};
+    use security_framework::passwords::{get_generic_password, set_generic_password};
+    use std::path::Path;
 
-    pub fn protect(_: &[u8], _: &[u8]) -> Result<Vec<u8>, SecretError> {
-        Err(SecretError::Dpapi("DPAPI is only available on Windows".into()))
+    const KEYCHAIN_SERVICE: &str = "TallyCheck data protection";
+    const ID_FILE: &str = "keychain-id";
+    const MAGIC: &[u8; 4] = b"TCK1";
+    /// errSecItemNotFound
+    const NOT_FOUND: i32 = -25300;
+
+    fn key_id(dir: &Path, create: bool) -> Result<String, SecretError> {
+        let file = dir.join(ID_FILE);
+        match std::fs::read_to_string(&file) {
+            Ok(id) if id.trim().len() == 32 && id.trim().bytes().all(|b| b.is_ascii_hexdigit()) => {
+                Ok(id.trim().to_string())
+            }
+            Ok(_) => Err(SecretError::Damaged),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && create => {
+                let id: String = random_bytes(16)?.iter().map(|b| format!("{b:02x}")).collect();
+                std::fs::create_dir_all(dir)?;
+                std::fs::write(&file, &id)?;
+                Ok(id)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(SecretError::Damaged),
+            Err(e) => Err(e.into()),
+        }
     }
 
-    pub fn unprotect(_: &[u8], _: &[u8]) -> Result<Vec<u8>, SecretError> {
-        Err(SecretError::Dpapi("DPAPI is only available on Windows".into()))
+    fn master_key(dir: &Path, create: bool) -> Result<Vec<u8>, SecretError> {
+        let id = key_id(dir, create)?;
+        match get_generic_password(KEYCHAIN_SERVICE, &id) {
+            Ok(key) if key.len() == 32 => Ok(key),
+            Ok(_) => Err(SecretError::Damaged),
+            Err(e) if e.code() == NOT_FOUND && create => {
+                let key = random_bytes(32)?;
+                set_generic_password(KEYCHAIN_SERVICE, &id, &key).map_err(|e| SecretError::Keychain(e.to_string()))?;
+                Ok(key)
+            }
+            Err(e) if e.code() == NOT_FOUND => Err(SecretError::Damaged),
+            Err(e) => Err(SecretError::Keychain(e.to_string())),
+        }
+    }
+
+    fn cipher(key: &[u8]) -> Result<Aes256Gcm, SecretError> {
+        Aes256Gcm::new_from_slice(key).map_err(|_| SecretError::Damaged)
+    }
+
+    pub fn protect(data: &[u8], entropy: &[u8], dir: &Path) -> Result<Vec<u8>, SecretError> {
+        let key = master_key(dir, true)?;
+        let nonce = random_bytes(12)?;
+        let sealed = cipher(&key)?
+            .encrypt(Nonce::from_slice(&nonce), Payload { msg: data, aad: entropy })
+            .map_err(|_| SecretError::Keychain("encryption failed".into()))?;
+        let mut out = Vec::with_capacity(4 + 12 + sealed.len());
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&sealed);
+        Ok(out)
+    }
+
+    pub fn unprotect(blob: &[u8], entropy: &[u8], dir: &Path) -> Result<Vec<u8>, SecretError> {
+        if blob.len() < 4 + 12 + 16 || &blob[..4] != MAGIC {
+            return Err(SecretError::Damaged);
+        }
+        let key = master_key(dir, false)?;
+        cipher(&key)?
+            .decrypt(Nonce::from_slice(&blob[4..16]), Payload { msg: &blob[16..], aad: entropy })
+            .map_err(|_| SecretError::Damaged)
     }
 }
 
-#[cfg(all(test, windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
+mod dpapi {
+    use super::SecretError;
+
+    pub fn protect(_: &[u8], _: &[u8], _: &std::path::Path) -> Result<Vec<u8>, SecretError> {
+        Err(SecretError::Dpapi("protected key storage is only available on Windows and macOS".into()))
+    }
+
+    pub fn unprotect(_: &[u8], _: &[u8], _: &std::path::Path) -> Result<Vec<u8>, SecretError> {
+        Err(SecretError::Dpapi("protected key storage is only available on Windows and macOS".into()))
+    }
+}
+
+#[cfg(all(test, any(windows, target_os = "macos")))]
 mod tests {
     use super::*;
 

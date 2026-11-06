@@ -2,10 +2,11 @@
 
 | What | Where | When | File |
 |---|---|---|---|
-| **CI**: formatting, frontend build, npm advisories, clippy, all tests | GitHub Actions (Windows, GitHub's machines) | every push and pull request on GitHub | `.github/workflows/ci.yml` |
+| **CI**: formatting, frontend build, npm advisories, clippy, all tests | GitHub Actions (Windows and macOS, GitHub's machines) | every push and pull request on GitHub | `.github/workflows/ci.yml` |
 | **CI**: the same checks | Bitbucket Pipelines (Windows, **self-hosted runner**) | every push on Bitbucket | `bitbucket-pipelines.yml` |
 | **CD**: installer → SignPath code signing → update signature → draft GitHub release | GitHub Actions | tag `v<version>` or run by hand | `.github/workflows/release.yml` (D48, `docs/signpath.md`) |
 | Microsoft Store MSIX | this PC | by hand | `python tools/build_msix.py` (D47, `docs/microsoft-store.md`) |
+| macOS app (.dmg), signed and notarized when the Apple secrets are set | GitHub Actions (Mac) or a Mac | by hand or tag `v<version>` | `.github/workflows/macos.yml`, `tools/build_macos.sh` (D53, `docs/macos.md`) |
 
 Both CI systems run one script, `tools/ci.ps1`, so they always check the same things. Run it
 yourself before pushing:

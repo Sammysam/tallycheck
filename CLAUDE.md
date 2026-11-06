@@ -756,6 +756,20 @@ recommendations without answering each one individually; revisit any of them on 
   checked before calamine reads them (≤ 5M cells, < 200 columns, malformed files refused).
   Not covered on purpose: LAN traffic is plain HTTP and installers are unsigned (§10).
 
+- **D53 macOS app** (requested by the user 2026-11-06; the company has an Apple Developer account).
+  One universal app (Apple silicon + Intel, macOS 11+) from the same code; `docs/macos.md`.
+  Data folder `~/Library/Application Support/TallyCheckData` (`config::data_base`); a folder on a
+  network volume is refused (statfs without `MNT_LOCAL`). Secret files keep their names and are
+  AES-256-GCM sealed (`TCK1` | nonce | ciphertext, entropy as associated data) under a 32-byte key
+  in the login Keychain (service "TallyCheck data protection", account = the random id in
+  `secrets/keychain-id`), so like DPAPI they open only for that user on that Mac. Windows sign-in
+  recovery is not offered (no verifier; the recovery key still works). LAN host names use the Mac's
+  host name. Build: `bash tools/build_macos.sh` on a Mac, or the `macos.yml` workflow; signing and
+  notarization through Tauri's `APPLE_*` variables (secrets only, never in the repo); bundle
+  settings `src-tauri/tauri.macos.json` (the connector ships as the `tallycheck-mcp` sidecar).
+  CI runs every check on a Mac too (`checks-macos`). Not yet: in-app updates on macOS, the Mac
+  App Store, Touch ID recovery. Windows builds are unchanged.
+
 Reference quirks reproduced on purpose (verified by tests): audit actions such as
 "Created an user" and "Posted a payroll" (the payroll-specific texts are unreachable in the
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
@@ -810,9 +824,10 @@ cargo run -p importer -- --source postgres://… --source-tz +05:30 --target <ne
 npm ci && npm run installer                       # Windows installer (frontend/dist must be built)
 python tools/release.py --notes "…" --download-base https://…/v{version}  # signed update + latest.json (D45)
 python tools/build_msix.py --identity-name … --publisher "CN=…" --publisher-display-name …  # Store MSIX (D47; --test for a test package)
+bash tools/build_macos.sh                         # macOS universal .dmg, on a Mac (D53; signed when APPLE_* are set)
 ```
 CI: `powershell -ExecutionPolicy Bypass -File tools\ci.ps1` runs fmt, frontend build, npm audit,
-clippy and tests; GitHub Actions (`.github/workflows/ci.yml`) and Bitbucket Pipelines
+clippy and tests; GitHub Actions (`.github/workflows/ci.yml`, Windows and macOS) and Bitbucket Pipelines
 (`bitbucket-pipelines.yml`, self-hosted Windows runner) both run it on every push (`docs/ci-cd.md`).
 Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
 UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh, empty database

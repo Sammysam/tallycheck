@@ -1,0 +1,74 @@
+# D53: builds the Mac app (universal: Apple silicon and Intel) as a disk image, signed with the
+# company's Developer ID and notarized by Apple when the secrets below are set; unsigned otherwise.
+# Run it by hand (Actions → macOS app → Run workflow) or push a tag v<version>.
+# The .dmg is attached to the run as an artifact for a person to test and publish.
+#
+# Repository secrets (Settings → Secrets and variables → Actions), never in the repository:
+#   APPLE_CERTIFICATE           the Developer ID Application certificate, .p12, base64-encoded
+#   APPLE_CERTIFICATE_PASSWORD  the .p12 password
+#   APPLE_SIGNING_IDENTITY      "Developer ID Application: <Company> (<TEAM ID>)"
+#   APPLE_API_ISSUER            App Store Connect API key: issuer ID
+#   APPLE_API_KEY               App Store Connect API key: key ID
+#   APPLE_API_KEY_P8            App Store Connect API key: contents of the .p8 file
+
+name: macOS app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # The API key file exists only on this runner, for this run.
+      - name: Notarization key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          if [ -n "$APPLE_API_KEY_P8" ]; then
+            umask 077
+            printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+            echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8" >> "$GITHUB_ENV"
+          else
+            echo "No notarization key: the app will not be notarized."
+          fi
+
+      - name: Build
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: bash tools/build_macos.sh
+
+      - name: Remove the notarization key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: TallyCheck-macOS
+          path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error

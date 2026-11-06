@@ -61,10 +61,36 @@ pub fn lan_host_allowed(host: &str, extra: &[String]) -> bool {
     if name == "localhost" || name.parse::<std::net::IpAddr>().is_ok() {
         return true;
     }
-    let this_pc = std::env::var("COMPUTERNAME").unwrap_or_default().to_ascii_lowercase();
+    let this_pc = this_pc_name();
     // The PC's name in its own Windows domain (set on domain-joined PCs), e.g. `pc.office.lan`.
     let domain = std::env::var("USERDNSDOMAIN").unwrap_or_default().to_ascii_lowercase();
     this_pc_names(&this_pc, &domain).contains(&name) || extra.iter().any(|e| e.trim().eq_ignore_ascii_case(&name))
+}
+
+/// This computer's name: `COMPUTERNAME` on Windows; on macOS (D53) the host name without
+/// `.local` (the `.local` form is added by `this_pc_names`).
+fn this_pc_name() -> String {
+    let name = std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty()).or_else(host_name_of_this_computer);
+    let name = name.unwrap_or_default().to_ascii_lowercase();
+    name.strip_suffix(".local").map(str::to_string).unwrap_or(name)
+}
+
+#[cfg(unix)]
+#[allow(unsafe_code)]
+fn host_name_of_this_computer() -> Option<String> {
+    let mut buf = [0u8; 256];
+    // SAFETY: the buffer is valid for its whole length; gethostname writes at most that many bytes.
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    std::str::from_utf8(&buf[..end]).ok().map(str::to_string).filter(|n| !n.is_empty())
+}
+
+#[cfg(not(unix))]
+fn host_name_of_this_computer() -> Option<String> {
+    None
 }
 
 /// Exact names of this PC. Any other `<pc>.something` is refused: an attacker's domain such as

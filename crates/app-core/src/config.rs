@@ -4,7 +4,7 @@
 //!
 //! | Setting | config.toml | Environment | Default |
 //! |---|---|---|---|
-//! | data directory | — | `ACCOUNTING_DATA_DIR` | `%LOCALAPPDATA%\TallyCheckData` (or the older `CenangoAccounting`, D46) |
+//! | data directory | — | `ACCOUNTING_DATA_DIR` | `%LOCALAPPDATA%\TallyCheckData` (or the older `CenangoAccounting`, D46); macOS: `~/Library/Application Support/TallyCheckData` (D53) |
 //! | bind address | `bind_address` | `ACCOUNTING_BIND` | `127.0.0.1` |
 //! | port | `port` | `ACCOUNTING_PORT` | `47800` |
 //! | LAN access | `lan_enabled` | `ACCOUNTING_LAN` | `false` |
@@ -212,8 +212,28 @@ fn read_file_config(path: &Path) -> Result<FileConfig, ConfigError> {
 }
 
 fn default_data_dir() -> Option<PathBuf> {
-    let base = PathBuf::from(std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty())?);
-    Some(choose_data_dir(&base, TEST_APP_DIR_NAME))
+    Some(choose_data_dir(&data_base()?, TEST_APP_DIR_NAME))
+}
+
+fn env_dir(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// The per-user folder for application data.
+#[cfg(windows)]
+fn data_base() -> Option<PathBuf> {
+    env_dir("LOCALAPPDATA")
+}
+
+/// D53: `~/Library/Application Support`, where macOS keeps each user's application data.
+#[cfg(target_os = "macos")]
+fn data_base() -> Option<PathBuf> {
+    Some(env_dir("HOME")?.join("Library").join("Application Support"))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn data_base() -> Option<PathBuf> {
+    env_dir("XDG_DATA_HOME").or_else(|| Some(env_dir("HOME")?.join(".local").join("share")))
 }
 
 /// `TallyCheckData`, unless only the older `CenangoAccounting` exists there (D46); a test build's
@@ -263,7 +283,37 @@ mod drive {
     }
 }
 
-#[cfg(not(windows))]
+/// D53: a folder on a network volume (SMB, AFP, NFS under `/Volumes`) has no `MNT_LOCAL` flag.
+/// A folder that does not exist yet is judged by its nearest existing parent.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+mod drive {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    const MNT_LOCAL: u32 = 0x0000_1000;
+
+    pub fn is_remote(path: &Path) -> bool {
+        let Some(existing) = path.ancestors().find(|p| p.exists()) else {
+            return false;
+        };
+        let Ok(c_path) = CString::new(existing.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: `c_path` is a NUL-terminated path that outlives the call, and `stat` is a
+        // plain C struct that statfs fills in completely on success.
+        unsafe {
+            let mut stat: libc::statfs = std::mem::zeroed();
+            if libc::statfs(c_path.as_ptr(), &mut stat) != 0 {
+                return false;
+            }
+            stat.f_flags & MNT_LOCAL == 0
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 mod drive {
     pub fn is_remote(_: &std::path::Path) -> bool {
         false

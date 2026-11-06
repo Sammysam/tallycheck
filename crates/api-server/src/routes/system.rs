@@ -92,9 +92,10 @@ fn local_only(path: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// `Documents\Cenango Backups` of the Windows user running the app.
+/// `Documents\Cenango Backups` of the user running the app (`USERPROFILE` on Windows, `HOME`
+/// on macOS, D53).
 pub fn default_folder() -> Option<String> {
-    let home = std::env::var_os("USERPROFILE")?;
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).filter(|v| !v.is_empty())?;
     Some(PathBuf::from(home).join("Documents").join("Cenango Backups").to_string_lossy().to_string())
 }
 

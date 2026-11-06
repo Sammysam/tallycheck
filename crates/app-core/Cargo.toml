@@ -21,6 +21,12 @@ uuid.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 
+# D53: Keychain-protected secrets and the network-volume check on macOS.
+[target.'cfg(target_os = "macos")'.dependencies]
+aes-gcm.workspace = true
+libc.workspace = true
+security-framework.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
 

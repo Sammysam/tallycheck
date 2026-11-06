@@ -35,6 +35,10 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 
+# D53: the computer's host name on macOS (LAN host check).
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 http-body-util.workspace = true
 sqlx.workspace = true

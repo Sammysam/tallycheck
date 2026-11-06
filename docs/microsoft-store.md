@@ -65,6 +65,11 @@ cd frontend && npm ci && npm run build && cd ..
 python tools/build_msix.py --identity-name "<Name>" --publisher "CN=<…>" --publisher-display-name "<PublisherDisplayName>"
 ```
 
+The name reserved in Partner Center is **TallyCheck.io**, so add `--display-name "TallyCheck.io"`
+(Package/Properties/DisplayName must be a reserved name, or the upload is refused). Cenango's
+values: `--identity-name "Cenango.TallyCheck.io" --publisher "CN=10446E21-680A-45CC-AC6E-7844866B02E5"
+--publisher-display-name "Cenango"`.
+
 Result: `target\msix\TallyCheck_<version>_x64.msix` (unsigned — the Store signs it). Raise the
 version (Cargo.toml `[workspace.package]` and `src-tauri/tauri.conf.json`) before each new
 submission; the Store takes the highest version.

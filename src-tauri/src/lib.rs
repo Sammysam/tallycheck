@@ -5,6 +5,7 @@
 
 #[cfg(not(feature = "store"))]
 mod updates;
+#[cfg(windows)]
 mod windows_verify;
 
 use api_server::ServerHandle;
@@ -41,11 +42,14 @@ fn start_server(app: &tauri::App) -> anyhow::Result<String> {
         }),
         api_server::updates::UpdateChannel::Direct,
     );
-    // D49: "Forgot password? → Reset using Windows sign-in" on this PC.
-    let verifier: std::sync::Arc<dyn api_server::local_verify::WindowsVerifier> =
-        std::sync::Arc::new(windows_verify::WindowsSignIn { app: app.handle().clone() });
-    let handle =
-        tauri::async_runtime::block_on(api_server::start_with_shell(&config, updater, channel, Some(verifier)))?;
+    // D49: "Forgot password? → Reset using Windows sign-in" on this PC. Not on macOS (D53): the
+    // sign-in screen then offers the recovery key only.
+    #[cfg(windows)]
+    let verifier: Option<std::sync::Arc<dyn api_server::local_verify::WindowsVerifier>> =
+        Some(std::sync::Arc::new(windows_verify::WindowsSignIn { app: app.handle().clone() }));
+    #[cfg(not(windows))]
+    let verifier: Option<std::sync::Arc<dyn api_server::local_verify::WindowsVerifier>> = None;
+    let handle = tauri::async_runtime::block_on(api_server::start_with_shell(&config, updater, channel, verifier))?;
     // Always open the loopback address, even when LAN access binds 0.0.0.0.
     let url = format!("http://127.0.0.1:{}/", handle.addr.port());
     app.manage(Server(Mutex::new(Some(handle))));
@@ -67,7 +71,23 @@ fn startup_error_box(message: &str) {
             MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
         }
     }
-    #[cfg(not(windows))]
+    // D53: macOS shows the same message in a standard alert. The text goes in as an argument,
+    // never as part of the script.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("osascript")
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "display alert \"TallyCheck could not start.\" message (item 1 of argv) as critical",
+                "-e",
+                "end run",
+                message,
+            ])
+            .status();
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = message;
 }
 
