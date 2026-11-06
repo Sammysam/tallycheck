@@ -35,7 +35,11 @@ for t in "${TARGETS[@]}"; do
   cargo build --release --locked -p mcp --bin tallycheck-mcp --target "$t"
 done
 mkdir -p target/sidecar
-# Tauri looks for <name>-<target triple>; the universal app takes one universal binary.
+# Tauri looks for <name>-<target triple>: a universal build compiles the app once per processor
+# (each needs its own copy) and then bundles the universal one.
+for t in "${TARGETS[@]}"; do
+  cp "target/$t/release/tallycheck-mcp" "target/sidecar/tallycheck-mcp-$t"
+done
 lipo -create -output target/sidecar/tallycheck-mcp-universal-apple-darwin \
   target/aarch64-apple-darwin/release/tallycheck-mcp target/x86_64-apple-darwin/release/tallycheck-mcp
 
