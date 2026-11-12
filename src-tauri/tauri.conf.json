@@ -20,10 +20,10 @@
     "icon": [
       "icons/icon.ico"
     ],
-    "publisher": "Cenango Financial LLC",
+    "publisher": "Cenango (Pvt) Ltd",
     "shortDescription": "TallyCheck",
     "longDescription": "Offline accounting, employees and payroll.",
-    "copyright": "Copyright (C) 2026 Cenango Financial LLC. Licensed under the MIT or Apache-2.0 license.",
+    "copyright": "Copyright (C) 2026 Cenango (Pvt) Ltd. Licensed under the MIT or Apache-2.0 license.",
     "licenseFile": "../NOTICE",
     "resources": {
       "../frontend/dist/": "frontend/"

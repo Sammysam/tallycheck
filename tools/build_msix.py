@@ -1,7 +1,7 @@
 """Builds TallyCheck's MSIX package for the Microsoft Store (D47).
 
     python tools/build_msix.py --identity-name <Package/Identity/Name> \
-        --publisher "CN=<…>" --publisher-display-name "Cenango Financial LLC"
+        --publisher "CN=<…>" --publisher-display-name "Cenango (Pvt) Ltd"
 
 The three identity values are on Partner Center → the app → Product management → Product
 identity; they must be copied exactly (case and spaces count). The package is not signed: the

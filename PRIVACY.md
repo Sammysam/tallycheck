@@ -3,7 +3,7 @@
 Last updated: 6 November 2026
 
 TallyCheck is an offline accounting, invoicing and payroll application for Windows and macOS, published by
-Cenango Financial LLC. This policy explains what happens to your information.
+Cenango (Pvt) Ltd. This policy explains what happens to your information.
 
 ## Your data stays on your PC
 
@@ -12,7 +12,7 @@ Cenango Financial LLC. This policy explains what happens to your information.
   is installed**, in `%LOCALAPPDATA%\TallyCheckData` (or `%LOCALAPPDATA%\CenangoAccounting` on PCs
   set up with an earlier version).
 * Employee documents are stored encrypted. Passwords are stored only as secure hashes.
-* **Cenango Financial LLC does not receive, collect or see any of your data.** TallyCheck has no
+* **Cenango (Pvt) Ltd does not receive, collect or see any of your data.** TallyCheck has no
   accounts with us, no analytics and no advertising.
 * Uninstalling TallyCheck leaves your data folder in place on purpose, so that your books are not
   lost. You can delete the folder yourself.

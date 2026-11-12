@@ -2,6 +2,6 @@
   "name": "cenango-accounting",
   "version": "1.0.0",
   "description": "TallyCheck for Claude: read the books (invoices, bills, payments, reports, stock, bank lines) and, if the key allows, create drafts. Includes month-end, overdue-customers, VAT-return, report-explaining and online-sales skills.",
-  "author": { "name": "Cenango Financial LLC" },
+  "author": { "name": "Cenango (Pvt) Ltd" },
   "license": "MIT OR Apache-2.0"
 }

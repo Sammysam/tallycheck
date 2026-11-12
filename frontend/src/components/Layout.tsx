@@ -389,7 +389,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="text-xs text-gray-600 mt-4 space-y-1.5">
-            <p>Copyright © 2026 Cenango Financial LLC.</p>
+            <p>Copyright © 2026 Cenango (Pvt) Ltd.</p>
             <p>
               Licensed under the MIT License or the Apache License 2.0, at your option. It comes with no warranty.
               The names TallyCheck and Cenango and their logos are not covered by these licenses.
