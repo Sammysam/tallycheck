@@ -40,6 +40,19 @@ jobs:
         with:
           python-version: "3.12"
 
+      # rustup downloads the toolchain from rust-toolchain.toml on first use; a short network
+      # failure there must not fail the run, so try up to 3 times before the real work.
+      - name: Install Rust (with retries)
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            cargo --version
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            Write-Host "Rust download failed (try $i of 3); trying again shortly"
+            Start-Sleep -Seconds (20 * $i)
+          }
+          exit 1
+
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Frontend
