@@ -4705,7 +4705,9 @@ async fn other_pcs_cannot_lock_the_owner_out_and_rebinding_names_are_refused() -
     assert_eq!(mine.status, StatusCode::OK, "the main PC still signs in: {}", mine.body);
 
     // `<pc>.attacker.example` rebound to this PC is not one of this PC's names.
-    let pc = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "testpc".into()).to_ascii_lowercase();
+    // The name the server itself uses (COMPUTERNAME on Windows, the host name on macOS).
+    let pc = api_server::middleware::this_pc_name();
+    assert!(!pc.is_empty(), "this computer has a name");
     let rebound = format!("{pc}.attacker.example:47800");
     let r = app.call_from("127.0.0.1:50000", &rebound, Method::GET, "/api/auth/me", None, None).await?;
     assert_eq!(r.status, StatusCode::FORBIDDEN);

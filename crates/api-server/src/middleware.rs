@@ -69,7 +69,7 @@ pub fn lan_host_allowed(host: &str, extra: &[String]) -> bool {
 
 /// This computer's name: `COMPUTERNAME` on Windows; on macOS (D53) the host name without
 /// `.local` (the `.local` form is added by `this_pc_names`).
-fn this_pc_name() -> String {
+pub fn this_pc_name() -> String {
     let name = std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty()).or_else(host_name_of_this_computer);
     let name = name.unwrap_or_default().to_ascii_lowercase();
     name.strip_suffix(".local").map(str::to_string).unwrap_or(name)
