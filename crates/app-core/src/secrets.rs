@@ -77,10 +77,18 @@ pub fn remove(path: &Path) -> Result<(), SecretError> {
 /// Protects `secret` with DPAPI and writes it to `path`, replacing any existing file
 /// (used when an administrator restores a key from its offline recovery copy).
 pub fn store(path: &Path, secret: &[u8]) -> Result<(), SecretError> {
+    store_for(path, secret, dir_of(path))
+}
+
+/// Like [`store`], but protected for the secrets folder `key_dir` instead of the file's own
+/// folder: a restore writes the key into a staging folder and later moves only that file into
+/// `<data_dir>/secrets`. On macOS (D53) the Keychain key belongs to the folder, so the file must
+/// be sealed with the destination's key; DPAPI ignores the folder.
+pub fn store_for(path: &Path, secret: &[u8], key_dir: &Path) -> Result<(), SecretError> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let blob = dpapi::protect(secret, ENTROPY, dir_of(path))?;
+    let blob = dpapi::protect(secret, ENTROPY, key_dir)?;
     // Write then rename so a crash never leaves a truncated key file behind.
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, &blob)?;

@@ -193,7 +193,12 @@ pub async fn stage_restore(path: &Path, key: &BackupKey, data_dir: &Path) -> Bac
         fs::rename(&db, staging.join("accounting.db"))?;
         let _ = fs::remove_dir(staging.join("database"));
         if let Some(k) = storage_key {
-            app_core::secrets::store(&staging.join("secrets").join(app_core::secrets::STORAGE_KEY_FILE), &k)?;
+            // Sealed for the live secrets folder it is moved into (macOS Keychain key, D53).
+            app_core::secrets::store_for(
+                &staging.join("secrets").join(app_core::secrets::STORAGE_KEY_FILE),
+                &k,
+                &data_dir.join("secrets"),
+            )?;
         }
         let manifest_json = serde_json::to_vec_pretty(&manifest).map_err(|e| BackupError::Verify(e.to_string()))?;
         fs::write(staging.join("manifest.json"), manifest_json)?;
