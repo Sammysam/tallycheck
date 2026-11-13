@@ -23,23 +23,23 @@ Checked against Microsoft's documentation on 2026-10-30:
 | Build | `npm run installer` | `python tools/build_msix.py …` |
 | Signed by | nobody yet (SmartScreen warns) | Microsoft, after certification |
 | Updates | in-app updater (D45, GitHub releases) | the Store; the in-app updater is not compiled in (`--features store`), and Help → Check for updates says so |
-| Data folder | `%LOCALAPPDATA%\TallyCheckData` (or an existing `CenangoAccounting`, D46) | the same folders, excluded from MSIX virtualization (below) |
+| Data folder | `%LOCALAPPDATA%\TallyCheckData` (or an existing `CenangoAccounting`, D46) | `%USERPROFILE%\TallyCheckData` (below, D55) |
 | Executable | installed by NSIS | `TallyCheck.exe` inside the package |
 
 ### Keeping the books on update and uninstall
 
-An MSIX app's writes to AppData normally go to a private copy that Windows **deletes when the app
-is uninstalled**. The manifest (`src-tauri/msix/AppxManifest.xml`) excludes the data folders:
+An MSIX app's writes to AppData go to a private copy that Windows **deletes when the app is
+uninstalled**. Excluding the data folder from that needs the restricted capability
+`unvirtualizedResources`, which the Store **refused** for TallyCheck (2026-11-13). So the Store
+build keeps the books in the user's own folder, **`%USERPROFILE%\TallyCheckData`** (for example
+`C:\Users\Anne\TallyCheckData`), outside AppData: MSIX does not redirect it, so the books survive
+updates and uninstalling. `tools/build_msix.py` compiles this in with `ACCOUNTING_STORE_EDITION=1`
+(D55). That folder is not one OneDrive backs up (Desktop, Documents, Pictures), which matters for
+the live database.
 
-* Windows 11: `virtualization:ExcludedDirectories` lists `%LOCALAPPDATA%\TallyCheckData` and
-  `%LOCALAPPDATA%\CenangoAccounting` only;
-* Windows 10 1903 or later: `desktop6:FileSystemWriteVirtualization = disabled` (all AppData
-  writes go to the real folders).
-
-Both need the restricted capability **`unvirtualizedResources`**, and a desktop app needs
-**`runFullTrust`**. Restricted capabilities are reviewed: Partner Center asks why they are needed
-(text below). Someone moving from the direct installer to the Store version, or back, keeps
-using the same data folder.
+The package asks only for **`runFullTrust`**, which every desktop app needs. The direct installer
+keeps `%LOCALAPPDATA%\TallyCheckData`; someone moving between the two moves the books with
+**Settings → Backup & restore**.
 
 ## 1. Partner Center (manual — needs a person from Cenango)
 
@@ -84,15 +84,9 @@ Optional before uploading: run the **Windows App Certification Kit** on the pack
 3. **Age ratings:** the questionnaire (no user-generated content shared between users, no
    purchases inside the app).
 4. **Packages:** upload `TallyCheck_<version>_x64.msix`.
-5. **Restricted capabilities — justification** (Submission options), for example:
+5. **Restricted capabilities — justification** (Submission options):
    > *runFullTrust*: TallyCheck is a desktop accounting application (Win32, Tauri/WebView2) that
    > runs its own local database and a local web server for its window.
-   > *unvirtualizedResources*: TallyCheck keeps each company's accounting database, documents and
-   > encryption keys in %LOCALAPPDATA%\TallyCheckData (or %LOCALAPPDATA%\CenangoAccounting on PCs
-   > set up before the rename). These are business records that must not be
-   > deleted when the app is uninstalled or reinstalled, and they must be shared with the
-   > TallyCheck desktop installer that some offices use. Only these folders are excluded from
-   > virtualization (Windows 11).
 6. **Store listing:** description, at least one screenshot (1366×768 or larger), the app icon
    (`src-tauri/icons/icon-512.png` works as the 300×300+ logo after resizing), search terms.
 7. Submit. Certification usually takes a few business days; Microsoft may ask questions about the

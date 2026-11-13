@@ -22,6 +22,11 @@ All notable changes to TallyCheck. The format follows
   ended after password or 2FA resets; 2FA codes work only once; failed sign-ins take a fixed
   minimum time (D52).
 
+### Changed
+- Microsoft Store version: the company's books are kept in `%USERPROFILE%\TallyCheckData`, so
+  they stay when the app is updated or uninstalled, without the restricted capability the Store
+  refused (D55). The direct installer is unchanged.
+
 ### Fixed
 - Restoring a backup on a Mac left the file encryption key unreadable; it is now sealed with
   the data folder's Keychain key.

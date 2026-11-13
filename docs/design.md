@@ -642,12 +642,18 @@ recommendations without answering each one individually; revisit any of them on 
   "This copy of TallyCheck is updated by the Microsoft Store") and cenango-mcp in
   `target/msix-build`, lays out `TallyCheck.exe`, `frontend/`, license files and tiles, fills
   `src-tauri/msix/AppxManifest.xml` with the Partner Center identity and packs it with the Windows
-  SDK's makeappx. The Store signs MSIX packages itself, so no certificate is bought. The data
-  folders (D46) are excluded from MSIX file-system virtualization (restricted capability
-  `unvirtualizedResources`) so the books survive updates and uninstalling. `--test` builds a
+  SDK's makeappx. The Store signs MSIX packages itself, so no certificate is bought. The books
+  live outside AppData so they survive updates and uninstalling (D55). `--test` builds a
   package with a made-up identity and its own data folder `TallyCheckStoreTest` (compiled in via
   `ACCOUNTING_APP_DIR_NAME`). The normal installer is unchanged. Submission: `docs/microsoft-store.md`. GitHub builds it
   too (`.github/workflows/msix.yml`, Run workflow or tag; the identity is in the workflow, no secrets).
+
+- **D55 Store data folder outside AppData** (2026-11-13). The Store refused the restricted
+  capability `unvirtualizedResources` that excluded the D46 data folders from MSIX virtualization.
+  The Store build (`ACCOUNTING_STORE_EDITION=1`, set by `tools/build_msix.py`) keeps the books in
+  `%USERPROFILE%\TallyCheckData`, which MSIX does not redirect, so they survive updates and
+  uninstalling; the package asks only for `runFullTrust`. The direct installer keeps
+  `%LOCALAPPDATA%\TallyCheckData`; moving between the two goes through Backup & restore.
 
 - **D48 Free code signing via SignPath Foundation** (2026-10-30).
   `.github/workflows/release.yml` (tag `v<version>` or run by hand): builds the NSIS installer on

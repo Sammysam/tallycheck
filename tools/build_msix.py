@@ -42,7 +42,6 @@ TEST = {
     "display": "TallyCheck (test)",
     "data_dir": "TallyCheckStoreTest",
 }
-DATA_DIRS = ["TallyCheckData", "CenangoAccounting"]  # D46: current name, and the one from before the rename
 TILES = {
     "Square44x44Logo.png": (44, 44),
     "Square150x150Logo.png": (150, 150),
@@ -84,6 +83,8 @@ def xml_escape(s: str) -> str:
 
 
 def main() -> int:
+    # The messages contain arrows; a Windows console in cp1252 must not stop the script at the end.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--identity-name")
     ap.add_argument("--publisher", help='e.g. "CN=12345678-ABCD-…" from Partner Center')
@@ -98,12 +99,10 @@ def main() -> int:
 
     if a.test:
         ident, publisher, publisher_display, display = TEST["identity"], TEST["publisher"], TEST["publisher_display"], TEST["display"]
-        data_dirs = [TEST["data_dir"]]
     else:
         if not (a.identity_name and a.publisher and a.publisher_display_name):
             sys.exit("Give --identity-name, --publisher and --publisher-display-name from Partner Center (or --test)")
         ident, publisher, publisher_display, display = a.identity_name, a.publisher, a.publisher_display_name, a.display_name
-        data_dirs = DATA_DIRS
     conf = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
     version = store_version(a.version or conf["version"])
 
@@ -115,6 +114,8 @@ def main() -> int:
         subprocess.run([sys.executable, str(ROOT / "tools" / "third_party_notices.py")], check=True)
         env = dict(os.environ)
         env.pop("ACCOUNTING_APP_DIR_NAME", None)
+        # D55: the books go to %USERPROFILE%\TallyCheckData, which MSIX does not virtualize.
+        env["ACCOUNTING_STORE_EDITION"] = "1"
         if a.test:
             env["ACCOUNTING_APP_DIR_NAME"] = TEST["data_dir"]
         target = ["--target-dir", str(TARGET)]
@@ -138,10 +139,6 @@ def main() -> int:
     for name, size in TILES.items():
         tile(icon, size).save(layout / "Assets" / name)
 
-    excluded = "\n".join(
-        f"        <virtualization:ExcludedDirectory>$(KnownFolder:LocalAppData)\\{d}</virtualization:ExcludedDirectory>"
-        for d in data_dirs
-    )
     manifest = (ROOT / "src-tauri" / "msix" / "AppxManifest.xml").read_text(encoding="utf-8")
     for key, value in {
         "IDENTITY_NAME": xml_escape(ident),
@@ -149,7 +146,6 @@ def main() -> int:
         "PUBLISHER_DISPLAY_NAME": xml_escape(publisher_display),
         "DISPLAY_NAME": xml_escape(display),
         "VERSION": version,
-        "EXCLUDED_DIRECTORIES": excluded,
     }.items():
         manifest = manifest.replace("{{" + key + "}}", value)
     left = re.findall(r"\{\{[A-Z_]+\}\}", manifest)

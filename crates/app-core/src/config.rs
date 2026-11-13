@@ -4,7 +4,7 @@
 //!
 //! | Setting | config.toml | Environment | Default |
 //! |---|---|---|---|
-//! | data directory | — | `ACCOUNTING_DATA_DIR` | `%LOCALAPPDATA%\TallyCheckData` (or the older `CenangoAccounting`, D46); macOS: `~/Library/Application Support/TallyCheckData` (D53) |
+//! | data directory | — | `ACCOUNTING_DATA_DIR` | `%LOCALAPPDATA%\TallyCheckData` (or the older `CenangoAccounting`, D46); Microsoft Store build: `%USERPROFILE%\TallyCheckData` (D55); macOS: `~/Library/Application Support/TallyCheckData` (D53) |
 //! | bind address | `bind_address` | `ACCOUNTING_BIND` | `127.0.0.1` |
 //! | port | `port` | `ACCOUNTING_PORT` | `47800` |
 //! | LAN access | `lan_enabled` | `ACCOUNTING_LAN` | `false` |
@@ -26,6 +26,12 @@ pub const LEGACY_APP_DIR_NAME: &str = "CenangoAccounting";
 /// Set at *build* time only, for package tests: the test build uses this folder alone, so a test
 /// install never opens a real company's books.
 const TEST_APP_DIR_NAME: Option<&str> = option_env!("ACCOUNTING_APP_DIR_NAME");
+/// D55: set at *build* time by `tools/build_msix.py`. A Microsoft Store (MSIX) app's writes to
+/// AppData go to a private copy that Windows deletes on uninstall, and the Store refused the
+/// restricted capability that would have excluded the data folder. The Store build therefore
+/// keeps the books in the user's own folder (`%USERPROFILE%\TallyCheckData`), which MSIX does
+/// not redirect: they survive updates and uninstalling. The direct installer is unchanged.
+const STORE_EDITION: bool = option_env!("ACCOUNTING_STORE_EDITION").is_some();
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -219,10 +225,19 @@ fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
-/// The per-user folder for application data.
+/// The per-user folder for application data (the user's own folder for the Store build, D55).
 #[cfg(windows)]
 fn data_base() -> Option<PathBuf> {
-    env_dir("LOCALAPPDATA")
+    windows_base(STORE_EDITION, env_dir("LOCALAPPDATA"), env_dir("USERPROFILE"))
+}
+
+#[cfg(windows)]
+fn windows_base(store: bool, local_app_data: Option<PathBuf>, profile: Option<PathBuf>) -> Option<PathBuf> {
+    if store {
+        profile
+    } else {
+        local_app_data
+    }
 }
 
 /// D53: `~/Library/Application Support`, where macOS keeps each user's application data.
@@ -323,6 +338,17 @@ mod drive {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D55: the Store build keeps the books outside AppData; the installer keeps LOCALAPPDATA.
+    #[cfg(windows)]
+    #[test]
+    fn store_build_uses_the_profile_folder() {
+        let (local, profile) = (Some(PathBuf::from(r"C:\U\AppData\Local")), Some(PathBuf::from(r"C:\U")));
+        assert_eq!(windows_base(false, local.clone(), profile.clone()), local);
+        assert_eq!(windows_base(true, local, profile.clone()), profile);
+        let base = windows_base(true, None, profile).expect("profile");
+        assert_eq!(choose_data_dir(&base, None), PathBuf::from(r"C:\U\TallyCheckData"));
+    }
 
     /// D46: a new PC gets `TallyCheckData`; a PC from before the rename keeps using its
     /// `CenangoAccounting` folder in place, even next to the installer's own `TallyCheck` program
