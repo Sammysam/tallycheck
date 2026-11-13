@@ -7,6 +7,6 @@
     "installer": "python tools/third_party_notices.py && cargo build --release -p mcp && tauri build --config src-tauri/tauri.installer.json"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.3"
+    "@tauri-apps/cli": "2.12.4"
   }
 }
