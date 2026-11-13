@@ -25,7 +25,7 @@ Requirements: Docker Desktop running, Node 24, the reference repository with its
 ## Reading the output
 
 - `PASS` — identical after normalisation.
-- `DEVN` — an approved deviation (CLAUDE.md §9); both sides are printed for review.
+- `DEVN` — an approved deviation (docs/design.md §8); both sides are printed for review.
 - `FAIL` — a real incompatibility. The run exits non-zero.
 
 W0 result (2026-10-14): 71 steps — 65 identical, 6 approved deviations, 0 mismatches.

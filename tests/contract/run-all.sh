@@ -5,11 +5,11 @@
 # Nothing is written inside the reference tree: its compiled dist/ is executed as-is with
 # environment overrides that point it at the scratch database and test-only secrets.
 #
-#   REF_BACKEND=/c/Users/.../QuickBooks/backend tests/contract/run-all.sh
+#   REF_BACKEND=/path/to/reference/backend tests/contract/run-all.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REF_BACKEND="${REF_BACKEND:-/c/Users/moham/OneDrive/Desktop/Risahd/New folder/Test project/QuickBooks/backend}"
+REF_BACKEND="${REF_BACKEND:?Set REF_BACKEND to the reference backend folder (see tests/contract/README.md)}"
 SCRATCH="$ROOT/tests/contract/.scratch"
 PG=qb-contract-pg
 

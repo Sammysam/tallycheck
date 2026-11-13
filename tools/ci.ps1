@@ -29,7 +29,7 @@ Push-Location frontend
 try {
     Step 'Frontend packages' { npm ci --ignore-scripts --no-audit --no-fund }
     Step 'Frontend type check and build' { npm run build }
-    # Known vulnerabilities in the packages the app ships (CLAUDE.md section 10: run before release).
+    # Known vulnerabilities in the packages the app ships (docs/design.md section 9: run before release).
     Step 'Frontend security advisories' { npm audit --omit=dev --audit-level=high }
 } finally {
     Pop-Location

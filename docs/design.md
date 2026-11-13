@@ -1,31 +1,11 @@
-# CLAUDE.md — Accounting Desktop (offline Rust port)
+# TallyCheck design notes
 
-Read this whole file before changing anything. It overrides default behaviour.
+How the app is built and why it behaves the way it does. TallyCheck is an offline desktop
+port of the Cenango accounting web application (the "reference": a NestJS + React +
+PostgreSQL app). Where this edition behaves differently from the reference, the difference is
+recorded in §8 as a numbered decision (D1, D2, …); code comments refer to those numbers.
 
-## 1. What this project is
-
-A fully offline Windows desktop port of the Cenango accounting web app.
-
-- **Reference (source of truth, READ-ONLY):**
-  `C:\Users\moham\OneDrive\Desktop\Risahd\New folder\Test project\QuickBooks`
-  NestJS backend (`backend/src`), React frontend (`frontend/src`), PostgreSQL migrations
-  (`backend/src/migrations`). Never write to it, never run builds or `npm install` inside it,
-  never copy its `backend/.env` (it holds production secrets).
-- **This repo:** `C:\dev\accounting-desktop` — deliberately outside OneDrive. OneDrive sync
-  corrupts live SQLite WAL databases and thrashes `target/`.
-
-**License** (changed 2026-10-30 at the request of the user's senior; was AGPL v3 + commercial from
-2026-10-28): `MIT OR Apache-2.0` — `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE` (copyright, and the
-TallyCheck / Cenango names and logos are not licensed). New dependencies must allow use in a
-permissively licensed product: no GPL, AGPL, LGPL-only, SSPL, BUSL or proprietary licenses.
-`python tools/third_party_notices.py` rewrites `THIRD-PARTY-NOTICES.txt` and runs before every
-installer build. The installer shows `NOTICE` and installs the license files; Help → About states
-the license and the source link.
-
-If the reference and this file disagree about *behaviour*, the reference wins unless the
-deviation is listed in §9 (Approved deviations).
-
-## 2. Architecture
+## 1. Architecture
 
 | Layer | Technology |
 |---|---|
@@ -59,7 +39,7 @@ No Node/NestJS/PostgreSQL/Docker/cloud dependency at runtime. Node is a dev-time
 - Later waves add: `payroll`, `employees`, `documents`,
   `reports`, `backup`, `importer`.
 
-## 3. Accounting invariants (non-negotiable)
+## 2. Accounting invariants (non-negotiable)
 
 - Every financial mutation posts a journal entry; the ledger is the only source of balances.
 - Every posted entry balances exactly to the cent (integer comparison, no tolerance).
@@ -69,12 +49,12 @@ No Node/NestJS/PostgreSQL/Docker/cloud dependency at runtime. Node is a dev-time
 - A business document and its journal entry are written in **one SQLite transaction**.
 - Retried requests must not double-post (idempotency per source document + status checks
   inside the transaction).
-- Reports derive from ledger lines using the reference's rules (§9 D1 for the one fix).
+- Reports derive from ledger lines using the reference's rules (§8 D1 for the one fix).
 - Preserve the chart-of-accounts codes the reference hard-codes (1100 AR, 2000 AP, 1300,
   2200–2260, 6100–6120, …), posting dates, status transitions and rounding.
 - **Do not invent accounting rules.** If the reference is silent, stop and ask.
 
-## 4. Money
+## 3. Money
 
 - Stored as **INTEGER minor units (cents)** in SQLite `STRICT` tables, column names unchanged
   (e.g. `"totalAmount"` holds cents). Quantities (`numeric(15,2)`) and `daysWorked`
@@ -82,12 +62,12 @@ No Node/NestJS/PostgreSQL/Docker/cloud dependency at runtime. Node is a dev-time
 - Never `f32`/`f64` for money. `app-core::money::Money(i64)` for amounts; `rust_decimal` for
   rate multiplication (payroll) with explicit rounding.
 - Rounding: exact decimal **half-up (away from zero)** to 2 dp at the same steps the
-  reference rounds (§9 D4). Differential tests compare against the reference JS functions.
+  reference rounds (§8 D4). Differential tests compare against the reference JS functions.
 - JSON: values the reference returns from `numeric` columns are **strings with 2 dp**
   (`"83850.00"`, TypeORM/pg behaviour); values the reference computes in JS are **numbers**.
   Reproduce per endpoint. Request bodies accept JSON numbers with ≤ 2 dp.
 
-## 5. Payroll reproduction
+## 4. Payroll reproduction
 
 `backend/src/modules/payroll/payroll-rates.ts` (`computeLine`, `calcPaye`) is reproduced
 exactly: proration, EPF base = basicForMonth + BRA2005 + BRA2016, EPF 8/12, ETF 3, progressive
@@ -95,9 +75,9 @@ monthly PAYE slabs on gross, flat stamp duty and employer welfare when gross > 0
 each step. Required regression (April 2026): gross 83,850; EPF employee 3,520; EPF employer
 5,280; ETF 1,320; net 80,005. The audit reproduced these with the reference code using
 basic+BRA = 44,000, allowances 39,850, 30/30 days, welfare 300 — the real employee's split is
-still needed (§10). Never change a formula to make a test pass; report the discrepancy.
+still needed (§9). Never change a formula to make a test pass; report the discrepancy.
 
-## 6. API compatibility
+## 5. API compatibility
 
 - Same paths under `/api`, methods, status codes, JSON shapes, validation messages
   (class-validator wording), pagination `{data,total,page,limit,totalPages}` (limit ≤ 100).
@@ -110,12 +90,12 @@ still needed (§10). Never change a formula to make a test pass; report the disc
 - Contract tests (`tests/contract`) run identical requests against the reference (in Docker
   with a scratch Postgres) and this server. Do not claim compatibility without them.
 
-## 7. Security
+## 6. Security
 
 - Passwords: Argon2id for new hashes; legacy bcrypt hashes verified then rehashed on login.
 - JWT HS256, claims `{sub, username, stage, iat, exp}`; access 8 h, pre-2FA 10 min.
   The JWT secret is random per installation, stored DPAPI-protected in the data directory.
-- TOTP (SHA-1, 6 digits, 30 s, ±1 step) is **optional per user** (D16, requested by the user
+- TOTP (SHA-1, 6 digits, 30 s, ±1 step) is **optional per user** (D16,
   2026-10-15). Without it, login returns an `accessToken` straight away; a signed-in user can turn
   it on from the status bar ("Turn on 2FA") or the File menu; once on, every login needs the code. An administrator's
   "Reset 2FA" turns it off for that user.
@@ -138,7 +118,7 @@ still needed (§10). Never change a formula to make a test pass; report the disc
   recovery copy, files cannot be opened after a reinstall or on another PC.
 - Downloads go through the server only, with `Cache-Control: private, no-store`.
 
-## 8. Database & migrations
+## 7. Database & migrations
 
 - SQLite, `STRICT` tables, quoted camelCase column names identical to the reference.
 - Every connection: `foreign_keys=ON` (verified by test), `journal_mode=WAL`,
@@ -149,7 +129,7 @@ still needed (§10). Never change a formula to make a test pass; report the disc
 - Migrations are append-only. Never edit an applied migration; add a new one.
 - `docs/schema-differences.md` records every difference from PostgreSQL.
 
-## 9. Approved deviations from the reference
+## 8. Approved deviations from the reference
 
 Adopted when W0 was approved on 2026-10-14. The user approved the plan containing these
 recommendations without answering each one individually; revisit any of them on request.
@@ -161,7 +141,7 @@ recommendations without answering each one individually; revisit any of them on 
 - **D2 Security fixes:** 2FA setup is refused once 2FA is enabled (the reference let a password
   alone re-enrol 2FA); inactive users cannot log in or use any token; failed logins are
   throttled (5 failures / 15 min per username → 429) and audited as "Failed login".
-- **D3 Money as integer cents** (§4).
+- **D3 Money as integer cents** (§3).
 - **D4 Exact decimal half-up rounding** instead of JS binary-float quirks; any input where the
   two differ is reported by the differential tests.
 - **D5 "Today"** is the Sri Lanka local date (UTC+05:30, no DST), not UTC.
@@ -195,7 +175,7 @@ recommendations without answering each one individually; revisit any of them on 
   - `null` for an account's code, name or type in PATCH is ignored (reference: 500).
   - Entry numbers are taken inside the posting transaction: a failed post never skips a number.
   - Journal lines are returned in posting order (the reference returned them unordered).
-- **D10 Seeding adds missing default accounts** (approved by the user 2026-10-14):
+- **D10 Seeding adds missing default accounts** (approved 2026-10-14):
   `POST /accounts/seed` inserts each of the 10 default codes that does not exist yet and never
   touches existing accounts. The reference only seeded an empty chart.
 - W2 (verified by the contract suite, 232 steps):
@@ -211,7 +191,7 @@ recommendations without answering each one individually; revisit any of them on 
   - Response shapes reproduce TypeORM exactly: a created invoice/bill echoes `unitPrice` and
     `amount` as JSON numbers but `quantity`/`totalAmount` as strings and has no `customer` /
     `vendor`; a draft PATCH that replaces lines answers `totalAmount` as a number.
-- **D11–D15** (approved by the user 2026-10-14, after W2):
+- **D11–D15** (approved 2026-10-14, after W2):
   - D11/D12: an empty string in an optional email or date field means "not given". The
     Customers/Vendors forms send `email: ""` and the Bills form `dueDate: ""`; the reference
     rejected both, which made those fields required in practice.
@@ -267,7 +247,7 @@ recommendations without answering each one individually; revisit any of them on 
   and a plain page at `/system/backup`; nothing of the reference API changes. Design and
   recovery scenarios: `docs/backup-and-recovery.md`; importer: `docs/importer.md`.
 
-- **D16 Optional 2FA** (requested by the user 2026-10-15): the reference forced every user to
+- **D16 Optional 2FA** (2026-10-15): the reference forced every user to
   enrol TOTP at first login. Now `POST /auth/login` for a user without 2FA answers
   `{tempToken, requiresTwoFactor:false, isNewUser:false, accessToken}`; users with 2FA are unchanged.
   Frontend changes (minimal): Login accepts the direct token; Layout offers "Turn on 2FA";
@@ -275,14 +255,14 @@ recommendations without answering each one individually; revisit any of them on 
   Risk accepted: such accounts are protected by the password alone (throttling and failed-login
   audit still apply) — matters most in LAN mode.
 
-- **D17 First-run administrator** (requested by the user 2026-10-19): a fresh install has no
+- **D17 First-run administrator** (2026-10-19): a fresh install has no
   users, so the sign-in page sends the browser to `/setup` to create the first administrator.
   `GET /api/auth/first-run` → `{needsSetup, canSetUpHere}`; `POST /api/auth/first-run`
   `{username, password}` (same rules as creating a user) → 201 `{accessToken}`. Refused (403)
   once any user exists and from any address that is not loopback, so a LAN client can never
   claim a fresh install. The check and insert share the writer transaction. Audited as
   "Created the first administrator". `ADMIN_USERNAME`/`ADMIN_PASSWORD` and `create-admin` still work.
-- **D18 Void a payment** (requested by the user 2026-10-20). The reference could not undo a
+- **D18 Void a payment** (2026-10-20). The reference could not undo a
   payment, although voiding a paid invoice told the user to "reverse the payment first".
   `POST /api/payments/:id/void` (permission `payments`, 201) reverses the payment's entry dated
   today, takes the amount off the invoice's or bill's `amountPaid` (PAID → POSTED) and marks the
@@ -291,7 +271,7 @@ recommendations without answering each one individually; revisit any of them on 
   payment". `POST /api/ledger/entries/:id/reverse` now refuses an entry posted by an invoice,
   bill, expense, payment or payroll run (400 "This entry was posted by a payment. Void or unpost
   it from that screen instead."), since reversing it there left the document out of step.
-- **D19 Books lock date** (requested by the user 2026-10-20). Settings key `booksLockedThrough`.
+- **D19 Books lock date** (2026-10-20). Settings key `booksLockedThrough`.
   `ledger::entries::insert` — the one path every posting and reversal takes — refuses any entry
   dated on or before it (400 "The books are locked up to and including YYYY-MM-DD. …"), so it
   covers documents, payroll and manual entries alike. Voids and unposts are dated today, so a
@@ -299,12 +279,12 @@ recommendations without answering each one individually; revisit any of them on 
   `{lockedThrough}`; `PUT /api/books/lock` `{lockedThrough: "YYYY-MM-DD" | null}` is Admin only
   (403 otherwise), the date may not be after today, audited as "Changed the books lock date"
   with "Locked through …" / "Unlocked". Shown and changed under Settings → Lock the books.
-- **D20 Default chart on a fresh install** (requested by the user 2026-10-20). When the server
+- **D20 Default chart on a fresh install** (2026-10-20). When the server
   starts (or `create-admin` runs) on a database with no users, `seed_fresh_install` adds the D10
   default chart (1000 Cash, 1100 AR, 2000 AP, 3000, 4000, 6000, …) next to the payroll accounts,
   so nobody has to press "Seed". Only missing codes are added, and never once a user exists, so
   an imported database or a chart someone has changed is left alone.
-- **D21 Credit notes and debit notes** (requested by the user 2026-10-20). Table `credit_notes`
+- **D21 Credit notes and debit notes** (2026-10-20). Table `credit_notes`
   (type AR/AP, `noteNumber` CN-/DN-000001, invoiceId or billId, date, reason, amount, accountId,
   status POSTED/VOID, journalEntryId, createdById) and `amountCredited` on invoices and bills
   (exposed in invoice JSON; internal on bills like `amountPaid`). AR: debit a revenue account,
@@ -316,7 +296,7 @@ recommendations without answering each one individually; revisit any of them on 
   entry dated today. Invoices and bills with notes cannot be voided or unposted until the notes
   are voided. Payments and AR/AP ageing use the same outstanding figure. Refunding money a
   customer already paid is not covered (a note cannot exceed what is owed).
-- **D22 Bank reconciliation** (requested by the user 2026-10-20). Tables `bank_reconciliations`
+- **D22 Bank reconciliation** (2026-10-20). Tables `bank_reconciliations`
   (accountId, statementDate, statementBalance, openingBalance = previous completed statement
   balance, status DRAFT/COMPLETED, completedAt/By) and `reconciled_lines` (journalLineId PK →
   reconciliationId), so journal lines stay immutable and a line is cleared at most once. Any
@@ -329,7 +309,7 @@ recommendations without answering each one individually; revisit any of them on 
   `?accountId=`, POST start, GET/DELETE `:id`, PUT `:id/lines` `{lineIds}`, POST `:id/complete`,
   POST `:id/undo`. Screen: Accounting → Bank Reconciliation. The unused `bank_accounts` table
   is untouched.
-- **D23 Statements, drill-down and export** (requested by the user 2026-10-20).
+- **D23 Statements, drill-down and export** (2026-10-20).
   * `GET /api/customers/:id/statement?dateFrom&dateTo` (permission `invoices`, `invoices:all`
     scope): POSTED/PAID invoices less POSTED AR payments and POSTED credit notes, date order,
     running balance, balance brought forward; drafts and voids never count. With no end date the
@@ -343,7 +323,7 @@ recommendations without answering each one individually; revisit any of them on 
   * Export (toolbar, File menu, Ctrl+E): every table on the screen into one UTF-8 CSV named after
     the screen heading, amounts as plain numbers, action/checkbox columns left out, text that
     Excel would run as a formula prefixed with an apostrophe (`lib/exportCsv.ts`).
-- **D24 Cash flow, comparisons, sign-in messages** (requested by the user 2026-10-20).
+- **D24 Cash flow, comparisons, sign-in messages** (2026-10-20).
   * `GET /api/reports/cash-flow?dateFrom&dateTo&cashAccounts=id,id` (permission `reports`; dates
     as for P&L; cashAccounts default = active 10xx asset accounts). Direct method from the
     ledger: for each entry in the period touching a cash account, every other line's
@@ -358,7 +338,7 @@ recommendations without answering each one individually; revisit any of them on 
   * Sign-in screens show the server's reason for 429 (too many attempts), a turned-off account
     (403, only after the right password), an unreachable server and server errors; a wrong
     username or password stays one message (`lib/signInError.ts`).
-- **D25 Any company, any country** (requested by the user 2026-10-20). The app is a product
+- **D25 Any company, any country** (2026-10-20). The app is a product
   sold to many companies, so **no customer's own details ship with it** — never add a company
   name, address, bank account, signatory, registration number or logo to code or seed data.
   * Company and region are settings (`company.name/address/phone/fax/email/website/taxNumber/
@@ -377,7 +357,7 @@ recommendations without answering each one individually; revisit any of them on 
   * "Today" is the main PC's own local date (`chrono::Local`), replacing the fixed +05:30 of D5.
   * Report defaults (P&L, cash flow, dashboard, statements) start at the financial year start.
   * The product's own name is **TallyCheck** (D44; it was "Cenango Accounting").
-- **D26 Taxes for any country** (requested by the user 2026-10-20). No country's tax law is
+- **D26 Taxes for any country** (2026-10-20). No country's tax law is
   built in; each company defines its own **tax codes** (`tax_codes`: name, rate in ten-thousandths
   of a percent — 18% = 180000 — sales account (liability) for output tax, purchase account
   (asset or liability) for input tax, active flag). `GET /api/tax-codes` (any signed-in user),
@@ -397,7 +377,7 @@ recommendations without answering each one individually; revisit any of them on 
     Screens: Administration → Taxes, Reports → Tax Return; invoices with tax print as
     "Tax Invoice" with Subtotal, one row per tax code, and Total (form and PDF alike).
   * Country return formats are not built (the return gives the figures to copy).
-- **D27 Tax groups and withholding tax** (requested by the user 2026-10-21). `tax_codes.kind` is
+- **D27 Tax groups and withholding tax** (2026-10-21). `tax_codes.kind` is
   STANDARD, GROUP or WITHHOLDING. A GROUP (`tax_code_components`: ordered standard codes, each
   optionally compound — charged on the net plus the parts before it) is charged on lines like a
   standard code; each part is rounded half-up on its own and posts to its own accounts. With
@@ -433,7 +413,7 @@ recommendations without answering each one individually; revisit any of them on 
   return use the as-booked home amounts. Not covered: bank accounts in a foreign currency,
   revaluing open items at period end, and foreign currencies with other than two decimals
   (foreign amounts are held in hundredths).
-- **D31 Company setup wizard** (requested by the user 2026-10-20). The first-run company screen
+- **D31 Company setup wizard** (2026-10-20). The first-run company screen
   asks one thing per page (name, address, email, phone, website, country, tax number, logo, how
   customers pay, invoice note, then a review). Each page saves on Next and can be skipped; "Set
   up later" leaves it for this session (a sessionStorage flag) and it asks again at the next
@@ -446,7 +426,7 @@ recommendations without answering each one individually; revisit any of them on 
   entries (document entries are still undone from their document, D18). A made-up demo company is
   typed in through the screens by `tests/ui/demo-data.mjs` into its own data folder
   (`docs/demo/README.md`, `scripts/run-demo.cmd`).
-- **D33 Payable accounts and account edits** (senior's list, 2026-10-21). A bill may be owed on any
+- **D33 Payable accounts and account edits** (2026-10-21). A bill may be owed on any
   liability (`bills.payableAccountId`, default 2000): posting credits it, its payments debit it and
   its debit notes reduce it, so e.g. Telephone Payable shows on its own Balance Sheet line. Bill
   lines may use expense, asset or liability accounts. An AP payment without a bill pays a liability
@@ -477,7 +457,7 @@ recommendations without answering each one individually; revisit any of them on 
   "a user" (the stored text is unchanged). Settings: tabs (Company, Region & currency, Invoices &
   documents, Closing, Backup & restore); backup moved into the React app and `/system/backup`
   now redirects there. Toasts and the app's own dialogs replace browser alert / confirm here.
-- **D37 Import from file** (2026-10-22, integrations plan phase 1, approved by the user's senior).
+- **D37 Import from file** (2026-10-22, integrations plan phase 1, approved by the project owner).
   `POST /imports/read` reads an uploaded CSV / Excel file (`operations::sheet`: UTF-8 / UTF-16 /
   Windows-1252, `,` `;` tab; XLSX / XLS / ODS via calamine, numbers kept as their shortest text so
   money is parsed to exact cents, never computed in floating point). The screen (`/import`) maps the
@@ -567,7 +547,7 @@ recommendations without answering each one individually; revisit any of them on 
   chase-overdue-customers, prepare-vat-return, explain-a-report, review-online-sales).
 
 - **D42 US payroll taxes** (2026-10-27, ported from the web Rust edition's waves U1 + U2, commits
-  `b78e032` and `082082a`; the user asked for the same here). `payroll::us` works out one pay period:
+  `b78e032` and `082082a`; ported to this edition). `payroll::us` works out one pay period:
   federal income tax withholding by IRS Pub 15-T (2026) Worksheet 1A with the annual percentage
   tables (2020+ Form W-4 and older W-4s with allowances; no whole-dollar rounding), social security
   6.2% each to $184,500, Medicare 1.45% each, Additional Medicare 0.9% employee-only over $200,000,
@@ -580,12 +560,12 @@ recommendations without answering each one individually; revisit any of them on 
   GET|PATCH `/payroll/us/settings`, GET|PUT `/payroll/employees/:id/us-tax`, POST
   `/payroll/us/preview` (201, saves nothing). Not built: US pay runs and ledger posting, screens,
   state / local income tax, overtime, employee-paid SUTA, 941 / 940 / W-2. Sri Lankan payroll is
-  unchanged. Choices made by the web agent without a spec (company-level state and pay frequency, no
+  unchanged. Choices made by the web edition without a spec (company-level state and pay frequency, no
   W-4 history, no dollar rounding) are kept so both editions agree.
 
 - **D43 US pay runs, state income tax and form figures** (2026-10-27, ported from the web Rust
-  edition's waves U3 `e1f403d`, U4 `450e073`, U5a `d62293d` and U5b `fa0c09c`; the user asked for
-  the same here). `payroll::us_runs`: runs (`USPR-0001`, DRAFT → POSTED → PAID, VOID), one line per
+  edition's waves U3 `e1f403d`, U4 `450e073`, U5a `d62293d` and U5b `fa0c09c`; ported to this
+  edition). `payroll::us_runs`: runs (`USPR-0001`, DRAFT → POSTED → PAID, VOID), one line per
   employee (salary / periods, or hourly hours × rate with 1.5× overtime; bonus, other earnings), W-4
   and state certificate snapshotted on the line, year-to-date wages from other POSTED / PAID runs of
   the pay-date year (worked out again at posting). Each step is one transaction with its entry:
@@ -604,7 +584,7 @@ recommendations without answering each one individually; revisit any of them on 
   `/payroll/us/state-taxes[/:state]`. Screens: Payroll → US payroll (settings, state rules, runs),
   run page, tax forms page, US tax section on the employee profile (instead of the Sri Lankan salary
   section when `payroll.country` = US). Desktop-only, beyond the web edition:
-  * **Accounts are chosen, never taken over** (user's choice, option b): each of the 11 roles
+  * **Accounts are chosen, never taken over** (the chosen option): each of the 11 roles
     (`us_runs::ROLES`, defaults 6100, 6130, 2200, 2300–2370) is a setting `payroll.us.account.<role>`
     (account id; PATCH `/payroll/us/settings` `accounts: {role: id | null}`). An unset role takes the
     account with its default code if it has the default name and type, or adds it if the code is
@@ -614,24 +594,23 @@ recommendations without answering each one individually; revisit any of them on 
     type (liability / expense) and in the home currency. A posted run keeps the accounts it used
     (`accountsSnapshot`), so paying it and its deposits clear those even after the settings change.
   * US payroll needs the company currency to be USD (switching and new runs are refused otherwise).
-  The web agent's own choices are kept: one company SUTA state and pay frequency, 2,080 standard
+  The web edition's own choices are kept: one company SUTA state and pay frequency, 2,080 standard
   hours, overtime 1.5× for hourly only, one line per employee per run, no W-4 / state rule history
   (runs keep snapshots), only 2026 federal tables, local taxes not covered.
 - Stripe: a publishable key (`pk_…`) is now refused with "That is a publishable key; use a secret or
   restricted key" (the general key check ran first and made that message unreachable; fixed in the
   web editions).
 
-- **D44 Renamed to TallyCheck** (requested by the user 2026-10-28). Window title, installer and
+- **D44 Renamed to TallyCheck** (2026-10-28). Window title, installer and
   Windows app name (`productName`), About, sign-in, messages, MCP texts, plugin descriptions, docs
   and the logo (`frontend/public` icons, `Logo_tallycheck.png` wordmark, `src-tauri/icons/icon.ico`
-  from the user's design). Kept on purpose so existing installations keep working: the data folder
+  from the product design). Kept on purpose so existing installations keep working: the data folder
   the data folder (see D46), the identifier `lk.cenango.accounting`, `cenango-mcp.exe`,
   `CENANGO_API_KEY` and the plugin id `cenango-accounting`. The publisher and copyright holder stay
-  Cenango (Pvt) Ltd (D54). Risk raised with the user: "Tally" is Tally Solutions' trademark (TallyPrime);
-  the user chose to go ahead. The installer installs to `%LOCALAPPDATA%\TallyCheck`, so a PC with
+  Cenango (Pvt) Ltd (D54). The installer installs to `%LOCALAPPDATA%\TallyCheck`, so a PC with
   the old "Cenango Accounting" uninstalls that first (its data is kept).
 
-- **D45 In-app updates** (requested by the user 2026-10-30). Tauri's updater
+- **D45 In-app updates** (2026-10-30). Tauri's updater
   (`tauri-plugin-updater`) runs in the desktop shell (`src-tauri/src/updates.rs`) and reaches the
   page only through the server: `GET /api/system/update` → `{current, supported, available
   {version, notes, date} | null, error}`, `POST /api/system/update/install` → 202 once the update is
@@ -648,7 +627,7 @@ recommendations without answering each one individually; revisit any of them on 
   https://github.com/Sammysam/tallycheck (pushed 2026-10-30, remote `github`; Bitbucket stays `origin`), which is also
   the source link shown in Help → About; `ACCOUNTING_UPDATE_URL` overrides it.
 
-- **D46 Data folder `TallyCheckData`** (requested by the user 2026-10-30). The default data folder is
+- **D46 Data folder `TallyCheckData`** (2026-10-30). The default data folder is
   `%LOCALAPPDATA%\TallyCheckData` — not `TallyCheck`, which is the installer's program folder (an
   uninstall or update would take the books with it). When only the older `%LOCALAPPDATA%\CenangoAccounting` exists, it is
   used where it is — never moved, copied or migrated (`app_core::config::choose_data_dir`).
@@ -657,7 +636,7 @@ recommendations without answering each one individually; revisit any of them on 
   `cenango-mcp.exe`, `CENANGO_API_KEY` and the plugin id stay (they are not shown to users;
   changing them would break updates and Claude connections of existing installations).
 
-- **D47 Microsoft Store (MSIX) build** (requested by the user 2026-10-30; company account, first
+- **D47 Microsoft Store (MSIX) build** (2026-10-30; company account, first
   Store version 1.0.0). `python tools/build_msix.py` builds `accounting-desktop --features store`
   (no in-app updater; `/api/system/update` answers `channel: "store"` and install is refused with
   "This copy of TallyCheck is updated by the Microsoft Store") and cenango-mcp in
@@ -670,7 +649,7 @@ recommendations without answering each one individually; revisit any of them on 
   `ACCOUNTING_APP_DIR_NAME`). The normal installer is unchanged. Submission: `docs/microsoft-store.md`. GitHub builds it
   too (`.github/workflows/msix.yml`, Run workflow or tag; the identity is in the workflow, no secrets).
 
-- **D48 Free code signing via SignPath Foundation** (requested by the user 2026-10-30).
+- **D48 Free code signing via SignPath Foundation** (2026-10-30).
   `.github/workflows/release.yml` (tag `v<version>` or run by hand): builds the NSIS installer on
   GitHub, sends it to SignPath (project `tallycheck`, artifact configuration `installer` =
   `.signpath/artifact-configuration.xml`, policy `release-signing`, manual approval), then makes the
@@ -679,7 +658,7 @@ recommendations without answering each one individually; revisit any of them on 
   policy page SignPath requires. Possible only because the license is MIT OR Apache-2.0 without
   commercial dual licensing. Manual steps and conditions: `docs/signpath.md`.
 
-- **D49 Forgotten passwords** (requested by the user 2026-11-03; the app is offline, so there is
+- **D49 Forgotten passwords** (2026-11-03; the app is offline, so there is
   no e-mail reset). Layer 1, **recovery key**: `recovery_keys` (one per user, SHA-256 of the
   normalised key). A key is `TCRK-` + 20 Crockford base32 characters (100 random bits); case,
   spaces, dashes and O/I/L typed for 0/1 don't matter. The first administrator gets one from
@@ -702,8 +681,8 @@ recommendations without answering each one individually; revisit any of them on 
   Existing installations make their key under File → Password recovery key…. Sessions already
   signed in are not ended by a reset (JWTs can't be revoked yet).
 
-- **D50 Security review fixes** (full review requested by the user 2026-11-03; all findings fixed
-  with the user's approval). Sign-in: the throttle counts an attempt *before* the password check
+- **D50 Security review fixes** (full review 2026-11-03; all findings fixed
+  after review). Sign-in: the throttle counts an attempt *before* the password check
   (`LoginThrottle::begin`, so parallel guesses stop at 5), keys are per username **and** per side
   (this PC / other PCs: a LAN client cannot lock the owner out), at most 10,000 keys (fewest
   attempts forgotten first), usernames over 255 characters refused unlogged. An administrator's
@@ -734,14 +713,14 @@ recommendations without answering each one individually; revisit any of them on 
   signing step (build with `createUpdaterArtifacts:false`, then `tauri signer sign`), actions
   pinned by commit, no `${{ }}` inside `run:`; `*.zip` is git-ignored.
 
-- **D51 TallyCheck names for the Claude connector** (requested by the user 2026-11-03). `crates/mcp`
+- **D51 TallyCheck names for the Claude connector** (2026-11-03). `crates/mcp`
   builds the same server twice: `tallycheck-mcp.exe` (new, `src/bin/tallycheck-mcp.rs`) and
   `cenango-mcp.exe` (kept for existing Claude connections); both are installed (installer and MSIX).
   It reads `TALLYCHECK_API_KEY` / `TALLYCHECK_API_URL` first, then `CENANGO_API_KEY` /
   `CENANGO_API_URL`. Settings → Integrations → Claude shows the new names. Unchanged: the plugin id
   `cenango-accounting` and its `.mcp.json`, the MCP `serverInfo.name`, the identifier.
 
-- **D52 Remaining security items** (requested by the user 2026-11-04). The `users` permission no
+- **D52 Remaining security items** (2026-11-04). The `users` permission no
   longer equals Admin: someone who is not an Admin may only give or manage rights they hold
   themselves (no Admin role, no Admin user, no user or role with a right they lack; creating,
   changing and deleting roles likewise) — 403 "Only an administrator can give or manage rights you
@@ -755,9 +734,9 @@ recommendations without answering each one individually; revisit any of them on 
   timing doesn't reveal usernames or imported bcrypt passwords. Scheduled backups refuse a network
   (UNC) folder saved earlier (`last_error` shown under Settings → Backup). Old .xls files are
   checked before calamine reads them (≤ 5M cells, < 200 columns, malformed files refused).
-  Not covered on purpose: LAN traffic is plain HTTP and installers are unsigned (§10).
+  Not covered on purpose: LAN traffic is plain HTTP and installers are unsigned (§9).
 
-- **D53 macOS app** (requested by the user 2026-11-06; the company has an Apple Developer account).
+- **D53 macOS app** (2026-11-06; the company has an Apple Developer account).
   One universal app (Apple silicon + Intel, macOS 11+) from the same code; `docs/macos.md`.
   Data folder `~/Library/Application Support/TallyCheckData` (`config::data_base`); a folder on a
   network volume is refused (statfs without `MNT_LOCAL`). Secret files keep their names and are
@@ -771,7 +750,7 @@ recommendations without answering each one individually; revisit any of them on 
   CI runs every check on a Mac too (`checks-macos`). Not yet: in-app updates on macOS, the Mac
   App Store, Touch ID recovery. Windows builds are unchanged.
 
-- **D54 Publisher name** (2026-11-06, undone 2026-11-12 at the user's request). For a few days the
+- **D54 Publisher name** (2026-11-06, undone 2026-11-12 on request). For a few days the
   copyright holder and publisher read "Cenango Financial LLC", the company that owns the Apple
   Developer and Microsoft Partner Center accounts; everything says **Cenango (Pvt) Ltd** again
   (`LICENSE-MIT`, `NOTICE`, `PRIVACY.md`, README, `tauri.conf.json`, Help → About, notices header,
@@ -784,22 +763,19 @@ Reference quirks reproduced on purpose (verified by tests): audit actions such a
 reference); `POST /users` returns the user without a `role` key; `POST /users/:id/reset-*`
 answer 201.
 
-## 10. Open items
+## 9. Open items
 
 - April 2026 regression: need the real employee's salary row (basic / BRA2005 / BRA2016 /
   vehicle / other split). Until then the fixture is reverse-engineered and marked as such.
   W5 computes the reverse-engineered row exactly as the reference does.
 - Payroll rounding: keep D4 (exact half-up, 1-cent differences on exact ties) or reproduce
-  the reference's float rounding bit for bit. Needs the user's decision.
-- Production files live in S3 and their key in the reference `.env`. The container format is
-  identical, so W6 can copy the encrypted objects unchanged; the administrator installs the
-  production key with `import-storage-key` (typed in by them, never copied from the `.env`).
+  the reference's float rounding bit for bit. Needs a decision.
 - Reference quirks to decide in their wave: bills never accumulate partial AP payments; a
   part-paid bill can be voided; `POST /accounts/seed` does nothing after the payroll migration
   seeded 11 accounts.
 - The copied frontend fails `npm run lint` (57 problems: 49 errors, 8 warnings, all inherited from
   the reference).
-- Security advisories fixed 2026-10-28 (asked by the user): `npm audit fix` in `frontend/` moved
+- Security advisories fixed 2026-10-28 : `npm audit fix` in `frontend/` moved
   react-router(-dom) 7.16.0 → 7.18.5, dompurify 3.4.11 → 3.4.17, form-data 4.0.5 → 4.0.6,
   follow-redirects 1.16.0 → 1.16.2, axios 1.17.0 → 1.21.0 and some build-only tools, within the
   existing version ranges; `npm audit` reports 0 in `frontend/` and the root. `cargo audit` lists
@@ -814,51 +790,3 @@ answer 201.
   (`docs/installer-and-updates.md`). LAN traffic is plain HTTP (`docs/lan-mode.md`).
 - The production reference server's time zone (for importing `timestamp without time zone`
   values) is unconfirmed.
-
-## 11. Commands
-
-```
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
-cd frontend && npm ci && npm run build && npm run lint
-cargo run -p api-server --bin accounting-server -- serve
-cargo run -p api-server --bin accounting-server -- create-admin <username>
-cargo run -p api-server --bin accounting-server -- export-storage-key   # offline recovery copy
-cargo run -p api-server --bin accounting-server -- import-storage-key   # restore on a new PC
-cargo run -p accounting-desktop
-cargo run -p api-server --bin accounting-server -- backup <folder> | verify-backup <file> | restore <file>
-cargo run -p api-server --bin accounting-server -- set-backup-password
-cargo run -p importer -- --source postgres://… --source-tz +05:30 --target <new folder> --files <folder>
-npm ci && npm run installer                       # Windows installer (frontend/dist must be built)
-python tools/release.py --notes "…" --download-base https://…/v{version}  # signed update + latest.json (D45)
-python tools/build_msix.py --identity-name … --publisher "CN=…" --publisher-display-name …  # Store MSIX (D47; --test for a test package)
-bash tools/build_macos.sh                         # macOS universal .dmg, on a Mac (D53; signed when APPLE_* are set)
-```
-CI: `powershell -ExecutionPolicy Bypass -File tools\ci.ps1` runs fmt, frontend build, npm audit,
-clippy and tests; GitHub Actions (`.github/workflows/ci.yml`, Windows and macOS) and Bitbucket Pipelines
-(`bitbucket-pipelines.yml`, self-hosted Windows runner) both run it on every push (`docs/ci-cd.md`).
-Contract tests: see `tests/contract/README.md` (`bash tests/contract/run-all.sh`).
-UI smoke test: `node tests/ui/smoke.mjs http://127.0.0.1:47800` against a fresh, empty database
-(no ADMIN_* variables; the test creates the admin on the first-run screen).
-Desktop shell (`components/Layout.tsx`): the page draws a Windows-style menu bar, toolbar,
-navigation pane and status bar; the Tauri window has no native menu. A list page registers what
-Ctrl+N and Esc do with `useCommand('new' | 'close', …)` from `lib/commands.ts`; Ctrl+S submits the
-open form, F5 remounts the screen, and browser keys (reload, zoom, right-click menu) are off.
-Reference-derived fixtures are regenerated with the scripts in `tools/`; never hand-edit them.
-
-## 12. Waves and approval gates
-
-W0 foundation → W1 ledger → W2 operational accounting → W3 reports → W4 employees →
-W5 payroll → W6 production readiness. One wave at a time. At the end of each wave run every
-command in §11, exercise the UI against the new backend, inspect logs for secrets, write the
-wave report (features, files, tests with real results, failures, risks, next step) and
-**STOP until the user explicitly approves the next wave.** Never claim a command passed
-unless it ran and its output was read.
-
-## 13. Working rules
-
-- Small, testable modules; no placeholder code that fakes success; never swallow errors
-  (exception: the audit write, which the reference also treats as best-effort — it is logged).
-- Don't redesign the UI. Don't start future waves early. Never commit secrets or real data.
-- Prefer reading the reference over asking; when evidence is missing, ask instead of guessing.

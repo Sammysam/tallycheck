@@ -1,3 +1,22 @@
 * text=auto eol=lf
-*.ico binary
-*.png binary
+
+# Binary files: never convert line endings or show text diffs.
+*.ico   binary
+*.icns  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.pdf   binary
+*.mp4   binary
+*.ttf   binary
+*.woff  binary
+*.woff2 binary
+*.xlsx  binary
+*.xls   binary
+*.ods   binary
+
+# Windows scripts keep Windows line endings.
+*.cmd   text eol=crlf
+*.bat   text eol=crlf

@@ -27,7 +27,7 @@ const RATE_SETS = [
 ];
 
 const lines = [];
-// The April 2026 regression row (CLAUDE.md §5): basic + BRA = 44,000, allowances 39,850.
+// The April 2026 regression row (docs/design.md §4): basic + BRA = 44,000, allowances 39,850.
 lines.push({
   rates: 0,
   input: { epfApplicable: true, daysInMonth: 30, daysWorked: 30, basic: 40500, bra2005: 1000, bra2016: 2500,

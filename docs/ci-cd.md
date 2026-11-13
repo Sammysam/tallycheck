@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File tools\ci.ps1
 ```
 
 `npm run lint` is not part of CI: the copied frontend has 57 problems inherited from the
-reference (CLAUDE.md §10). `cargo audit` is not either: it lists advisories that do not apply
+reference (docs/design.md §9). `cargo audit` is not either: it lists advisories that do not apply
 (§10); run it by hand before a release.
 
 ## GitHub Actions

@@ -82,7 +82,7 @@ function mutationRows(body) {
   return { ...body, data, total: data.length };
 }
 
-// Signing in with the imported bcrypt password upgrades it to Argon2id (CLAUDE.md §7), which
+// Signing in with the imported bcrypt password upgrades it to Argon2id (docs/design.md §6), which
 // touches that one user's updatedAt on this side only. Only that field of that user is ignored.
 function signedInUser(body) {
   const strip = (u) => (u && typeof u === 'object' && u.username === 'admin' ? { ...u, updatedAt: '<signed in>' } : u);
