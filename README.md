@@ -1,7 +1,13 @@
 # TallyCheck
 
-Offline accounting for small and medium businesses, as a desktop app for **Windows** and
-**macOS**. Everything runs on the user's own computer: a Tauri 2 window around an embedded Rust
+**Invoicing, bills, banking, reports, sales tax and US payroll in one app.** Run it offline on a
+Windows PC, or on your own server for the whole team.
+
+**[Download TallyCheck](https://tallycheck.io/download)** · [Website](https://tallycheck.io) ·
+[Privacy](PRIVACY.md)
+
+This repository is TallyCheck Desktop: offline accounting for small and medium businesses, as a
+desktop app for **Windows** and **macOS**. Everything runs on the user's own computer: a Tauri 2 window around an embedded Rust
 server (Axum + SQLite) that serves the React frontend. No cloud account, no database server and
 no internet connection are needed; the optional online connectors are used only when the user
 syncs them.
@@ -28,9 +34,25 @@ syncs them.
 
 ## Download
 
-- **Windows:** the installer from [Releases](https://github.com/Sammysam/tallycheck/releases), or
-  the Microsoft Store. Install guide: [docs/INSTALL.md](docs/INSTALL.md).
+**[tallycheck.io/download](https://tallycheck.io/download)** has the current version for every
+platform.
+
+- **Windows:** the installer from [tallycheck.io/download](https://tallycheck.io/download) or
+  [Releases](https://github.com/Sammysam/tallycheck/releases), or the Microsoft Store. Install
+  guide: [docs/INSTALL.md](docs/INSTALL.md).
 - **macOS 11 or later** (Apple silicon and Intel): see [docs/macos.md](docs/macos.md).
+
+## Privacy (GDPR and California)
+
+TallyCheck Desktop keeps the books on the user's own computer: no accounts, analytics, telemetry
+or advertising, and Cenango never receives the data. It goes online only for the update check and
+for connectors the user switches on.
+
+- [PRIVACY.md](PRIVACY.md): the privacy policy for the desktop app.
+- [docs/privacy-compliance.md](docs/privacy-compliance.md): GDPR and CCPA / CPRA checklist — what
+  is in place, what is planned in the app, and what Cenango must do for the website and
+  TallyCheck Web.
+- Privacy questions: hello@tallycheck.io.
 
 ## Repository layout
 
