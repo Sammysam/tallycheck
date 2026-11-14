@@ -31,6 +31,7 @@ const TEST_APP_DIR_NAME: Option<&str> = option_env!("ACCOUNTING_APP_DIR_NAME");
 /// restricted capability that would have excluded the data folder. The Store build therefore
 /// keeps the books in the user's own folder (`%USERPROFILE%\TallyCheckData`), which MSIX does
 /// not redirect: they survive updates and uninstalling. The direct installer is unchanged.
+#[cfg(windows)]
 const STORE_EDITION: bool = option_env!("ACCOUNTING_STORE_EDITION").is_some();
 
 #[derive(Debug, thiserror::Error)]
