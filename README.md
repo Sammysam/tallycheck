@@ -1,18 +1,60 @@
-# TallyCheck
+<div align="center">
 
-**Invoicing, bills, banking, reports, sales tax and US payroll in one app.** Run it offline on a
-Windows PC, or on your own server for the whole team.
+<a href="https://tallycheck.io">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <img src="docs/images/logo.png" alt="TallyCheck" width="360">
+  </picture>
+</a>
 
-**[Download TallyCheck](https://tallycheck.io/download)** · [Website](https://tallycheck.io) ·
-[Privacy](PRIVACY.md)
+### Invoicing, bills, banking, reports, sales tax and US payroll in one app.
 
-This repository is TallyCheck Desktop: offline accounting for small and medium businesses, as a
-desktop app for **Windows** and **macOS**. Everything runs on the user's own computer: a Tauri 2 window around an embedded Rust
-server (Axum + SQLite) that serves the React frontend. No cloud account, no database server and
-no internet connection are needed; the optional online connectors are used only when the user
-syncs them.
+Run it offline on a Windows PC, or on your own server for the whole team.
+
+[![Download](https://img.shields.io/badge/Download-tallycheck.io-F97316?style=for-the-badge)](https://tallycheck.io/download)
+[![Latest release](https://img.shields.io/github/v/release/Sammysam/tallycheck?style=for-the-badge&color=0F172A&label=Release)](https://github.com/Sammysam/tallycheck/releases/latest)
 
 [![CI](https://github.com/Sammysam/tallycheck/actions/workflows/ci.yml/badge.svg)](https://github.com/Sammysam/tallycheck/actions/workflows/ci.yml)
+![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-11%2B-000000?logo=apple&logoColor=white)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue)](#license)
+
+[Website](https://tallycheck.io) · [Download](https://tallycheck.io/download) · [Install guide](docs/INSTALL.md) · [Privacy](PRIVACY.md) · [Changelog](CHANGELOG.md)
+
+<br>
+
+<img src="docs/images/dashboard.png" alt="TallyCheck dashboard: revenue and expenses by month, receivables, payables and overdue items" width="100%">
+
+</div>
+
+<br>
+
+## Why TallyCheck
+
+| | |
+|---|---|
+| 🔒 **Your books stay with you** | Everything is stored on your own computer. No cloud account, no subscription lock-in, no tracking. |
+| ✈️ **Works offline** | No internet needed. Online connectors are used only when you sync them. |
+| 🎯 **Exact to the cent** | Double-entry accounting with integer money, balanced journal entries and posted entries that are never deleted. |
+| 👥 **Built for teams** | Roles and permissions, optional two-factor sign-in, an activity log, and other office PCs through LAN mode. |
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/invoices.png" alt="Invoices list with paid and posted invoices"><p align="center"><b>Invoices</b></p></td>
+    <td width="50%"><img src="docs/images/profit-and-loss.png" alt="Profit and loss report"><p align="center"><b>Profit &amp; Loss</b></p></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/balance-sheet.png" alt="Balance sheet report"><p align="center"><b>Balance Sheet</b></p></td>
+    <td width="50%"><img src="docs/images/payroll.png" alt="Payroll runs by month"><p align="center"><b>Payroll</b></p></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/ledger.png" alt="General ledger with journal entries"><p align="center"><b>Ledger</b></p></td>
+  </tr>
+</table>
+
+<sub>Screenshots show a made-up demo company; no real business data.</sub>
 
 ## Features
 
@@ -31,6 +73,12 @@ syncs them.
 - **Integrations:** import from CSV/Excel; Shopify, WooCommerce, PayPal and Stripe connectors; a
   Claude (MCP) connector with revocable read-only or draft-only keys.
 - **Updates:** signed in-app updates (Windows installer) or through the Microsoft Store.
+
+## How it works
+
+This repository is **TallyCheck Desktop**. Everything runs on the user's own computer: a Tauri 2
+window around an embedded Rust server (Axum + SQLite) that serves the React frontend. No cloud
+account, no database server and no internet connection are needed.
 
 ## Download
 
