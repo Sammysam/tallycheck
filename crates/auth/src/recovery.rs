@@ -95,6 +95,29 @@ pub async fn matches_in(conn: &mut SqliteConnection, user_id: &str, input: &str)
     Ok(stored.len() == given.len() && stored.bytes().zip(given.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0)
 }
 
+/// D56: the active user whose current recovery key is `input`, for "Forgot username?". The key
+/// is not used up: showing someone their own username gives nothing a reset with the same key
+/// would not. `None` when the key is malformed, unknown or belongs to a user who is switched off.
+pub async fn user_for_key(db: &Db, input: &str) -> AppResult<Option<crate::User>> {
+    let Some(normalised) = normalise(input) else { return Ok(None) };
+    let user_id: Option<String> = sqlx::query_scalar(r#"SELECT "userId" FROM "recovery_keys" WHERE "keyHash" = ?1"#)
+        .bind(hash(&normalised))
+        .fetch_optional(db.read())
+        .await?;
+    let Some(user_id) = user_id else { return Ok(None) };
+    Ok(crate::users::get_by_id(db, &user_id).await?.filter(|u| u.is_active))
+}
+
+/// D56: the active users' names and roles, for the Windows owner's "Forgot username?".
+pub async fn active_usernames(db: &Db) -> AppResult<Vec<(String, Option<String>)>> {
+    Ok(sqlx::query_as(
+        r#"SELECT u."username", r."name" FROM "users" u LEFT JOIN "roles" r ON r."id" = u."roleId"
+           WHERE u."isActive" = 1 ORDER BY u."username" COLLATE NOCASE"#,
+    )
+    .fetch_all(db.read())
+    .await?)
+}
+
 /// Sets `username`'s password with their recovery key. On success the key is used up and a
 /// new one is returned with the user; `None` (nothing changed) when the user, the key or the
 /// match is missing — the caller answers all three the same way.

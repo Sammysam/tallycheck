@@ -5296,3 +5296,90 @@ async fn backups_and_restores_refuse_network_paths() -> TestResult {
     }
     Ok(())
 }
+
+/// D56: "Forgot username?" with the recovery key shows only that key's own username, keeps the
+/// key valid, says nothing about other users, and is throttled and logged.
+#[tokio::test]
+async fn a_forgotten_username_is_found_with_the_recovery_key() -> TestResult {
+    let app = App::new().await?;
+    let (token, key) = app.first_admin().await?;
+    let role: Option<String> =
+        sqlx::query_scalar(r#"SELECT "id" FROM "roles" WHERE "name" = 'Viewer'"#).fetch_optional(app.db.read()).await?;
+    auth::users::create_user(
+        &app.db,
+        auth::users::CreateUser { username: "clerk".into(), password: "password123".into(), role_id: role },
+    )
+    .await?;
+    let path = "/api/auth/recovery/username/key";
+
+    // Case, spaces and the dashes don't matter, as for a password reset.
+    let typed = key.to_lowercase().replace('-', " ");
+    let found = app.call(Method::POST, path, None, Some(json!({"recoveryKey": typed}))).await?;
+    assert_eq!(found.status, StatusCode::OK, "{}", found.body);
+    assert_eq!(found.body, json!({"username": "owner"}), "only the key's own username, nothing else");
+
+    // The key is not used up: it still resets the password afterwards.
+    let reset = app
+        .call(
+            Method::POST,
+            "/api/auth/recovery/key",
+            None,
+            Some(json!({"username": "owner", "recoveryKey": key, "password": "new-password-1"})),
+        )
+        .await?;
+    assert_eq!(reset.status, StatusCode::OK, "{}", reset.body);
+    let old_key_now = app.call(Method::POST, path, None, Some(json!({"recoveryKey": key}))).await?;
+    assert_eq!(old_key_now.status, StatusCode::BAD_REQUEST, "a used-up key finds nobody");
+
+    let empty = app.call(Method::POST, path, None, Some(json!({}))).await?;
+    assert_nest_error(&empty, 400, json!("Enter your recovery key"), path);
+    let wrong =
+        app.call(Method::POST, path, None, Some(json!({"recoveryKey": "TCRK-0000-0000-0000-0000-0000"}))).await?;
+    assert_nest_error(&wrong, 400, json!("That recovery key doesn't match any user. Check it and try again."), path);
+    for _ in 0..3 {
+        app.call(Method::POST, path, None, Some(json!({"recoveryKey": "not a key"}))).await?;
+    }
+    let blocked =
+        app.call(Method::POST, path, None, Some(json!({"recoveryKey": "TCRK-1111-1111-1111-1111-1111"}))).await?;
+    assert_eq!(blocked.status, StatusCode::TOO_MANY_REQUESTS, "{}", blocked.body);
+
+    let actions: Vec<String> =
+        sqlx::query_scalar(r#"SELECT "action" FROM "audit_logs""#).fetch_all(app.db.read()).await?;
+    assert!(actions.iter().any(|a| a == "Looked up the username with the recovery key"), "{actions:?}");
+    assert!(actions.iter().any(|a| a == "Failed username lookup"), "{actions:?}");
+    let _ = token;
+    Ok(())
+}
+
+/// D56: the Windows owner of the main PC can see the active usernames, after Windows confirms;
+/// never from another PC, never without the desktop shell.
+#[tokio::test]
+async fn the_windows_owner_can_see_the_usernames() -> TestResult {
+    use api_server::local_verify::Verification;
+    let path = "/api/auth/recovery/username/windows";
+
+    let no_shell = App::new().await?;
+    no_shell.first_admin().await?;
+    let r = no_shell.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, None).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.body);
+
+    let refused = App::with_windows(Verification::NotVerified).await?;
+    refused.first_admin().await?;
+    let r = refused.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, None).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert!(r.body["message"].as_str().unwrap_or_default().contains("no usernames are shown"), "{}", r.body);
+
+    let app = App::with_windows(Verification::Verified).await?;
+    app.first_admin().await?;
+    let remote = app.call_from("192.168.1.50:50000", HOST, Method::POST, path, None, None).await?;
+    assert_eq!(remote.status, StatusCode::FORBIDDEN, "never from another PC");
+    let no_peer = app.call(Method::POST, path, None, None).await?;
+    assert_eq!(no_peer.status, StatusCode::FORBIDDEN);
+    let ok = app.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, None).await?;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
+    assert_eq!(ok.body, json!({"users": [{"username": "owner", "role": "Admin"}]}));
+    let actions: Vec<String> =
+        sqlx::query_scalar(r#"SELECT "action" FROM "audit_logs""#).fetch_all(app.db.read()).await?;
+    assert!(actions.iter().any(|a| a == "Listed the usernames with Windows sign-in"), "{actions:?}");
+    Ok(())
+}

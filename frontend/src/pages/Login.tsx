@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import AuthShell, { PasswordInput } from '../components/AuthShell';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/client';
 import { signInError } from '../lib/signInError';
 
 export default function Login() {
-  const [username, setUsername] = useState('');
+  const location = useLocation();
+  // D56: coming back from "Forgot username?" fills it in.
+  const [username, setUsername] = useState(() => (location.state as { username?: string } | null)?.username ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -51,7 +53,12 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1.5">Username</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-gray-600">Username</label>
+                <button type="button" tabIndex={-1} onClick={() => navigate('/forgot-password?what=username')} className="text-xs text-orange-700 hover:underline">
+                  Forgot username?
+                </button>
+              </div>
               <input
                 type="text"
                 required

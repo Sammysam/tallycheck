@@ -446,6 +446,92 @@ pub async fn recover_with_windows(
     }
 }
 
+const USERNAME_KEY_PATH: &str = "/api/auth/recovery/username/key";
+const USERNAME_WINDOWS_PATH: &str = "/api/auth/recovery/username/windows";
+const NO_USERNAME_FOR_KEY: &str = "That recovery key doesn't match any user. Check it and try again.";
+
+/// `POST /api/auth/recovery/username/key` (public, 200, D56) `{recoveryKey}` → `{username}`:
+/// "Forgot username?". Shows only the username that the key belongs to, and nothing about any
+/// other user; the key stays valid. Failures are throttled per side (this PC / other PCs), since
+/// there is no username to count them by, and logged.
+pub async fn username_with_key(
+    State(state): State<AppState>,
+    FromThisPc(local): FromThisPc,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    let key = text(&body.object(), "recoveryKey");
+    if key.is_empty() {
+        return Err(AppError::bad_request("Enter your recovery key"));
+    }
+    let throttle_key = throttle_key("username-key", local, "");
+    state.recovery_throttle.begin(&throttle_key).map_err(throttled)?;
+    match recovery::user_for_key(&state.db, &key).await? {
+        Some(user) => {
+            state.recovery_throttle.reset(&throttle_key);
+            audit_auth(
+                &state,
+                Some(&user),
+                &user.username,
+                "Looked up the username with the recovery key",
+                USERNAME_KEY_PATH,
+                200,
+            )
+            .await;
+            Ok(Json(json!({ "username": user.username })))
+        }
+        None => {
+            audit_auth(&state, None, "(unknown)", "Failed username lookup", USERNAME_KEY_PATH, 400).await;
+            Err(AppError::bad_request(NO_USERNAME_FOR_KEY))
+        }
+    }
+}
+
+/// `POST /api/auth/recovery/username/windows` (public, 200, D56) → `{users: [{username, role}]}`:
+/// only on the main PC in the desktop app, after Windows confirms the person is the Windows user
+/// that runs TallyCheck. That Windows account can already open the data folder, so listing the
+/// active users' names and roles (nothing else) discloses nothing new to it.
+pub async fn usernames_with_windows(
+    State(state): State<AppState>,
+    FromThisPc(local): FromThisPc,
+) -> AppResult<Json<Value>> {
+    if !local {
+        return Err(AppError::Forbidden(
+            "Finding usernames with Windows sign-in works only on the main PC where TallyCheck is installed".into(),
+        ));
+    }
+    let verifier = state.windows_verifier.clone().ok_or_else(|| {
+        AppError::bad_request("Finding usernames with Windows sign-in works only in the TallyCheck desktop app")
+    })?;
+    let throttle_key = throttle_key("username-windows", true, "");
+    state.recovery_throttle.begin(&throttle_key).map_err(throttled)?;
+    let Some(_prompt) = PromptGuard::take() else {
+        return Err(AppError::bad_request("A Windows confirmation is already open. Finish or cancel it first."));
+    };
+    match verifier.verify("Confirm it's you to see the TallyCheck usernames on this PC.".to_string()).await {
+        Verification::Verified => {
+            state.recovery_throttle.reset(&throttle_key);
+            let rows = recovery::active_usernames(&state.db).await?;
+            audit_auth(
+                &state,
+                None,
+                "(Windows owner)",
+                "Listed the usernames with Windows sign-in",
+                USERNAME_WINDOWS_PATH,
+                200,
+            )
+            .await;
+            let users: Vec<Value> = rows.into_iter().map(|(u, r)| json!({ "username": u, "role": r })).collect();
+            Ok(Json(json!({ "users": users })))
+        }
+        Verification::NotVerified => {
+            audit_auth(&state, None, "(Windows owner)", "Failed username lookup (Windows)", USERNAME_WINDOWS_PATH, 400)
+                .await;
+            Err(AppError::bad_request("Windows did not confirm it's you, so no usernames are shown."))
+        }
+        Verification::Unavailable(reason) => Err(AppError::bad_request(reason)),
+    }
+}
+
 /// `GET /api/auth/recovery-key` (signed in, D49): whether the signed-in user has a recovery key.
 pub async fn recovery_key_status(State(state): State<AppState>, current: CurrentUser) -> AppResult<Json<Value>> {
     let created = recovery::created_at(&state.db, &current.user.id).await?;

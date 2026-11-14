@@ -687,6 +687,20 @@ recommendations without answering each one individually; revisit any of them on 
   Existing installations make their key under File → Password recovery key…. Sessions already
   signed in are not ended by a reset (JWTs can't be revoked yet).
 
+- **D56 Forgotten usernames** (2026-11-14). The sign-in screen has "Forgot username?" next to the
+  username (`/forgot-password?what=username`, a Password / Username choice on the recovery page).
+  `POST /api/auth/recovery/username/key` `{recoveryKey}` (public, 200) → `{username}`: only the
+  username that key belongs to, for an active user; the key is **not** used up (it already allows
+  a password reset, so showing its own username adds nothing); one message for every failure
+  ("That recovery key doesn't match any user…"); failures throttled per side (this PC / other
+  PCs) in the recovery throttle; audited "Looked up the username with the recovery key" / "Failed
+  username lookup". `POST /api/auth/recovery/username/windows` (public, 200) → `{users:
+  [{username, role}]}`: only from this PC with the desktop shell's Windows verification, like D49;
+  lists the active users' names and roles only, since that Windows account can already open the
+  data folder; audited "Listed the usernames with Windows sign-in". No route reveals whether a
+  given username exists (GDPR data minimisation; no username enumeration). "Sign in as this user"
+  fills in the sign-in form.
+
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check
   (`LoginThrottle::begin`, so parallel guesses stop at 5), keys are per username **and** per side

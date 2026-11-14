@@ -44,6 +44,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/auth/recovery/options", get(auth::recovery_options))
         .route("/auth/recovery/key", post(auth::recover_with_key))
         .route("/auth/recovery/windows", post(auth::recover_with_windows))
+        .route("/auth/recovery/username/key", post(auth::username_with_key))
+        .route("/auth/recovery/username/windows", post(auth::usernames_with_windows))
         .route("/auth/recovery-key", get(auth::recovery_key_status).post(auth::create_recovery_key))
         .route("/users", get(users::list).post(users::create))
         .route("/users/last-sign-in", get(users::last_sign_ins))
