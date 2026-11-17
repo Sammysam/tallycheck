@@ -58,7 +58,7 @@ meet *their* duties towards the people in their books.
 
 | # | Item | Status |
 |---|---|---|
-| B1 | Name the legal entity and postal address (Cenango (Pvt) Ltd, Sri Lanka) as controller in the website privacy policy (Art. 13(1)(a)) | ⚠️ The policy says only "TallyCheck" and hello@tallycheck.io |
+| B1 | Name the legal entity and postal address (Cenango (Pvt) Ltd, Sri Lanka) as controller in the website privacy policy (Art. 13(1)(a)) | ⚠️ The policy says only "TallyCheck" and info@tallycheck.io |
 | B2 | State the lawful basis for each use (contract, legitimate interests, consent for marketing) (Art. 13(1)(c)) | ⚠️ Missing |
 | B3 | List all GDPR rights, including objection, portability, withdrawing consent and complaining to a data protection authority (Art. 13(2)) | ⚠️ Partly there |
 | B4 | International transfers (to Sri Lanka, US hosting) and the safeguard used, e.g. Standard Contractual Clauses (Art. 44–49) | ⚠️ Missing |

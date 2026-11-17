@@ -100,7 +100,7 @@ for connectors the user switches on.
 - [docs/privacy-compliance.md](docs/privacy-compliance.md): GDPR and CCPA / CPRA checklist — what
   is in place, what is planned in the app, and what Cenango must do for the website and
   TallyCheck Web.
-- Privacy questions: hello@tallycheck.io.
+- Privacy questions: info@tallycheck.io.
 
 ## Repository layout
 

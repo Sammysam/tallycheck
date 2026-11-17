@@ -78,5 +78,5 @@ TallyCheck is business software and is not directed at children.
 If this policy changes, the new version will be published at
 https://github.com/Sammysam/tallycheck/blob/main/PRIVACY.md with a new date.
 
-Privacy questions and requests: **hello@tallycheck.io** (please do not post personal information
+Privacy questions and requests: **info@tallycheck.io** (please do not post personal information
 in public GitHub issues).
