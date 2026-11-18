@@ -325,6 +325,9 @@ export default function ImportData() {
     return <div><PageHeader title="Import from File" /><p className="text-sm text-gray-600">Your role cannot import anything.</p></div>;
   }
 
+  /** Up to three values of a column that are not blank (statements leave Money in / out empty on half the rows). */
+  const examples = (col: number) => dataRows.map((r) => (r[col] ?? '').trim()).filter((v) => v !== '').slice(0, 3);
+
   return (
     <div>
       <PageHeader
@@ -417,8 +420,8 @@ export default function ImportData() {
             </label>
           </div>
 
-          <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(320px, 1fr) 1.4fr' }}>
-            <div>
+          <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(320px,1fr)_1.4fr]">
+            <div className="min-w-0">
               <div className="grid gap-2 mb-3">
                 <label className="text-xs font-medium text-gray-600">Where is this file from?
                   <input className="mt-1" value={source} onChange={(e) => setSource(e.target.value)} placeholder="e.g. Commercial Bank, Shopify, old system" aria-label="Source" />
@@ -462,22 +465,22 @@ export default function ImportData() {
               </div>
 
               <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1">Match the columns</h4>
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <tbody>
                   {info.fields.map((f) => (
                     <tr key={f.key} className="border-b border-[#f3f3f3] last:border-0">
-                      <td className="py-1.5 pr-2 align-top w-[44%]">
+                      <td className="py-1.5 pr-3 align-top w-[38%]">
                         <div className="font-medium text-gray-800">{f.label}{f.required && <span className="text-red-600"> *</span>}</div>
                         {f.hint && <div className="text-[11px] text-gray-500">{f.hint}</div>}
                       </td>
-                      <td className="py-1.5">
+                      <td className="py-1.5 min-w-0">
                         <select value={mapping[f.key] ?? ''} aria-label={`Column for ${f.label}`}
                           onChange={(e) => setMapping((m) => { const n = { ...m }; if (e.target.value === '') delete n[f.key]; else n[f.key] = Number(e.target.value); return n; })}>
                           <option value="">— not in this file —</option>
                           {Array.from({ length: width }, (_, i) => <option key={i} value={i}>{columnName(i)}</option>)}
                         </select>
                         {mapping[f.key] !== undefined && dataRows[0] && (
-                          <div className="text-[11px] text-gray-500 mt-0.5 truncate">e.g. {dataRows.slice(0, 3).map((r) => r[mapping[f.key]] || '·').join('  |  ')}</div>
+                          <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={examples(mapping[f.key]).join('  |  ')}>e.g. {examples(mapping[f.key]).join('  |  ') || '(empty in the first rows)'}</div>
                         )}
                       </td>
                     </tr>

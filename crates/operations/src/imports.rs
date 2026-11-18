@@ -758,6 +758,9 @@ async fn invoice(
                     date,
                     due_date,
                     lines,
+                    // The number the invoice had in the file, so it can still be found by it (and a
+                    // bank line quoting it recognised); the app gives the invoice its own number.
+                    po_number: Some(field(first, "number").to_string()).filter(|n| !n.is_empty()),
                     ..Default::default()
                 },
                 created_by,

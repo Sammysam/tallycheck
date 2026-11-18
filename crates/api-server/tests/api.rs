@@ -2676,6 +2676,7 @@ async fn import_from_file_bank_matching_and_undo() -> TestResult {
     let drafts = app.call(Method::GET, "/api/invoices?status=DRAFT", Some(&admin), None).await?;
     let draft = drafts.body["data"].as_array().and_then(|d| d.first()).cloned().ok_or("draft")?;
     assert_eq!((draft["totalAmount"].as_str(), draft["status"].as_str()), (Some("500.50"), Some("DRAFT")));
+    assert_eq!(draft["poNumber"], json!("S-1"), "the file's invoice number is kept");
     let s2 = app.call(Method::POST, "/api/imports", Some(&admin), Some(sales)).await?;
     assert_eq!(s2.body["skipped"], json!(1), "S-1 was imported before");
     let sid = s.body["id"].as_str().ok_or("sales import")?;

@@ -276,16 +276,22 @@ async fn suggestions(
     // Open documents in the account's currency: the exact amount owed first, then those whose
     // customer / vendor is named in the bank text (part payments).
     let text = format!("{} {}", line.description, line.reference.clone().unwrap_or_default()).to_lowercase();
-    let mut docs: Vec<(bool, Value)> = Vec::new();
+    // Ranked: named (or numbered) with the exact amount, then named, then only the same amount.
+    let mut docs: Vec<(u8, Value)> = Vec::new();
     for (owed, party, mut v) in open_documents(conn, line.money_in(), currency, scope).await? {
         let exact = owed == size;
         let named = party.len() >= 3 && text.contains(&party.to_lowercase()) && size <= owed;
-        if exact || named {
+        // The bank text quotes the document's number, or the number it had in an imported file.
+        let quoted = ["number", "poNumber"]
+            .iter()
+            .any(|k| v[*k].as_str().is_some_and(|n| n.len() >= 3 && text.contains(&n.to_lowercase())))
+            && size <= owed;
+        if exact || named || quoted {
             v["exact"] = json!(exact);
-            docs.push((exact, v));
+            docs.push((u8::from(exact) + 2 * u8::from(named || quoted), v));
         }
     }
-    docs.sort_by_key(|(exact, _)| !*exact);
+    docs.sort_by_key(|(rank, _)| std::cmp::Reverse(*rank));
     out.extend(docs.into_iter().map(|(_, v)| v));
     out.truncate(MAX_SUGGESTIONS);
     Ok(out)
@@ -319,7 +325,7 @@ async fn open_documents(
             let party =
                 inv.customer.as_ref().map(|c| c.name.clone()).or_else(|| inv.bill_to_name.clone()).unwrap_or_default();
             let v = json!({ "type": "INVOICE", "id": inv.id, "number": inv.invoice_number, "date": inv.date,
-                            "party": party, "amount": money_num(owed) });
+                            "party": party, "amount": money_num(owed), "poNumber": inv.po_number });
             out.push((owed, party, v));
         }
     } else {

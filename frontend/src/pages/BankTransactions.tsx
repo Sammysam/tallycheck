@@ -19,7 +19,7 @@ import { lineCodes, useTaxCodes } from '../lib/taxes';
  */
 
 type Status = 'UNMATCHED' | 'MATCHED' | 'IGNORED';
-interface Suggestion { type: 'PAYMENT' | 'EXPENSE' | 'INVOICE' | 'BILL' | 'TRANSFER'; id: string; number: string; date: string; party?: string; amount: number; exact: boolean }
+interface Suggestion { type: 'PAYMENT' | 'EXPENSE' | 'INVOICE' | 'BILL' | 'TRANSFER'; id: string; number: string; date: string; party?: string; amount: number; exact: boolean; poNumber?: string | null }
 interface Match { type: 'PAYMENT' | 'EXPENSE' | 'TRANSFER'; id: string; number?: string | null; status?: string | null; journalEntryId?: string | null }
 interface Line {
   id: string; date: string; description: string; reference?: string | null; amount: number; status: Status;
@@ -117,7 +117,7 @@ export default function BankTransactions() {
     switch (s.type) {
       case 'PAYMENT': return `Already recorded: ${s.number} (${fmtDate(s.date)})`;
       case 'EXPENSE': return `Already recorded: ${s.number} ${s.party ?? ''}`;
-      case 'INVOICE': return `${s.exact ? 'Pays' : 'Part-pays'} ${s.number} · ${s.party ?? ''} (owed ${fmt(s.amount)})`;
+      case 'INVOICE': return `${s.exact ? 'Pays' : 'Part-pays'} ${s.number}${s.poNumber ? ` (ref ${s.poNumber})` : ''} · ${s.party ?? ''} (owed ${fmt(s.amount)})`;
       case 'BILL': return `${s.exact ? 'Pays' : 'Part-pays'} ${s.number} · ${s.party ?? ''} (owed ${fmt(s.amount)})`;
       case 'TRANSFER': return `Same transfer as ${s.number} (${fmtDate(s.date)})`;
     }
