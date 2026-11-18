@@ -37,12 +37,15 @@ function totp(secret) {
   return String((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000).padStart(6, '0');
 }
 
-// D39: a stand-in Shopify Admin API (one order, its payment, fee and payout).
+// D39: a stand-in Shopify Admin API (one order, its payment, fee and payout). Dated on the 1st of
+// the current month: a first sync reads from the 1st of this month, so fixed dates would drop out.
+const now = new Date();
+const MONTH = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 const fakeShopify = createServer((req, res) => {
   // D40: Stripe on the same stand-in (start the server with ACCOUNTING_STRIPE_BASE_URL too).
   if (req.url.startsWith('/v1/')) {
     if (req.headers.authorization !== 'Bearer sk_test_smoke_1234567890abcd') { res.writeHead(401); res.end('{}'); return; }
-    const at = Math.floor(Date.UTC(2026, 9, 20, 6) / 1000);
+    const at = Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), 1, 6) / 1000);
     const body = req.url.startsWith('/v1/balance_transactions') ? { has_more: false, data: [
         { id: 'txn_s1', type: 'charge', amount: 300000, fee: 9000, currency: 'lkr', created: at, description: 'Order 3001',
           source: { id: 'ch_s1', billing_details: { name: 'Dilini Silva' } } }] }
@@ -55,13 +58,13 @@ const fakeShopify = createServer((req, res) => {
   if (req.headers['x-shopify-access-token'] !== 'shpat_smoke_1234567890') { res.writeHead(401); res.end('{}'); return; }
   const body = req.url.includes('/shop.json') ? { shop: { name: 'Smoke Tea Shop', currency: 'LKR' } }
     : req.url.includes('/orders.json') ? { orders: [{
-        id: 7001, name: '#2001', processed_at: '2026-10-20T10:00:00+05:30', currency: 'LKR', financial_status: 'paid', cancelled_at: null,
+        id: 7001, name: '#2001', processed_at: `${MONTH}-01T10:00:00+05:30`, currency: 'LKR', financial_status: 'paid', cancelled_at: null,
         taxes_included: false, total_price: '1500.00', customer: { first_name: 'Nimali', last_name: 'Fernando', email: 'nimali@example.lk' },
         line_items: [{ title: 'Tea gift box', sku: 'GIFT-1', quantity: 1, price: '1500.00', discount_allocations: [], tax_lines: [] }],
         shipping_lines: [] }] }
     : req.url.includes('/balance/transactions.json') ? { transactions: [
-        { id: 8001, type: 'charge', test: false, amount: '1500.00', fee: '45.00', source_order_id: 7001, processed_at: '2026-10-20T10:01:00+05:30' },
-        { id: 8002, type: 'payout', test: false, amount: '-1455.00', fee: '0.00', source_order_id: null, processed_at: '2026-10-21T08:00:00+05:30' }] }
+        { id: 8001, type: 'charge', test: false, amount: '1500.00', fee: '45.00', source_order_id: 7001, processed_at: `${MONTH}-01T10:01:00+05:30` },
+        { id: 8002, type: 'payout', test: false, amount: '-1455.00', fee: '0.00', source_order_id: null, processed_at: `${MONTH}-01T11:00:00+05:30` }] }
     : null;
   res.writeHead(body ? 200 : 404, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body ?? {}));
