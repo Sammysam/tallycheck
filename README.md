@@ -9,7 +9,7 @@
 
 ### Invoicing, bills, banking, reports, sales tax and US payroll in one app.
 
-Run it offline on a Windows PC, or on your own server for the whole team.
+Run it offline on a Windows PC or MacOS.
 
 [![Download](https://img.shields.io/badge/Download-tallycheck.io-F97316?style=for-the-badge)](https://tallycheck.io/download)
 [![Latest release](https://img.shields.io/github/v/release/Sammysam/tallycheck?style=for-the-badge&color=0F172A&label=Release)](https://github.com/Sammysam/tallycheck/releases/latest)
