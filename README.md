@@ -197,8 +197,10 @@ bodies, passwords, tokens or keys.
 
 ## Contributing and security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems privately as described in
-[SECURITY.md](SECURITY.md), not in public issues. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) (look for issues labelled `good first issue`) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). For help, see [SUPPORT.md](SUPPORT.md). Please report
+security problems privately as described in [SECURITY.md](SECURITY.md), not in public issues.
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

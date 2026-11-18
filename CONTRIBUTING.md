@@ -1,7 +1,20 @@
 # Contributing to TallyCheck
 
 Thank you for helping. Read [docs/design.md](docs/design.md) first: it holds the accounting
-rules, the security model and the numbered decisions that the code refers to.
+rules, the security model and the numbered decisions that the code refers to. Everyone taking
+part follows the [Code of Conduct](CODE_OF_CONDUCT.md); questions go where
+[SUPPORT.md](SUPPORT.md) says.
+
+## Your first contribution
+
+- Issues labelled **`good first issue`** are small, well-described and don't need deep accounting
+  knowledge: a good place to start. **`help wanted`** marks larger tasks we would welcome help
+  with.
+- Comment on the issue before you start, so two people don't do the same work; a maintainer will
+  answer questions there.
+- Not a developer? Reporting a clear bug, improving the user guide or a translation, or testing
+  a release on your Windows or Mac also helps.
+- For anything bigger than a small fix, open an issue first to agree the approach.
 
 ## Workflow
 

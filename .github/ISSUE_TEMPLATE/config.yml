@@ -3,3 +3,6 @@ contact_links:
   - name: Report a security problem
     url: https://github.com/Sammysam/tallycheck/security/advisories/new
     about: Please report vulnerabilities privately, not as a public issue.
+  - name: Questions, sales, licences or a demo
+    url: https://github.com/Sammysam/tallycheck/blob/main/SUPPORT.md
+    about: Where to get help with the app, and how to reach the team (info@tallycheck.io).
