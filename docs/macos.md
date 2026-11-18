@@ -90,5 +90,6 @@ connector path.
 ## Not covered yet
 
 * In-app updates on macOS (`tools/release.py` and `latest.json` are Windows-only).
-* The Mac App Store (it needs the App Sandbox; the direct .dmg does not).
+* The Mac App Store (it needs the App Sandbox; the direct .dmg does not): in progress, see
+  [macos-app-store.md](macos-app-store.md) (D58).
 * Password recovery with Touch ID (the Windows sign-in option has no Mac version yet).

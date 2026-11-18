@@ -11,6 +11,11 @@
 .env.*
 *.dpapi
 *.key
+# Apple provisioning profiles and certificates stay in the company password manager (D58).
+*.provisionprofile
+*.p12
+*.p8
+*.cer
 /tests/contract/node_modules
 /tests/contract/.scratch
 /src-tauri/gen

@@ -705,6 +705,19 @@ recommendations without answering each one individually; revisit any of them on 
   given username exists (GDPR data minimisation; no username enumeration). "Sign in as this user"
   fills in the sign-in form.
 
+- **D58 Mac App Store build** (2026-11-18, in progress, not released). A sandboxed build for the
+  Mac App Store next to the website `.dmg` (D53), which stays unsandboxed and unchanged:
+  `tools/build_macos_appstore.sh` builds with `--features store` (no in-app updater) and
+  `src-tauri/tauri.macos-appstore.json` (app bundle only, entitlements
+  `src-tauri/macos/appstore.entitlements`: App Sandbox, network server and client, user-selected
+  files read-write, app-scoped bookmarks; the script adds the application / team identifiers
+  from `APPLE_TEAM_ID` and embeds the provisioning profile), signs with Apple Distribution and
+  packages a `.pkg` with the Mac Installer Distribution certificate. The Claude connector is not
+  bundled yet. Open items before submitting (docs/macos-app-store.md): a picked backup folder kept
+  as a security-scoped bookmark, the connector, books moved from the website version with Backup &
+  restore (container data folder and its own Keychain item), LAN mode, and a full test with the
+  sandbox on.
+
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check
   (`LoginThrottle::begin`, so parallel guesses stop at 5), keys are per username **and** per side

@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "targets": [
+      "app"
+    ],
+    "externalBin": [],
+    "macOS": {
+      "entitlements": "../target/macos-appstore/appstore.entitlements",
+      "files": {
+        "embedded.provisionprofile": "../target/macos-appstore/embedded.provisionprofile"
+      }
+    }
+  }
+}

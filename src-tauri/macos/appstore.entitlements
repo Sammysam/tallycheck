@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  D58: entitlements of the Mac App Store build ONLY (tools/build_macos_appstore.sh). The website
+  .dmg (Developer ID, tauri.macos.json) is not sandboxed and must not use this file.
+
+  The build script copies this file and adds the two identifiers the provisioning profile needs
+  (com.apple.application-identifier = <TEAM ID>.lk.cenango.accounting and
+  com.apple.developer.team-identifier = <TEAM ID>) from APPLE_TEAM_ID, so no account detail is
+  stored here.
+-->
+<plist version="1.0">
+<dict>
+	<!-- Apple's App Sandbox: required for the Mac App Store. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- The built-in server the window talks to (127.0.0.1:47800; LAN mode only if switched on). -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<!-- Outgoing connections: Shopify, WooCommerce, PayPal, Stripe connectors and the AI model download. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Files the person picks: backups, restore, imports, exports, documents, the company logo. -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- Remember a picked folder (the backup folder) across restarts: security-scoped bookmarks. -->
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+</dict>
+</plist>
