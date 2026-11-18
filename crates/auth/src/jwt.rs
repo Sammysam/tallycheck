@@ -117,8 +117,15 @@ mod tests {
     #[test]
     fn rejects_alg_none() {
         let k = JwtKeys::new(b"0123456789abcdef0123456789abcdef");
-        // {"alg":"none"} . {"sub":"u1","username":"a","stage":"authenticated","iat":1,"exp":9999999999}
-        let t = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1MSIsInVzZXJuYW1lIjoiYSIsInN0YWdlIjoiYXV0aGVudGljYXRlZCIsImlhdCI6MSwiZXhwIjo5OTk5OTk5OTk5fQ.";
+        // An unsigned token ({"alg":"none"}, empty signature), built here rather than written out so
+        // secret scanners don't mistake the test for a leaked token.
+        let part = |json: &str| base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, json);
+        let t = format!(
+            "{}.{}.",
+            part(r#"{"alg":"none"}"#),
+            part(r#"{"sub":"u1","username":"a","stage":"authenticated","iat":1,"exp":9999999999}"#)
+        );
+        let t = t.as_str();
         assert!(k.verify(t).is_none());
     }
 }

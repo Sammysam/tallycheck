@@ -1,11 +1,14 @@
 # Weekly dependency update pull requests. Each must pass CI and be reviewed before merging;
-# new versions must keep the license rules in CONTRIBUTING.md.
+# new versions must keep the license rules in CONTRIBUTING.md. A version is proposed only once it
+# has been public for 7 days (cooldown), so a hijacked or malicious release has time to be caught.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       rust-minor:
@@ -14,6 +17,8 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       frontend-minor:
@@ -22,11 +27,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 2
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     groups:
       actions:

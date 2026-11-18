@@ -3,7 +3,28 @@
 // Usage: node gen_validation_fixture.js <reference backend dir> <output json>
 const path = require('path');
 const fs = require('fs');
-const ref = process.argv[2];
+// Developer tool, run by hand: check both paths before reading or writing anything.
+if (process.argv.length !== 4) {
+  console.error('Usage: node gen_validation_fixture.js <reference backend dir> <output json>');
+  process.exit(2);
+}
+const ref = path.resolve(process.argv[2]);
+if (!fs.existsSync(path.join(ref, 'package.json')) || !fs.statSync(path.join(ref, 'src')).isDirectory()) {
+  console.error(`Not a reference backend folder (no package.json and src/): ${ref}`);
+  process.exit(2);
+}
+const outFile = path.resolve(process.argv[3]);
+if (path.extname(outFile) !== '.json' || !fs.existsSync(path.dirname(outFile))) {
+  console.error(`The output must be a .json file in an existing folder: ${outFile}`);
+  process.exit(2);
+}
+// Every DTO file read must stay inside <reference>/src.
+const insideSrc = (p) => {
+  const full = path.resolve(ref, 'src', p);
+  const rel = path.relative(path.join(ref, 'src'), full);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`outside the reference src folder: ${p}`);
+  return full;
+};
 const req = (m) => require(path.join(ref, 'node_modules', m));
 // In-memory TypeScript transpilation (nothing is written to the reference tree).
 const ts = req('typescript');
@@ -19,7 +40,7 @@ require('module').Module._initPaths && 0;
 process.env.NODE_PATH = path.join(ref, 'node_modules'); require('module').Module._initPaths();
 req('reflect-metadata');
 const { ValidationPipe } = req('@nestjs/common');
-const dto = (p, name) => require(path.join(ref, 'src', p))[name];
+const dto = (p, name) => require(insideSrc(p))[name];
 const pipe = new ValidationPipe({ whitelist: true, transform: true });
 
 const cases = {
@@ -205,6 +226,6 @@ const cases = {
       }
     }
   }
-  require('fs').writeFileSync(process.argv[3], JSON.stringify(out, null, 1));
+  require('fs').writeFileSync(outFile, JSON.stringify(out, null, 1));
   console.log(Object.entries(out).map(([k, v]) => `${k}:${v.length}`).join(' '));
 })().catch((e) => { console.error(e); process.exit(1); });

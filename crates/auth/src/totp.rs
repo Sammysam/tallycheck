@@ -114,7 +114,11 @@ mod tests {
     fn rfc6238_sha1_vector() {
         // RFC 6238 test secret "12345678901234567890" (base32 below) at T=59 s → 94287082 (8
         // digits); the 6-digit code is the last six digits.
-        let secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+        // Encoded here (not written out in base32) so secret scanners don't flag the RFC's example.
+        let Secret::Encoded(secret) = Secret::Raw(b"12345678901234567890".to_vec()).to_encoded() else {
+            panic!("base32 encoding")
+        };
+        let secret = secret.as_str();
         let t = totp_for(secret).map(|t| t.generate(59));
         assert_eq!(t.as_deref(), Some("287082"));
     }

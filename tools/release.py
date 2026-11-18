@@ -80,8 +80,9 @@ def main() -> int:
         with tempfile.TemporaryDirectory() as tmp:
             override = Path(tmp) / "no-updater-artifacts.json"
             override.write_text('{"bundle":{"createUpdaterArtifacts":false}}', encoding="utf-8")
-            subprocess.run(f'npm run installer -- --config "{override}"', cwd=ROOT, env=build_env(),
-                           shell=True, check=True)
+            # A list of arguments, like the signing step below (Windows runs npm.cmd through the shell).
+            subprocess.run(["npm", "run", "installer", "--", "--config", str(override)], cwd=ROOT,
+                           env=build_env(), shell=(os.name == "nt"), check=True)
         if not setup.is_file():
             sys.exit(f"missing {setup}")
         sig.unlink(missing_ok=True)
