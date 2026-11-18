@@ -8,7 +8,7 @@
 // fictitious: Lotus Spice & Tea Traders (Pvt) Ltd, Colombo, April – October 2026.
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -16,7 +16,13 @@ const BASE = process.argv[2] ?? 'http://127.0.0.1:47811';
 const SHOTS = process.argv[3] ?? join(tmpdir(), 'accounting-demo');
 mkdirSync(SHOTS, { recursive: true });
 const LOGO = resolve('docs/demo/lotus-logo.png');
-const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
+// A Chromium browser to drive: DEMO_BROWSER, or Edge / Chrome where Windows and macOS install them.
+const EDGE = process.env.DEMO_BROWSER ?? [
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+].find((p) => existsSync(p)) ?? 'msedge';
 const PORT = 9334;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -136,6 +142,14 @@ const api = (method, path, body) => evaluate(`(async () => {
 async function shot(name) {
   const { data } = await send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(SHOTS, `${name}.png`), Buffer.from(data, 'base64'));
+}
+/** Settings is split into tabs (Company, Invoices & documents, Closing, …): opens one by its label. */
+async function settingsTab(label) {
+  await go('/settings');
+  await evaluate(`(() => {
+    const el = [...document.querySelectorAll('button, a, [role=tab]')].find((b) => b.textContent.trim() === ${J(label)});
+    if (el) el.click(); return true; })()`);
+  await sleep(500);
 }
 let step = 0;
 /** Resume from a phase: node demo-data.mjs <base> <shots> <phase number>. */
@@ -361,12 +375,19 @@ try {
   });
 
   await phase('Users: an accountant and a read-only owner', async () => {
+    const existing = (await api('GET', '/api/users')).body ?? [];
+    const names = new Set((Array.isArray(existing) ? existing : existing.items ?? []).map((x) => x.username));
     for (const u of USERS) {
+      if (names.has(u.username)) continue; // made by an earlier, interrupted run
       await go('/users');
       await clickText('+ New User');
       await waitFor(`!!document.querySelector('input[placeholder=Username]')`, 'user form');
       await set('input[placeholder=Username]', u.username);
       await set('input[placeholder="Password (min 8 chars)"]', u.password);
+      // The form asks for the password twice ("Type it again").
+      if (await evaluate(`!!document.querySelector('input[placeholder="Confirm password"]')`)) {
+        await set('input[placeholder="Confirm password"]', u.password);
+      }
       await choose('form select', u.role);
       await clickText('Save');
       await waitFor(has(u.username), `user ${u.username}`);
@@ -374,7 +395,7 @@ try {
   });
 
   await phase('Settings: invoice signatory', async () => {
-    await go('/settings');
+    await settingsTab('Invoices & documents');
     await waitFor(`!!document.querySelector('input[placeholder="e.g. Jane Smith"]')`, 'signatory form');
     await set('input[placeholder="e.g. Jane Smith"]', 'Kasun Jayasinghe');
     await set('input[placeholder="e.g. Director"]', 'Operations Manager');
@@ -620,8 +641,10 @@ try {
       await set('form input[placeholder="Item description"]', desc, i);
       await set('form input[type=number]', qty, i * 2);
       await set('form input[type=number]', price, i * 2 + 1);
-      await evaluate(`(() => { const tax = __q('select[aria-label="Tax for line ${i + 1}"]'); const row = tax.parentElement;
-        const acct = [...row.querySelectorAll('select')][0]; __opt(acct, ${J(acct + ' ')}); ${vat ? `__opt(tax, 'VAT 18%');` : `__set(tax, '');`} return true; })()`);
+      // The bill line now starts with a Product picker, so find the account picker by its label.
+      await evaluate(`(() => { const tax = __q('select[aria-label="Tax for line ${i + 1}"]');
+        const acct = document.querySelector('select[aria-label="Account for line ${i + 1}"]') ?? [...tax.parentElement.querySelectorAll('select')][0];
+        __opt(acct, ${J(acct + ' ')}); ${vat ? `__opt(tax, 'VAT 18%');` : `__set(tax, '');`} return true; })()`);
     }
     await clickText('Save Bill');
     await waitFor(`!document.querySelector('form input[placeholder="Item description"]')`, 'bill saved');
@@ -860,7 +883,7 @@ try {
   });
 
   await phase('Lock the books up to 30 June 2026 (first quarter closed)', async () => {
-    await go('/settings');
+    await settingsTab('Closing');
     await waitFor(has('not locked'), 'lock card');
     await evaluate(`(() => { const card = [...document.querySelectorAll('input[type=date]')].pop(); __set(card, '2026-06-30'); return true; })()`);
     await clickText('Lock');

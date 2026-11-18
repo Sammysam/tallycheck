@@ -35,10 +35,41 @@ mkdir -p "$OUT"
 echo "==> Entitlements and provisioning profile"
 cp src-tauri/macos/appstore.entitlements "$OUT/appstore.entitlements"
 BUNDLE_ID=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['identifier'])")
-plutil -insert com.apple.application-identifier -string "$APPLE_TEAM_ID.$BUNDLE_ID" "$OUT/appstore.entitlements"
-plutil -insert com.apple.developer.team-identifier -string "$APPLE_TEAM_ID" "$OUT/appstore.entitlements"
+# PlistBuddy, not plutil: plutil reads the dots in these keys as nested key paths.
+/usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $APPLE_TEAM_ID.$BUNDLE_ID" "$OUT/appstore.entitlements"
+/usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $APPLE_TEAM_ID" "$OUT/appstore.entitlements"
 plutil -lint "$OUT/appstore.entitlements"
 cp "$APPLE_PROVISIONING_PROFILE" "$OUT/embedded.provisionprofile"
+
+# The App Store reads the app icon from an asset catalog (Assets.car) named by CFBundleIconName;
+# without it, Transporter shows no icon and the upload is rejected (ITMS-90546 / ITMS-90713).
+# Built here from icon.icns with Xcode's actool (needs Xcode, not only the command line tools).
+echo "==> App icon asset catalog"
+ICONSET="$OUT/AppIcon.iconset"
+XCASSETS="$OUT/Assets.xcassets"
+rm -rf "$ICONSET" "$XCASSETS" "$OUT/car"
+iconutil -c iconset src-tauri/icons/icon.icns -o "$ICONSET"
+mkdir -p "$XCASSETS/AppIcon.appiconset" "$OUT/car"
+cp "$ICONSET"/*.png "$XCASSETS/AppIcon.appiconset/"
+printf '{"info":{"version":1,"author":"xcode"}}\n' > "$XCASSETS/Contents.json"
+python3 - "$XCASSETS/AppIcon.appiconset" <<'PY'
+import json, os, re, sys
+d = sys.argv[1]
+images = []
+for f in sorted(os.listdir(d)):
+    m = re.fullmatch(r"icon_(\d+)x\d+(@2x)?\.png", f)
+    if m:
+        images.append({"idiom": "mac", "size": f"{m.group(1)}x{m.group(1)}",
+                       "scale": "2x" if m.group(2) else "1x", "filename": f})
+if not any(i["size"] == "512x512" and i["scale"] == "2x" for i in images):
+    sys.exit("icon.icns has no 1024 x 1024 image (icon_512x512@2x), which the App Store needs")
+json.dump({"images": images, "info": {"version": 1, "author": "xcode"}},
+          open(os.path.join(d, "Contents.json"), "w"), indent=2)
+PY
+xcrun actool "$XCASSETS" --compile "$OUT/car" --platform macosx --target-device mac \
+  --minimum-deployment-target 11.0 --app-icon AppIcon \
+  --output-partial-info-plist "$OUT/car/partial-info.plist" > /dev/null
+cp "$OUT/car/Assets.car" "$OUT/Assets.car"
 
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
 rustup target add "${TARGETS[@]}"
@@ -58,6 +89,17 @@ npx tauri build --target universal-apple-darwin --bundles app --features store \
   --config src-tauri/tauri.macos-appstore.json
 
 APP=target/universal-apple-darwin/release/bundle/macos/TallyCheck.app
+# App Store Connect refuses a package whose Info.plist has no category (error 90242).
+/usr/libexec/PlistBuddy -c "Print :LSApplicationCategoryType" "$APP/Contents/Info.plist" > /dev/null 2>&1 \
+  || { echo "Info.plist has no LSApplicationCategoryType: set bundle.category." >&2; exit 1; }
+# Name the asset catalog's icon in Info.plist, then sign again (the plist is part of the signature).
+INFO="$APP/Contents/Info.plist"
+[ -f "$APP/Contents/Resources/Assets.car" ] || { echo "Assets.car is missing from the app." >&2; exit 1; }
+if ! /usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$INFO" > /dev/null 2>&1; then
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$INFO"
+  codesign --force --sign "$APPLE_SIGNING_IDENTITY" --entitlements "$OUT/appstore.entitlements" "$APP"
+fi
+
 codesign --display --entitlements - "$APP" | grep -q "com.apple.security.app-sandbox" \
   || { echo "The app is not sandboxed: check the entitlements." >&2; exit 1; }
 

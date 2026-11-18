@@ -3,11 +3,14 @@
     "targets": [
       "app"
     ],
+    "category": "Business",
     "externalBin": [],
     "macOS": {
+      "minimumSystemVersion": "11.0",
       "entitlements": "../target/macos-appstore/appstore.entitlements",
       "files": {
-        "embedded.provisionprofile": "../target/macos-appstore/embedded.provisionprofile"
+        "embedded.provisionprofile": "../target/macos-appstore/embedded.provisionprofile",
+        "Resources/Assets.car": "../target/macos-appstore/Assets.car"
       }
     }
   }
