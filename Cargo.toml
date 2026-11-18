@@ -63,7 +63,8 @@ sha2 = "0.10"
 # D53: macOS only (Keychain, statfs); already in the tree through reqwest / rustls.
 security-framework = "3"
 libc = "0.2"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+# sqlite-bundled: SQLite compiled in (0.9's plain "sqlite" also turns on loading extensions, not wanted).
+sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "migrate", "macros"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs"] }

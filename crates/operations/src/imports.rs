@@ -276,7 +276,7 @@ fn money_text(m: Money) -> String {
     format!("{sign}{grouped}.{frac}")
 }
 
-async fn savepoint(tx: &mut Tx, sql: &str) -> AppResult<()> {
+async fn savepoint(tx: &mut Tx, sql: &'static str) -> AppResult<()> {
     sqlx::query(sql).execute(&mut **tx).await?;
     Ok(())
 }
@@ -316,11 +316,13 @@ async fn already_imported(conn: &mut SqliteConnection, kind: Kind, key: &str) ->
     .fetch_optional(&mut *conn)
     .await?;
     let Some((item_id, record_type, record_id)) = row else { return Ok(None) };
-    let exists: Option<i64> =
-        sqlx::query_scalar(&format!(r#"SELECT 1 FROM "{}" WHERE "id" = ?1"#, record_table(&record_type)))
-            .bind(&record_id)
-            .fetch_optional(&mut *conn)
-            .await?;
+    let exists: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        r#"SELECT 1 FROM "{}" WHERE "id" = ?1"#,
+        record_table(&record_type)
+    )))
+    .bind(&record_id)
+    .fetch_optional(&mut *conn)
+    .await?;
     if exists.is_some() {
         return Ok(Some(record_id));
     }
@@ -545,9 +547,9 @@ async fn parties(tx: &mut Tx, import_id: &str, kind: PartyKind, req: &Request) -
             continue;
         }
         // An earlier row of this file is already inserted, so it counts here too.
-        let exists: Option<i64> = sqlx::query_scalar(&format!(
+        let exists: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             r#"SELECT 1 FROM "{table}" WHERE lower(trim("name")) = lower(trim(?1)) LIMIT 1"#
-        ))
+        )))
         .bind(name)
         .fetch_optional(&mut **tx)
         .await?;
@@ -582,7 +584,7 @@ async fn parties(tx: &mut Tx, import_id: &str, kind: PartyKind, req: &Request) -
     Ok(out)
 }
 
-async fn find_by_name(conn: &mut SqliteConnection, sql: &str, name: &str) -> AppResult<Option<String>> {
+async fn find_by_name(conn: &mut SqliteConnection, sql: &'static str, name: &str) -> AppResult<Option<String>> {
     Ok(sqlx::query_scalar(sql).bind(name).fetch_optional(conn).await?)
 }
 
@@ -887,13 +889,17 @@ fn record(r: &sqlx::sqlite::SqliteRow) -> AppResult<ImportRecord> {
 }
 
 pub async fn list(db: &Db) -> AppResult<Vec<ImportRecord>> {
-    let rows =
-        sqlx::query(&format!(r#"{RECORD_SQL} ORDER BY i."createdAt" DESC LIMIT 100"#)).fetch_all(db.read()).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(r#"{RECORD_SQL} ORDER BY i."createdAt" DESC LIMIT 100"#)))
+        .fetch_all(db.read())
+        .await?;
     rows.iter().map(record).collect()
 }
 
 pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<ImportRecord> {
-    let row = sqlx::query(&format!(r#"{RECORD_SQL} WHERE i."id" = ?1"#)).bind(id).fetch_optional(conn).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"{RECORD_SQL} WHERE i."id" = ?1"#)))
+        .bind(id)
+        .fetch_optional(conn)
+        .await?;
     match row {
         Some(r) => record(&r),
         None => Err(AppError::NotFound(format!("Import with ID {id} not found"))),
@@ -948,14 +954,18 @@ pub async fn undo(db: &Db, id: &str) -> AppResult<ImportRecord> {
     }
     for (record_type, table, label) in [("CUSTOMER", "customers", "Customer"), ("VENDOR", "vendors", "Vendor")] {
         for party in ids(record_type) {
-            let res =
-                sqlx::query(&format!(r#"DELETE FROM "{table}" WHERE "id" = ?1"#)).bind(&party).execute(&mut *tx).await;
+            let res = sqlx::query(sqlx::AssertSqlSafe(format!(r#"DELETE FROM "{table}" WHERE "id" = ?1"#)))
+                .bind(&party)
+                .execute(&mut *tx)
+                .await;
             if let Err(sqlx::Error::Database(e)) = &res {
                 if e.is_foreign_key_violation() {
-                    let name: String = sqlx::query_scalar(&format!(r#"SELECT "name" FROM "{table}" WHERE "id" = ?1"#))
-                        .bind(&party)
-                        .fetch_one(&mut *tx)
-                        .await?;
+                    let name: String = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                        r#"SELECT "name" FROM "{table}" WHERE "id" = ?1"#
+                    )))
+                    .bind(&party)
+                    .fetch_one(&mut *tx)
+                    .await?;
                     return Err(AppError::bad_request(format!(
                         "{label} \"{name}\" is now used on other records, so this import cannot be undone"
                     )));

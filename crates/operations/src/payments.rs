@@ -133,7 +133,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Payment> {
 }
 
 pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<Payment> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "payments" WHERE "id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "payments" WHERE "id" = ?1"#)))
         .bind(id)
         .fetch_optional(conn)
         .await?;
@@ -145,12 +145,13 @@ pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<Paymen
 
 pub async fn find_all(db: &Db, page: i64, limit: i64) -> AppResult<(Vec<Payment>, i64)> {
     let total: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "payments""#).fetch_one(db.read()).await?;
-    let rows =
-        sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "payments" ORDER BY "date" DESC, rowid ASC LIMIT ?1 OFFSET ?2"#))
-            .bind(limit)
-            .bind((page - 1).saturating_mul(limit))
-            .fetch_all(db.read())
-            .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "payments" ORDER BY "date" DESC, rowid ASC LIMIT ?1 OFFSET ?2"#
+    )))
+    .bind(limit)
+    .bind((page - 1).saturating_mul(limit))
+    .fetch_all(db.read())
+    .await?;
     Ok((rows.iter().map(from_row).collect::<AppResult<Vec<_>>>()?, total))
 }
 

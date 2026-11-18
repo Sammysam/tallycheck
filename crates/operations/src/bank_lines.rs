@@ -124,7 +124,7 @@ pub async fn insert(tx: &mut Tx, l: NewBankLine<'_>) -> AppResult<String> {
 }
 
 pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<BankLine> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "bank_lines" WHERE "id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "bank_lines" WHERE "id" = ?1"#)))
         .bind(id)
         .fetch_optional(conn)
         .await?;
@@ -207,13 +207,13 @@ async fn transfers_near(
     size: Money,
 ) -> AppResult<Vec<(String, String, String)>> {
     let side = if line.money_in() { "debit" } else { "credit" };
-    let rows: Vec<(String, String, String)> = sqlx::query_as(&format!(
+    let rows: Vec<(String, String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"SELECT e."id", e."entryNumber", e."date" FROM "journal_entries" e
              JOIN "journal_lines" l ON l."journalEntryId" = e."id"
             WHERE e."sourceType" = 'BANK_TRANSFER' AND e."status" = 'POSTED' AND l."accountId" = ?1 AND l."{side}" = ?2
               AND e."date" BETWEEN date(?3, '-{SUGGEST_DAYS} days') AND date(?3, '+{SUGGEST_DAYS} days')
             ORDER BY abs(julianday(e."date") - julianday(?3))"#
-    ))
+    )))
     .bind(&line.account_id)
     .bind(size.cents())
     .bind(&line.date)
@@ -240,8 +240,11 @@ async fn suggestions(
                ORDER BY abs(julianday("date") - julianday(?2))"#
         )
     };
-    let ids: Vec<String> =
-        sqlx::query_scalar(&near("payments")).bind(&line.account_id).bind(&line.date).fetch_all(&mut *conn).await?;
+    let ids: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(&*near("payments")))
+        .bind(&line.account_id)
+        .bind(&line.date)
+        .fetch_all(&mut *conn)
+        .await?;
     for id in ids {
         let p = payments::find_one(conn, &id).await?;
         if payment_money_in(&p) == line.money_in()
@@ -253,8 +256,11 @@ async fn suggestions(
         }
     }
     if !line.money_in() && !foreign {
-        let ids: Vec<String> =
-            sqlx::query_scalar(&near("expenses")).bind(&line.account_id).bind(&line.date).fetch_all(&mut *conn).await?;
+        let ids: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(&*near("expenses")))
+            .bind(&line.account_id)
+            .bind(&line.date)
+            .fetch_all(&mut *conn)
+            .await?;
         for id in ids {
             let e = expenses::find_one(conn, &id).await?;
             if e.amount == size && !matched_elsewhere(conn, "EXPENSE", &e.id, &line.account_id).await? {
@@ -395,10 +401,10 @@ fn to_json(line: &BankLine) -> Value {
 pub async fn list(db: &Db, account_id: &str, status: Option<&str>, scope: &invoices::Scope) -> AppResult<Value> {
     let mut conn = db.read().acquire().await?;
     let currency = account_currency(&mut conn, account_id).await?;
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {COLUMNS} FROM "bank_lines" WHERE "accountId" = ?1 AND (?2 IS NULL OR "status" = ?2)
            ORDER BY "date" DESC, "createdAt" DESC LIMIT 1000"#
-    ))
+    )))
     .bind(account_id)
     .bind(status)
     .fetch_all(&mut *conn)

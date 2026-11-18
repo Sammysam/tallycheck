@@ -381,12 +381,12 @@ fn row(kind: &str, reference: &str, status: &str, message: impl Into<String>) ->
     json!({ "kind": kind, "ref": reference, "status": status, "message": message.into() })
 }
 
-async fn savepoint(tx: &mut Tx, sql: &str) -> AppResult<()> {
+async fn savepoint(tx: &mut Tx, sql: &'static str) -> AppResult<()> {
     sqlx::query(sql).execute(&mut **tx).await?;
     Ok(())
 }
 
-async fn find_id(conn: &mut SqliteConnection, sql: &str, value: &str) -> AppResult<Option<String>> {
+async fn find_id(conn: &mut SqliteConnection, sql: &'static str, value: &str) -> AppResult<Option<String>> {
     Ok(sqlx::query_scalar(sql).bind(value).fetch_optional(conn).await?)
 }
 

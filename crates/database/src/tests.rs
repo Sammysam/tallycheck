@@ -85,7 +85,7 @@ const APPROVED_EXTRA_TABLES: &[&str] = &[
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {
     let rows: Vec<(String, i64, i64)> =
-        sqlx::query_as(&format!("SELECT name, \"notnull\", pk FROM pragma_table_info('{table}')"))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT name, \"notnull\", pk FROM pragma_table_info('{table}')")))
             .fetch_all(db.read())
             .await?;
     Ok(rows.into_iter().map(|(n, notnull, pk)| (n, notnull == 1 || pk > 0)).collect())
@@ -143,9 +143,9 @@ async fn every_reference_foreign_key_and_unique_constraint_exists() -> AppResult
             } else {
                 "NO ACTION"
             };
-            let found: Option<(String, String)> = sqlx::query_as(&format!(
+            let found: Option<(String, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT \"table\", on_delete FROM pragma_foreign_key_list('{table}') WHERE \"from\" = ?1"
-            ))
+            )))
             .bind(&column)
             .fetch_optional(db.read())
             .await?;
@@ -153,17 +153,18 @@ async fn every_reference_foreign_key_and_unique_constraint_exists() -> AppResult
             fk_checked += 1;
         } else if def.starts_with("UNIQUE") {
             let cols = cols_in(def);
-            let indexes: Vec<String> = sqlx::query_scalar(&format!(
+            let indexes: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT name FROM pragma_index_list('{table}') WHERE \"unique\" = 1 AND partial = 0"
-            ))
+            )))
             .fetch_all(db.read())
             .await?;
             let mut matched = false;
             for idx in indexes {
-                let idx_cols: Vec<String> =
-                    sqlx::query_scalar(&format!("SELECT name FROM pragma_index_info('{idx}') ORDER BY seqno"))
-                        .fetch_all(db.read())
-                        .await?;
+                let idx_cols: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    "SELECT name FROM pragma_index_info('{idx}') ORDER BY seqno"
+                )))
+                .fetch_all(db.read())
+                .await?;
                 matched |= idx_cols == cols;
             }
             assert!(matched, "UNIQUE {table} {cols:?}");
@@ -200,6 +201,18 @@ async fn every_connection_enforces_foreign_keys_and_wal() -> AppResult<()> {
     db.verify_pragmas().await?;
     let sync: i64 = sqlx::query_scalar("PRAGMA synchronous").fetch_one(db.write()).await?;
     assert_eq!(sync, 2, "synchronous=FULL");
+    Ok(())
+}
+
+/// RUSTSEC-2026-0459 (CVE-2026-119375): SQLite before 3.54.0 can return uninitialised memory
+/// when a database is opened next to a crafted `-wal` file. The bundled SQLite must stay new
+/// enough; this fails if a dependency change ever brings an older one back.
+#[tokio::test]
+async fn bundled_sqlite_has_the_wal_fix() -> AppResult<()> {
+    let (_dir, db) = fresh().await?;
+    let version: String = sqlx::query_scalar("SELECT sqlite_version()").fetch_one(db.read()).await?;
+    let parts: Vec<u32> = version.split('.').filter_map(|p| p.parse().ok()).collect();
+    assert!(parts.as_slice() >= [3, 54, 0].as_slice(), "SQLite {version} is older than 3.54.0");
     Ok(())
 }
 
@@ -436,6 +449,7 @@ async fn every_earlier_schema_version_upgrades_cleanly() -> AppResult<()> {
             ignore_missing: false,
             locking: true,
             no_tx: false,
+            ..sqlx::migrate::Migrator::DEFAULT
         };
         older.run(&pool).await?;
         sqlx::query(r#"INSERT INTO "vendors" ("id","name") VALUES ('v1','Paper Co')"#).execute(&pool).await?;
@@ -476,6 +490,7 @@ async fn an_older_database_is_copied_before_it_is_upgraded() -> AppResult<()> {
         ignore_missing: false,
         locking: true,
         no_tx: false,
+        ..sqlx::migrate::Migrator::DEFAULT
     };
     older.run(&pool).await?;
     sqlx::query(r#"INSERT INTO "vendors" ("id","name") VALUES ('v1','Paper Co')"#).execute(&pool).await?;

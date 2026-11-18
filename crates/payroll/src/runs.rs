@@ -425,7 +425,7 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
         marks.join(","),
         updates.join(",")
     );
-    let mut q = sqlx::query(&sql)
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql))
         .bind(&l.id)
         .bind(&l.run_id)
         .bind(&l.employee_id)
@@ -568,7 +568,8 @@ async fn recalc_totals(conn: &mut SqliteConnection, run_id: &str) -> AppResult<(
         sets.join(","),
         values.len() + 3
     );
-    let mut q = sqlx::query(&sql).bind(i64::try_from(lines.len()).unwrap_or(i64::MAX)).bind(now_iso());
+    let mut q =
+        sqlx::query(sqlx::AssertSqlSafe(&*sql)).bind(i64::try_from(lines.len()).unwrap_or(i64::MAX)).bind(now_iso());
     for (_, v) in &values {
         q = q.bind(v.cents());
     }
@@ -792,10 +793,11 @@ pub async fn create(db: &Db, period: &str, notes: Option<String>, by: &Actor) ->
     .await?;
     let run = get_run(&mut tx, &id).await?;
 
-    let rows =
-        sqlx::query(&format!(r#"SELECT {EMPLOYEE_COLUMNS} FROM "employees" ORDER BY "employeeId" ASC, rowid ASC"#))
-            .fetch_all(&mut *tx)
-            .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {EMPLOYEE_COLUMNS} FROM "employees" ORDER BY "employeeId" ASC, rowid ASC"#
+    )))
+    .fetch_all(&mut *tx)
+    .await?;
     let mut skipped = Vec::new();
     for row in &rows {
         let e = employee_from_row(row)?;
@@ -822,10 +824,11 @@ pub async fn create(db: &Db, period: &str, notes: Option<String>, by: &Actor) ->
 pub async fn add_line(db: &Db, run_id: &str, employee_id: &str) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     let run = draft_only(&mut tx, run_id).await?;
-    let row = sqlx::query(&format!(r#"SELECT {EMPLOYEE_COLUMNS} FROM "employees" WHERE "id" = ?1"#))
-        .bind(employee_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let row =
+        sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {EMPLOYEE_COLUMNS} FROM "employees" WHERE "id" = ?1"#)))
+            .bind(employee_id)
+            .fetch_optional(&mut *tx)
+            .await?;
     let e = employee_from_row(row.as_ref().ok_or_else(|| AppError::NotFound("Employee not found".into()))?)?;
     let dup: Option<String> =
         sqlx::query_scalar(r#"SELECT "id" FROM "payroll_lines" WHERE "runId" = ?1 AND "employeeId" = ?2"#)

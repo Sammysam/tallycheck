@@ -59,7 +59,9 @@ async fn add_employee_with_document(i: &Install, code: &str) -> BackupResult<Str
 }
 
 async fn count(db: &Db, table: &str) -> BackupResult<i64> {
-    Ok(sqlx::query_scalar(&format!("SELECT COUNT(*) FROM \"{table}\"")).fetch_one(db.read()).await?)
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM \"{table}\"")))
+        .fetch_one(db.read())
+        .await?)
 }
 
 #[tokio::test]

@@ -124,7 +124,7 @@ fn noun(kind: &str) -> &'static str {
 
 /// A note of `kind`, visible to `scope` (credit notes follow the invoice's visibility).
 pub async fn find_one(conn: &mut SqliteConnection, kind: &str, id: &str, scope: &Scope) -> AppResult<CreditNote> {
-    let row = sqlx::query(&format!(r#"{SELECT} WHERE n."id" = ?1 AND n."type" = ?2"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"{SELECT} WHERE n."id" = ?1 AND n."type" = ?2"#)))
         .bind(id)
         .bind(kind)
         .fetch_optional(&mut *conn)
@@ -146,7 +146,12 @@ pub async fn find_all(db: &Db, kind: &str, scope: &Scope) -> AppResult<Vec<Credi
     let sql = format!(
         r#"{SELECT} WHERE n."type" = ?1 AND (?2 = 0 OR i."createdById" IS ?3) ORDER BY n."date" DESC, n.rowid DESC"#
     );
-    let rows = sqlx::query(&sql).bind(kind).bind(own_only).bind(&scope.user_id).fetch_all(db.read()).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+        .bind(kind)
+        .bind(own_only)
+        .bind(&scope.user_id)
+        .fetch_all(db.read())
+        .await?;
     rows.iter().map(from_row).collect()
 }
 

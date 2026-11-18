@@ -88,7 +88,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Employee> {
 }
 
 pub async fn get(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Employee>> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "employees" WHERE "id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "employees" WHERE "id" = ?1"#)))
         .bind(id)
         .fetch_optional(conn)
         .await?;
@@ -123,7 +123,11 @@ pub async fn find_all(db: &Db, q: Option<&str>, status: Option<&str>) -> AppResu
         );
     }
     sql.push_str(r#" ORDER BY "name" ASC, rowid ASC"#);
-    let rows = sqlx::query(&sql).bind(status).bind(q.map(|q| format!("%{q}%"))).fetch_all(db.read()).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+        .bind(status)
+        .bind(q.map(|q| format!("%{q}%")))
+        .fetch_all(db.read())
+        .await?;
     rows.iter().map(from_row).collect()
 }
 

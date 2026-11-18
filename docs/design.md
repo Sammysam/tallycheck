@@ -127,6 +127,10 @@ still needed (§9). Never change a formula to make a test pass; report the discr
   (seed rows use a SQL v4 expression); timestamps TEXT ISO-8601 UTC with milliseconds
   (`2026-10-14T05:30:00.000Z`); dates TEXT `YYYY-MM-DD` with a `date()` check.
 - Migrations are append-only. Never edit an applied migration; add a new one.
+- SQL text is a literal wherever possible, with every value bound (`?1`, `.bind(…)`). sqlx 0.9
+  refuses runtime-built SQL unless wrapped in `sqlx::AssertSqlSafe`: wrap only SQL assembled
+  from constants (column lists, fixed table names, `?N` placeholders), never from user input;
+  helpers that take SQL as a parameter take `&'static str`.
 - `docs/schema-differences.md` records every difference from PostgreSQL.
 
 ## 8. Approved deviations from the reference
@@ -799,8 +803,9 @@ answer 201.
   react-router(-dom) 7.16.0 → 7.18.5, dompurify 3.4.11 → 3.4.17, form-data 4.0.5 → 4.0.6,
   follow-redirects 1.16.0 → 1.16.2, axios 1.17.0 → 1.21.0 and some build-only tools, within the
   existing version ranges; `npm audit` reports 0 in `frontend/` and the root. `cargo audit` lists
-  `rsa` (RUSTSEC-2023-0071, no fix upstream), which is only in Cargo.lock through sqlx's unused
-  MySQL driver and is never compiled, and `glib` / `proc-macro-error`, Linux (GTK) only. Run both
+  `glib` / `proc-macro-error`, Linux (GTK) only. 2026-11-18: sqlx 0.8.6 → 0.9.1 and
+  libsqlite3-sys 0.30.1 → 0.40.0 (bundled SQLite 3.54+) for RUSTSEC-2026-0459; a test checks
+  the SQLite version; the old `rsa` entry (RUSTSEC-2023-0071) left Cargo.lock with it. Run both
   audits before each release.
 - Fresh installs get the default chart automatically (D20); the migration itself still seeds
   only the 11 payroll accounts, as the reference did, so imports are unaffected.

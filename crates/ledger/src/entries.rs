@@ -304,7 +304,7 @@ async fn attach_lines(conn: &mut SqliteConnection, entries: &mut [JournalEntry],
         r#"SELECT l."id", l."journalEntryId", l."accountId", l."description", l."debit", l."credit", l."foreignAmount"
            FROM "journal_lines" l WHERE l."journalEntryId" IN ({placeholders}) ORDER BY l.rowid"#
     );
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
     for e in entries.iter() {
         q = q.bind(&e.id);
     }
@@ -341,10 +341,11 @@ async fn attach_lines(conn: &mut SqliteConnection, entries: &mut [JournalEntry],
 }
 
 async fn load(conn: &mut SqliteConnection, id: &str, with_accounts: bool) -> AppResult<Option<JournalEntry>> {
-    let row = sqlx::query(&format!(r#"SELECT {ENTRY_COLUMNS} FROM "journal_entries" WHERE "id" = ?1"#))
-        .bind(id)
-        .fetch_optional(&mut *conn)
-        .await?;
+    let row =
+        sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {ENTRY_COLUMNS} FROM "journal_entries" WHERE "id" = ?1"#)))
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await?;
     let Some(row) = row else { return Ok(None) };
     let mut entries = vec![entry_from_row(&row)?];
     attach_lines(conn, &mut entries, with_accounts).await?;
@@ -379,7 +380,7 @@ pub async fn list(conn: &mut SqliteConnection, filter: &EntryFilter) -> AppResul
         }
     }
     sql.push_str(r#" ORDER BY "date" DESC, "entryNumber" DESC"#);
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
     for b in binds {
         q = q.bind(b);
     }
@@ -474,10 +475,10 @@ pub fn normal_balance(account_type: AccountType, debit: Money, credit: Money) ->
 
 /// Active accounts ordered by code.
 pub async fn active_accounts(conn: &mut SqliteConnection) -> AppResult<Vec<Account>> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {} FROM "accounts" WHERE "isActive" = 1 ORDER BY "code" ASC"#,
         accounts::COLUMNS
-    ))
+    )))
     .fetch_all(&mut *conn)
     .await?;
     rows.iter().map(accounts::from_row).collect()

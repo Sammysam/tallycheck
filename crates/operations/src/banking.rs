@@ -44,7 +44,7 @@ fn from_row(r: &SqliteRow) -> AppResult<BankAccount> {
 }
 
 pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<BankAccount> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "bank_accounts" WHERE "id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "bank_accounts" WHERE "id" = ?1"#)))
         .bind(id)
         .fetch_optional(conn)
         .await?;
@@ -55,9 +55,9 @@ pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<BankAc
 }
 
 pub async fn find_all(db: &Db) -> AppResult<Vec<BankAccount>> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {COLUMNS} FROM "bank_accounts" WHERE "isActive" = 1 ORDER BY "name" ASC, rowid ASC"#
-    ))
+    )))
     .fetch_all(db.read())
     .await?;
     rows.iter().map(from_row).collect()

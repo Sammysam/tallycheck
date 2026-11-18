@@ -89,8 +89,8 @@ async fn with_role(conn: &mut SqliteConnection, mut user: User) -> AppResult<Use
     Ok(user)
 }
 
-async fn fetch_one_by(conn: &mut SqliteConnection, column: &str, value: &str) -> AppResult<Option<User>> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "users" WHERE "{column}" = ?1"#))
+async fn fetch_one_by(conn: &mut SqliteConnection, column: &'static str, value: &str) -> AppResult<Option<User>> {
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "users" WHERE "{column}" = ?1"#)))
         .bind(value)
         .fetch_optional(&mut *conn)
         .await?;
@@ -124,9 +124,11 @@ pub(crate) async fn require(conn: &mut SqliteConnection, id: &str) -> AppResult<
 
 pub async fn find_all(db: &Db) -> AppResult<Vec<User>> {
     let mut conn = db.read().acquire().await?;
-    let rows = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "users" ORDER BY "createdAt" ASC, rowid ASC"#))
-        .fetch_all(&mut *conn)
-        .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "users" ORDER BY "createdAt" ASC, rowid ASC"#
+    )))
+    .fetch_all(&mut *conn)
+    .await?;
     let mut out = Vec::with_capacity(rows.len());
     for r in &rows {
         out.push(with_role(&mut conn, from_row(r)?).await?);

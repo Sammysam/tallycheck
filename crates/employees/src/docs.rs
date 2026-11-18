@@ -76,9 +76,9 @@ fn from_row(r: &SqliteRow) -> AppResult<Document> {
 
 /// Every document of an employee, newest first.
 pub(crate) async fn for_employee(conn: &mut SqliteConnection, employee_id: &str) -> AppResult<Vec<Document>> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {COLUMNS} FROM "employee_documents" WHERE "employeeId" = ?1 ORDER BY "createdAt" DESC, rowid DESC"#
-    ))
+    )))
     .bind(employee_id)
     .fetch_all(conn)
     .await?;
@@ -93,12 +93,13 @@ pub async fn list(db: &Db, employee_id: &str) -> AppResult<Vec<Document>> {
 
 /// Reference `getDocument`: the document must belong to that employee.
 pub async fn get_document(conn: &mut SqliteConnection, employee_id: &str, id: &str) -> AppResult<Document> {
-    let row =
-        sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "employee_documents" WHERE "id" = ?1 AND "employeeId" = ?2"#))
-            .bind(id)
-            .bind(employee_id)
-            .fetch_optional(conn)
-            .await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "employee_documents" WHERE "id" = ?1 AND "employeeId" = ?2"#
+    )))
+    .bind(id)
+    .bind(employee_id)
+    .fetch_optional(conn)
+    .await?;
     row.as_ref().map(from_row).transpose()?.ok_or_else(|| AppError::NotFound(format!("Document {id} not found")))
 }
 

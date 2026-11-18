@@ -277,7 +277,7 @@ async fn attach(conn: &mut SqliteConnection, invoices: &mut [Invoice]) -> AppRes
 }
 
 pub(crate) async fn load(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Invoice>> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "invoices" i WHERE i."id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "invoices" i WHERE i."id" = ?1"#)))
         .bind(id)
         .fetch_optional(&mut *conn)
         .await?;
@@ -1016,13 +1016,13 @@ pub async fn find_all(db: &Db, query: &InvoiceQuery, scope: &Scope) -> AppResult
     let from = r#" FROM "invoices" i LEFT JOIN "customers" c ON c."id" = i."customerId""#;
     let mut conn = db.read().acquire().await?;
     let count_sql = format!("SELECT COUNT(*){from}{wh}");
-    let mut cq = sqlx::query_scalar::<_, i64>(&count_sql);
+    let mut cq = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_sql));
     for b in &binds {
         cq = cq.bind(b);
     }
     let total = cq.fetch_one(&mut *conn).await?;
     let sql = format!(r#"SELECT {COLUMNS}{from}{wh} ORDER BY i."date" DESC, i."invoiceNumber" DESC LIMIT ? OFFSET ?"#);
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
     for b in &binds {
         q = q.bind(b);
     }

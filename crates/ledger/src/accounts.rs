@@ -89,14 +89,16 @@ pub(crate) fn from_row(row: &SqliteRow) -> AppResult<Account> {
 
 /// Active accounts ordered by code (reference `findAll`).
 pub async fn find_all(db: &Db) -> AppResult<Vec<Account>> {
-    let rows = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "accounts" WHERE "isActive" = 1 ORDER BY "code" ASC"#))
-        .fetch_all(db.read())
-        .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "accounts" WHERE "isActive" = 1 ORDER BY "code" ASC"#
+    )))
+    .fetch_all(db.read())
+    .await?;
     rows.iter().map(from_row).collect()
 }
 
 pub async fn get(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Account>> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "accounts" WHERE "id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "accounts" WHERE "id" = ?1"#)))
         .bind(id)
         .fetch_optional(conn)
         .await?;
@@ -111,7 +113,7 @@ pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<Accoun
 /// Reference `findByCode`: 404 `Account code <code> not found`. Used by postings that need a
 /// fixed account (1100 AR, 2000 AP, payroll payables, …).
 pub async fn find_by_code(conn: &mut SqliteConnection, code: &str) -> AppResult<Account> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "accounts" WHERE "code" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "accounts" WHERE "code" = ?1"#)))
         .bind(code)
         .fetch_optional(conn)
         .await?;

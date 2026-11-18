@@ -99,7 +99,9 @@ async fn snapshot_facts(path: &Path) -> BackupResult<(i64, std::collections::BTr
         sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations").fetch_one(&mut conn).await?;
     let mut counts = std::collections::BTreeMap::new();
     for t in COUNTED_TABLES {
-        let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM \"{t}\"")).fetch_one(&mut conn).await?;
+        let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM \"{t}\"")))
+            .fetch_one(&mut conn)
+            .await?;
         counts.insert((*t).to_string(), n);
     }
     let referenced: Vec<String> = sqlx::query_scalar(

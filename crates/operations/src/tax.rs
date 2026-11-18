@@ -245,7 +245,7 @@ pub async fn load_parts(
         r#"SELECT "sourceId","taxCodeId","taxAmount" FROM "document_taxes"
            WHERE "sourceType" = ?1 AND "sourceId" IN ({placeholders}) ORDER BY rowid"#
     );
-    let mut q = sqlx::query(&sql).bind(source_type);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql)).bind(source_type);
     for id in source_ids {
         q = q.bind(id);
     }
@@ -334,9 +334,11 @@ async fn attach_components(conn: &mut SqliteConnection, code: &mut TaxCode) -> A
 }
 
 pub async fn find_all(conn: &mut SqliteConnection) -> AppResult<Vec<TaxCode>> {
-    let rows = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "tax_codes" ORDER BY "isActive" DESC, "name""#))
-        .fetch_all(&mut *conn)
-        .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "tax_codes" ORDER BY "isActive" DESC, "name""#
+    )))
+    .fetch_all(&mut *conn)
+    .await?;
     let mut codes = rows.iter().map(from_row).collect::<AppResult<Vec<_>>>()?;
     for c in &mut codes {
         attach_components(conn, c).await?;
@@ -345,7 +347,7 @@ pub async fn find_all(conn: &mut SqliteConnection) -> AppResult<Vec<TaxCode>> {
 }
 
 pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<TaxCode> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "tax_codes" WHERE "id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "tax_codes" WHERE "id" = ?1"#)))
         .bind(id)
         .fetch_optional(&mut *conn)
         .await?;

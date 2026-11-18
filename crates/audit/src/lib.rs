@@ -136,13 +136,13 @@ pub async fn list(db: &Db, page: i64, limit: i64, filter: &Filter) -> AppResult<
         n + 1,
         n + 2
     );
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql));
     for b in &binds {
         q = q.bind(b);
     }
     let rows = q.bind(limit).bind(offset).fetch_all(db.read()).await?;
     let count_sql = format!(r#"SELECT COUNT(*) FROM "audit_logs" {clause}"#);
-    let mut c = sqlx::query_scalar::<_, i64>(&count_sql);
+    let mut c = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_sql));
     for b in &binds {
         c = c.bind(b);
     }

@@ -132,8 +132,10 @@ fn from_row(r: &SqliteRow) -> AppResult<Item> {
 }
 
 pub async fn get(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Item>> {
-    let row =
-        sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "items" WHERE "id" = ?1"#)).bind(id).fetch_optional(conn).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "items" WHERE "id" = ?1"#)))
+        .bind(id)
+        .fetch_optional(conn)
+        .await?;
     row.as_ref().map(from_row).transpose()
 }
 
@@ -142,10 +144,11 @@ pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<Item> 
 }
 
 pub async fn find_all(db: &Db) -> AppResult<Vec<Item>> {
-    let rows =
-        sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "items" ORDER BY "isActive" DESC, "name" COLLATE NOCASE"#))
-            .fetch_all(db.read())
-            .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "items" ORDER BY "isActive" DESC, "name" COLLATE NOCASE"#
+    )))
+    .fetch_all(db.read())
+    .await?;
     rows.iter().map(from_row).collect()
 }
 

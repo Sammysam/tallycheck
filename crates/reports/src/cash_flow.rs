@@ -116,7 +116,7 @@ pub async fn cash_flow(
            WHERE (?1 IS NULL OR e."date" >= ?1) AND (?2 IS NULL OR e."date" <= ?2)
              AND e."id" IN (SELECT "journalEntryId" FROM "journal_lines" WHERE "accountId" IN ({placeholders}))"#
     );
-    let mut q = sqlx::query(&sql).bind(from).bind(to);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql)).bind(from).bind(to);
     for id in cash_ids {
         q = q.bind(id);
     }

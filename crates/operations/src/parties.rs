@@ -73,7 +73,7 @@ fn from_row(r: &SqliteRow) -> AppResult<Party> {
 }
 
 pub async fn get(conn: &mut SqliteConnection, kind: PartyKind, id: &str) -> AppResult<Option<Party>> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "{}" WHERE "id" = ?1"#, kind.table()))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "{}" WHERE "id" = ?1"#, kind.table())))
         .bind(id)
         .fetch_optional(conn)
         .await?;
@@ -87,10 +87,10 @@ pub async fn find_one(conn: &mut SqliteConnection, kind: PartyKind, id: &str) ->
 
 /// Active records ordered by name.
 pub async fn find_all(db: &Db, kind: PartyKind) -> AppResult<Vec<Party>> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {COLUMNS} FROM "{}" WHERE "isActive" = 1 ORDER BY "name" ASC, rowid ASC"#,
         kind.table()
-    ))
+    )))
     .fetch_all(db.read())
     .await?;
     rows.iter().map(from_row).collect()
@@ -117,11 +117,11 @@ pub async fn create(db: &Db, kind: PartyKind, f: PartyFields) -> AppResult<Party
 pub async fn create_in(tx: &mut database::Tx, kind: PartyKind, f: PartyFields) -> AppResult<Party> {
     let id = new_id();
     let now = now_iso();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"INSERT INTO "{}" ("id","name","email","phone","address","taxId","isActive","createdAt","updatedAt")
            VALUES (?1,?2,?3,?4,?5,?6,1,?7,?7)"#,
         kind.table()
-    ))
+    )))
     .bind(&id)
     .bind(f.name.unwrap_or_default())
     .bind(f.email.flatten())
@@ -156,10 +156,10 @@ pub async fn update(db: &Db, kind: PartyKind, id: &str, f: PartyFields) -> AppRe
         next.tax_id = v;
     }
     if next != current {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"UPDATE "{}" SET "name"=?1,"email"=?2,"phone"=?3,"address"=?4,"taxId"=?5,"updatedAt"=?6 WHERE "id"=?7"#,
             kind.table()
-        ))
+        )))
         .bind(&next.name)
         .bind(&next.email)
         .bind(&next.phone)
@@ -182,7 +182,11 @@ pub(crate) fn is_foreign_key_violation(e: &sqlx::Error) -> bool {
 pub async fn remove(db: &Db, kind: PartyKind, id: &str) -> AppResult<()> {
     let mut tx = db.begin().await?;
     find_one(&mut tx, kind, id).await?;
-    match sqlx::query(&format!(r#"DELETE FROM "{}" WHERE "id" = ?1"#, kind.table())).bind(id).execute(&mut *tx).await {
+    match sqlx::query(sqlx::AssertSqlSafe(format!(r#"DELETE FROM "{}" WHERE "id" = ?1"#, kind.table())))
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+    {
         Ok(_) => {}
         Err(e) if is_foreign_key_violation(&e) => return Err(AppError::bad_request(kind.in_use_message())),
         Err(e) => return Err(e.into()),

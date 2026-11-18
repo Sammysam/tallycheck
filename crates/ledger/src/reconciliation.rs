@@ -132,7 +132,10 @@ fn too_large() -> AppError {
 }
 
 async fn find(conn: &mut SqliteConnection, id: &str) -> AppResult<Reconciliation> {
-    let row = sqlx::query(&format!(r#"{SELECT} WHERE r."id" = ?1"#)).bind(id).fetch_optional(&mut *conn).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"{SELECT} WHERE r."id" = ?1"#)))
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await?;
     match row {
         Some(r) => from_row(&r),
         None => Err(AppError::NotFound(format!("Reconciliation {id} not found"))),
@@ -140,9 +143,9 @@ async fn find(conn: &mut SqliteConnection, id: &str) -> AppResult<Reconciliation
 }
 
 async fn last_completed(conn: &mut SqliteConnection, account_id: &str) -> AppResult<Option<Reconciliation>> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"{SELECT} WHERE r."accountId" = ?1 AND r."status" = 'COMPLETED' ORDER BY r."statementDate" DESC, r.rowid DESC LIMIT 1"#
-    ))
+    )))
     .bind(account_id)
     .fetch_optional(&mut *conn)
     .await?;
@@ -151,11 +154,12 @@ async fn last_completed(conn: &mut SqliteConnection, account_id: &str) -> AppRes
 
 /// Every reconciliation of an account, newest statement first.
 pub async fn list(conn: &mut SqliteConnection, account_id: &str) -> AppResult<Vec<Reconciliation>> {
-    let rows =
-        sqlx::query(&format!(r#"{SELECT} WHERE r."accountId" = ?1 ORDER BY r."statementDate" DESC, r.rowid DESC"#))
-            .bind(account_id)
-            .fetch_all(&mut *conn)
-            .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"{SELECT} WHERE r."accountId" = ?1 ORDER BY r."statementDate" DESC, r.rowid DESC"#
+    )))
+    .bind(account_id)
+    .fetch_all(&mut *conn)
+    .await?;
     rows.iter().map(from_row).collect()
 }
 

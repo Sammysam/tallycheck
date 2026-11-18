@@ -56,14 +56,18 @@ fn from_row(r: &sqlx::sqlite::SqliteRow) -> AppResult<ApiKey> {
 }
 
 pub async fn list(db: &Db) -> AppResult<Vec<ApiKey>> {
-    let rows = sqlx::query(&format!(r#"{SELECT} ORDER BY k."revokedAt" IS NOT NULL, k."createdAt" DESC"#))
-        .fetch_all(db.read())
-        .await?;
+    let rows =
+        sqlx::query(sqlx::AssertSqlSafe(format!(r#"{SELECT} ORDER BY k."revokedAt" IS NOT NULL, k."createdAt" DESC"#)))
+            .fetch_all(db.read())
+            .await?;
     rows.iter().map(from_row).collect()
 }
 
 async fn find(db: &Db, id: &str) -> AppResult<ApiKey> {
-    let row = sqlx::query(&format!(r#"{SELECT} WHERE k."id" = ?1"#)).bind(id).fetch_optional(db.read()).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"{SELECT} WHERE k."id" = ?1"#)))
+        .bind(id)
+        .fetch_optional(db.read())
+        .await?;
     row.as_ref().map(from_row).transpose()?.ok_or_else(|| AppError::NotFound(format!("Key with ID {id} not found")))
 }
 
@@ -121,7 +125,7 @@ pub async fn verify(db: &Db, key: &str) -> AppResult<Option<ApiKey>> {
     if !looks_like_key(key) {
         return Ok(None);
     }
-    let row = sqlx::query(&format!(r#"{SELECT} WHERE k."keyHash" = ?1 AND k."revokedAt" IS NULL"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"{SELECT} WHERE k."keyHash" = ?1 AND k."revokedAt" IS NULL"#)))
         .bind(hash(key))
         .fetch_optional(db.read())
         .await?;

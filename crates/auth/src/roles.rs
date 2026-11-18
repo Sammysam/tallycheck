@@ -45,15 +45,19 @@ fn from_row(row: &SqliteRow) -> AppResult<Role> {
 }
 
 pub async fn find_all(db: &Db) -> AppResult<Vec<Role>> {
-    let rows = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "roles" ORDER BY "createdAt" ASC, rowid ASC"#))
-        .fetch_all(db.read())
-        .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "roles" ORDER BY "createdAt" ASC, rowid ASC"#
+    )))
+    .fetch_all(db.read())
+    .await?;
     rows.iter().map(from_row).collect()
 }
 
 pub async fn get(conn: &mut SqliteConnection, id: &str) -> AppResult<Option<Role>> {
-    let row =
-        sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "roles" WHERE "id" = ?1"#)).bind(id).fetch_optional(conn).await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "roles" WHERE "id" = ?1"#)))
+        .bind(id)
+        .fetch_optional(conn)
+        .await?;
     row.as_ref().map(from_row).transpose()
 }
 
@@ -63,7 +67,7 @@ pub async fn find_by_id(conn: &mut SqliteConnection, id: &str) -> AppResult<Role
 }
 
 pub async fn find_by_name(conn: &mut SqliteConnection, name: &str) -> AppResult<Option<Role>> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "roles" WHERE "name" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "roles" WHERE "name" = ?1"#)))
         .bind(name)
         .fetch_optional(conn)
         .await?;

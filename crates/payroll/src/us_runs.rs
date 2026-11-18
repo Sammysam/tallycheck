@@ -628,7 +628,7 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
         placeholders.join(","),
         updates.join(", ")
     );
-    let mut q = sqlx::query(&sql)
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql))
         .bind(&l.id)
         .bind(&l.run_id)
         .bind(&l.employee_id)
@@ -773,11 +773,11 @@ async fn recalc_totals(conn: &mut SqliteConnection, run_id: &str) -> AppResult<(
             format!(r#""{k}" = (SELECT COALESCE(SUM("{col}"),0) FROM "us_payroll_lines" WHERE "runId" = ?1)"#)
         })
         .collect();
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"UPDATE "us_payroll_runs" SET {}, "employeeCount" = (SELECT count(*) FROM "us_payroll_lines" WHERE "runId" = ?1),
            "updatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE "id" = ?1"#,
         sums.join(", ")
-    ))
+    )))
     .bind(run_id)
     .execute(&mut *conn)
     .await?;

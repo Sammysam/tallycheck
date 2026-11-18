@@ -79,9 +79,9 @@ fn from_row(r: &SqliteRow) -> AppResult<Salary> {
 
 /// Rows ascending by effective date.
 pub async fn rows(conn: &mut SqliteConnection, employee_id: &str) -> AppResult<Vec<Salary>> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {COLUMNS} FROM "employee_salaries" WHERE "employeeId" = ?1 ORDER BY "effectiveFrom" ASC"#
-    ))
+    )))
     .bind(employee_id)
     .fetch_all(conn)
     .await?;
@@ -91,10 +91,10 @@ pub async fn rows(conn: &mut SqliteConnection, employee_id: &str) -> AppResult<V
 /// The salary in force on `date` (latest effectiveFrom on or before it) — what a payroll run
 /// for that month uses.
 pub async fn salary_as_of(conn: &mut SqliteConnection, employee_id: &str, date: &str) -> AppResult<Option<Salary>> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         r#"SELECT {COLUMNS} FROM "employee_salaries" WHERE "employeeId" = ?1 AND "effectiveFrom" <= ?2
            ORDER BY "effectiveFrom" DESC LIMIT 1"#
-    ))
+    )))
     .bind(employee_id)
     .bind(date)
     .fetch_optional(conn)
@@ -103,12 +103,13 @@ pub async fn salary_as_of(conn: &mut SqliteConnection, employee_id: &str, date: 
 }
 
 pub async fn get_salary(conn: &mut SqliteConnection, employee_id: &str, id: &str) -> AppResult<Salary> {
-    let row =
-        sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "employee_salaries" WHERE "id" = ?1 AND "employeeId" = ?2"#))
-            .bind(id)
-            .bind(employee_id)
-            .fetch_optional(conn)
-            .await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "employee_salaries" WHERE "id" = ?1 AND "employeeId" = ?2"#
+    )))
+    .bind(id)
+    .bind(employee_id)
+    .fetch_optional(conn)
+    .await?;
     row.as_ref().map(from_row).transpose()?.ok_or_else(|| AppError::NotFound(format!("Salary record {id} not found")))
 }
 

@@ -217,7 +217,7 @@ async fn attach(conn: &mut SqliteConnection, bill: &mut Bill) -> AppResult<()> {
 }
 
 pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<Bill> {
-    let row = sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "bills" WHERE "id" = ?1"#))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(r#"SELECT {COLUMNS} FROM "bills" WHERE "id" = ?1"#)))
         .bind(id)
         .fetch_optional(&mut *conn)
         .await?;
@@ -230,12 +230,13 @@ pub async fn find_one(conn: &mut SqliteConnection, id: &str) -> AppResult<Bill> 
 pub async fn find_all(db: &Db, page: i64, limit: i64) -> AppResult<(Vec<Bill>, i64)> {
     let mut conn = db.read().acquire().await?;
     let total: i64 = sqlx::query_scalar(r#"SELECT COUNT(*) FROM "bills""#).fetch_one(&mut *conn).await?;
-    let rows =
-        sqlx::query(&format!(r#"SELECT {COLUMNS} FROM "bills" ORDER BY "date" DESC, rowid ASC LIMIT ?1 OFFSET ?2"#))
-            .bind(limit)
-            .bind((page - 1).saturating_mul(limit))
-            .fetch_all(&mut *conn)
-            .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "bills" ORDER BY "date" DESC, rowid ASC LIMIT ?1 OFFSET ?2"#
+    )))
+    .bind(limit)
+    .bind((page - 1).saturating_mul(limit))
+    .fetch_all(&mut *conn)
+    .await?;
     let mut bills = Vec::with_capacity(rows.len());
     for r in &rows {
         let mut b = from_row(r)?;

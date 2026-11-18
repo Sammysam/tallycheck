@@ -142,7 +142,9 @@ async fn target_tables(db: &Db) -> anyhow::Result<Vec<(String, Vec<TargetColumn>
 /// A fresh installation holds only migration seeds: no users, entries, employees or documents.
 async fn ensure_fresh(db: &Db) -> anyhow::Result<()> {
     for t in ["users", "journal_entries", "employees", "invoices", "payroll_runs", "audit_logs"] {
-        let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", q(t))).fetch_one(db.read()).await?;
+        let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {}", q(t))))
+            .fetch_one(db.read())
+            .await?;
         if n > 0 {
             anyhow::bail!("the target already holds data ({t}: {n} rows); import into a new, empty data folder");
         }
@@ -212,7 +214,7 @@ pub async fn run(opts: &Options) -> anyhow::Result<Report> {
         let upsert = table == "settings";
         if !upsert {
             // Only migration seeds can be here (checked above); the source's own rows replace them.
-            sqlx::query(&format!("DELETE FROM {}", q(table))).execute(&mut *tx).await?;
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {}", q(table)))).execute(&mut *tx).await?;
         }
         let select = format!(
             "SELECT {} FROM {}",
@@ -226,9 +228,9 @@ pub async fn run(opts: &Options) -> anyhow::Result<Report> {
             shared.iter().map(|c| q(&c.name)).collect::<Vec<_>>().join(","),
             (1..=shared.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",")
         );
-        let rows = sqlx::query(&select).fetch_all(&mut *tx_source).await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(&*select)).fetch_all(&mut *tx_source).await?;
         for row in &rows {
-            let mut stmt = sqlx::query(&insert);
+            let mut stmt = sqlx::query(sqlx::AssertSqlSafe(&*insert));
             for (i, c) in shared.iter().enumerate() {
                 let raw: Option<String> = row.try_get(i)?;
                 stmt = match convert(
@@ -357,7 +359,9 @@ async fn reconcile(
 ) -> anyhow::Result<()> {
     // Record counts.
     for t in &mut report.tables {
-        t.target = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {}", q(&t.table))).fetch_one(db.read()).await?;
+        t.target = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {}", q(&t.table))))
+            .fetch_one(db.read())
+            .await?;
         let ok = if t.table == "settings" { t.target >= t.source } else { t.target == t.source };
         if !ok {
             report.discrepancies.push(format!("{}: {} rows in the source, {} imported", t.table, t.source, t.target));
@@ -365,12 +369,17 @@ async fn reconcile(
     }
     // Every money / quantity column, summed on both sides.
     for (table, col) in money_columns {
-        let src: String = sqlx::query_scalar(&format!("SELECT COALESCE(SUM({}), 0)::text FROM {}", q(col), q(table)))
-            .fetch_one(&mut *pg)
-            .await?;
-        let dst: i64 = sqlx::query_scalar(&format!("SELECT COALESCE(SUM({}), 0) FROM {}", q(col), q(table)))
-            .fetch_one(db.read())
-            .await?;
+        let src: String = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT COALESCE(SUM({}), 0)::text FROM {}",
+            q(col),
+            q(table)
+        )))
+        .fetch_one(&mut *pg)
+        .await?;
+        let dst: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COALESCE(SUM({}), 0) FROM {}", q(col), q(table))))
+                .fetch_one(db.read())
+                .await?;
         report.money_columns_checked += 1;
         if parse_money(&src).map(Money::cents) != Some(dst) {
             report.money_mismatches.push(format!("{table}.{col}: source {src}, imported {}", Money::from_cents(dst)));
