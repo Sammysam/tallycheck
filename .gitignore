@@ -17,6 +17,17 @@
 /node_modules
 /.scratch
 
+# Local test output. The test code itself (crates/*/tests, tests/ui, tests/contract) stays in
+# git; what running it leaves on this PC does not: screenshots, test books, logs.
+/tests/**/screenshots/
+/tests/**/shots/
+/tests/**/out/
+/tests/**/*.png
+/test-data/
+/test-output/
+/screenshots/
+*.log
+
 # Archives of local work (e.g. zipped folders) can contain test data or secrets.
 *.zip
 
