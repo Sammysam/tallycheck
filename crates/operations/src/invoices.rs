@@ -753,7 +753,7 @@ pub async fn remove(db: &Db, id: &str, scope: &Scope) -> AppResult<()> {
     Ok(())
 }
 
-async fn post_in(tx: &mut Tx, id: &str, scope: &Scope) -> AppResult<Invoice> {
+pub(crate) async fn post_in(tx: &mut Tx, id: &str, scope: &Scope) -> AppResult<Invoice> {
     let mut inv = find_one(tx, id, scope).await?;
     if inv.status != DRAFT {
         return Err(AppError::bad_request(format!("Invoice is already {}", inv.status)));
@@ -862,7 +862,7 @@ async fn unpost_in(tx: &mut Tx, id: &str, scope: &Scope, today: &str) -> AppResu
     load(tx, id).await?.ok_or_else(|| not_found(id))
 }
 
-async fn void_in(tx: &mut Tx, id: &str, scope: &Scope, today: &str) -> AppResult<Invoice> {
+pub(crate) async fn void_in(tx: &mut Tx, id: &str, scope: &Scope, today: &str) -> AppResult<Invoice> {
     let mut inv = find_one(tx, id, scope).await?;
     if inv.status == VOID {
         return Err(AppError::bad_request("Invoice is already voided"));

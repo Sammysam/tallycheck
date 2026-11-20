@@ -263,6 +263,11 @@ pub fn summarize(method: &str, path: &str) -> String {
             _ => "Changed system settings".into(),
         };
     }
+    // D59: moving books in from another system.
+    if resource == "conversions" {
+        return if last == "reverse" { "Reversed a book conversion" } else { "Moved books in from another system" }
+            .into();
+    }
     match last {
         "post" => return format!("Posted {} {noun}", article(noun)),
         "void" => return format!("Voided {} {noun}", article(noun)),

@@ -9,14 +9,14 @@ use serde::Serialize;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartyKind {
     Customer,
     Vendor,
 }
 
 impl PartyKind {
-    fn table(self) -> &'static str {
+    pub fn table(self) -> &'static str {
         match self {
             PartyKind::Customer => "customers",
             PartyKind::Vendor => "vendors",

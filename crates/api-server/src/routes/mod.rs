@@ -5,6 +5,7 @@ pub mod api_keys;
 pub mod audit_logs;
 pub mod auth;
 pub mod books;
+pub mod conversions;
 pub mod employees;
 pub mod imports;
 pub mod integrations;
@@ -167,6 +168,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/imports/layouts/{id}", axum::routing::delete(imports::layout_remove))
         .route("/imports", get(imports::list).post(imports::run))
         .route("/imports/{id}", axum::routing::delete(imports::undo))
+        // D59: moving books in from another accounting system.
+        .route("/conversions", get(conversions::list).post(conversions::run))
+        .route("/conversions/preview", post(conversions::preview))
+        .route("/conversions/{id}/reverse", post(conversions::reverse))
         .route("/api-keys", get(api_keys::list).post(api_keys::create))
         .route("/api-keys/me", get(api_keys::me))
         .route("/api-keys/setup", get(api_keys::setup))

@@ -103,6 +103,10 @@ when it was made).
 D52 adds `session_cutoffs` (one row per user: sign-in tokens issued before `validFrom`, Unix
 seconds, are refused).
 
+D59 adds `conversions` (one per move of books from another system: source, cut-over date,
+ACTIVE / REVERSED, the opening entry, a JSON summary of counts and checks) and
+`conversion_items` (every account, customer, vendor, invoice and bill a conversion created).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

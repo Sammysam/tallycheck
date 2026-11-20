@@ -732,6 +732,38 @@ recommendations without answering each one individually; revisit any of them on 
   restore (container data folder and its own Keychain item), LAN mode, and a full test with the
   sandbox on.
 
+- **D59 Moving books in from another system** (2026-11-20; the treatment of unpaid invoices and
+  bills was chosen explicitly: each one as a document, cleared through 3900). An Administrator
+  brings a company's books over from QuickBooks, Xero, Zoho, Sage, TallyPrime or any spreadsheet
+  on a cut-over date (Admin → File → Move books in from another system…, `/move-books`; Import
+  from File links to it). The screen reads the old system's exports with `/imports/read`:
+  trial balance (needed), chart of accounts, unpaid invoices, unpaid bills, customers, vendors.
+  It understands report layouts (title lines above the headings, a blank first heading, names on
+  their own row above their documents, "Total" rows and footers; `lib/conversionFiles.ts`), and
+  the CSV reader now picks the delimiter from the first 20 lines instead of the first one. Old
+  accounts are matched to TallyCheck accounts or created (receivables to 1100, payables to 2000).
+  `POST /api/conversions/preview` runs everything and rolls back; `POST /api/conversions` saves it
+  in one transaction, only when nothing is wrong:
+  * each unpaid invoice / bill becomes a POSTED document dated as in the old system (old number as
+    the invoice's PO number / in the bill's notes), one line on **3900 Opening Balance Equity**
+    (equity, created when first needed), so it posts Dr 1100 / Cr 3900 or Dr 3900 / Cr 2000 and
+    can be paid, chased and aged here;
+  * the trial balance becomes one opening entry on the cut-over date (source `CONVERSION`), its
+    1100 and 2000 lines posted to 3900 instead, so 3900 nets to zero when the open documents add
+    up to the trial balance; a trial balance that doesn't balance is refused, and a difference
+    between the documents and the receivables / payables must be accepted explicitly
+    (`acceptDifferences`; it stays in 3900);
+  * one conversion at a time; documents dated after the cut-over, credit balances, unknown
+    accounts and lock-date refusals are reported per row and nothing is saved.
+  Tables `conversions` and `conversion_items`. `GET /api/conversions` lists them;
+  `POST /api/conversions/{id}/reverse` voids the documents and reverses the opening entry dated
+  today (refused while a document has payments or notes; accounts, customers and vendors stay).
+  The opening entry can't be reversed from the Ledger (D18). Administrators only, closed to
+  Claude keys, previews not written to the activity log ("Moved books in from another system",
+  "Reversed a book conversion"). Not yet: full history from the general ledger, reading
+  QuickBooks Desktop IIF and TallyPrime XML directly, foreign-currency open documents, tax on
+  open documents (they come in as one untaxed amount).
+
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check
   (`LoginThrottle::begin`, so parallel guesses stop at 5), keys are per username **and** per side

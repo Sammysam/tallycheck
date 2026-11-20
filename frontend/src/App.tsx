@@ -31,6 +31,7 @@ import TransactionDetail from './pages/TransactionDetail';
 import CreditNotes from './pages/CreditNotes';
 import Ledger from './pages/Ledger';
 import ImportData from './pages/ImportData';
+import MoveBooks from './pages/MoveBooks';
 import Items from './pages/Items';
 import BankTransactions from './pages/BankTransactions';
 import BankReconciliation from './pages/BankReconciliation';
@@ -100,6 +101,7 @@ export default function App() {
                   <Route path="/debit-notes"              element={<CreditNotes kind="AP" key="AP" />} />
                   <Route path="/ledger"                   element={<Ledger />} />
                   <Route path="/import"                   element={<ImportData />} />
+                  <Route path="/move-books"               element={<MoveBooks />} />
                   <Route path="/items"                    element={<Items />} />
                   <Route path="/bank-transactions" element={
                     <ProtectedRoute permission="banking"><BankTransactions /></ProtectedRoute>

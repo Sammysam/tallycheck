@@ -5384,3 +5384,183 @@ async fn the_windows_owner_can_see_the_usernames() -> TestResult {
     assert!(actions.iter().any(|a| a == "Listed the usernames with Windows sign-in"), "{actions:?}");
     Ok(())
 }
+
+/// D59: moving books in from another system. Open invoices and bills become posted documents
+/// against 3900, the trial balance becomes the opening entry, and the two must agree.
+#[tokio::test]
+async fn books_move_in_from_another_system_and_can_be_reversed() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let accounts = app.account_ids(&admin).await?;
+    let id_of = |code: &str| code_of(&accounts, code);
+    let body = |bill_amount: &str, sales_credit: &str, accept: bool| {
+        json!({
+            "source": "QuickBooks Online", "cutoverDate": "2026-10-31", "dateOrder": "DMY", "acceptDifferences": accept,
+            "accounts": [
+                {"key": "Checking", "accountId": id_of("1000")},
+                {"key": "Accounts Receivable (A/R)", "accountId": id_of("1100")},
+                {"key": "Accounts Payable (A/P)", "accountId": id_of("2000")},
+                {"key": "Owner Equity", "accountId": id_of("3000")},
+                {"key": "Sales", "accountId": id_of("4000")},
+                {"key": "Office Equipment", "code": "1500", "name": "Office Equipment", "type": "ASSET"}],
+            "customers": [{"name": "Lanka Traders", "email": "accounts@lanka.example", "phone": "0112345678"}],
+            "vendors": [],
+            "balances": [
+                {"account": "Checking", "debit": "50,000.00"},
+                {"account": "Accounts Receivable (A/R)", "debit": "1,500.00"},
+                {"account": "Office Equipment", "debit": "10000"},
+                {"account": "Accounts Payable (A/P)", "credit": "800"},
+                {"account": "Owner Equity", "credit": "60,000.00"},
+                {"account": "Sales", "credit": sales_credit}],
+            "invoices": [
+                {"number": "1001", "customer": "Lanka Traders", "date": "15/09/2026", "dueDate": "15/10/2026", "amount": "1,000.00"},
+                {"number": "1002", "customer": "Ceylon Tea", "date": "20/10/2026", "amount": "500"}],
+            "bills": [{"number": "B-77", "vendor": "Colombo Packaging", "date": "01/10/2026", "amount": bill_amount}]
+        })
+    };
+
+    // Administrators only.
+    let clerk = app.with_permissions(&admin, "clerk", &["invoices", "bills", "ledger", "customers", "vendors"]).await?;
+    let denied =
+        app.call(Method::POST, "/api/conversions/preview", Some(&clerk), Some(body("800", "700", false))).await?;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+
+    // A preview saves nothing.
+    let pv = app.call(Method::POST, "/api/conversions/preview", Some(&admin), Some(body("800", "700", false))).await?;
+    assert_eq!(pv.status, StatusCode::OK, "{}", pv.body);
+    assert_eq!(pv.body["canSave"], json!(true), "{}", pv.body);
+    assert_eq!(pv.body["issues"], json!([]));
+    assert_eq!(pv.body["totals"]["accountsCreated"], json!(1));
+    assert_eq!(pv.body["totals"]["accountsMatched"], json!(5));
+    assert_eq!(pv.body["totals"]["customersCreated"], json!(2), "Lanka Traders and Ceylon Tea");
+    assert_eq!(pv.body["totals"]["vendorsCreated"], json!(1));
+    assert_eq!((pv.body["totals"]["invoices"].clone(), pv.body["totals"]["bills"].clone()), (json!(2), json!(1)));
+    assert_eq!(pv.body["check"]["leftInOpeningEquity"], json!(0));
+    assert_eq!(pv.body["id"], Value::Null);
+    let customers = app.call(Method::GET, "/api/customers", Some(&admin), None).await?;
+    assert!(!customers.body.to_string().contains("Lanka Traders"));
+
+    // Open bills that don't add up to the trial balance's payables need an explicit yes.
+    let off = app.call(Method::POST, "/api/conversions/preview", Some(&admin), Some(body("700", "700", false))).await?;
+    assert_eq!(off.body["canSave"], json!(false));
+    assert!(
+        off.body
+            .to_string()
+            .contains("Payables in the trial balance (800.00) and the unpaid bills (700.00) differ by 100.00"),
+        "{}",
+        off.body
+    );
+    let accepted =
+        app.call(Method::POST, "/api/conversions/preview", Some(&admin), Some(body("700", "700", true))).await?;
+    assert_eq!(accepted.body["canSave"], json!(true), "{}", accepted.body);
+    assert_eq!(accepted.body["check"]["leftInOpeningEquity"], json!(-100));
+    let saved_off = app.call(Method::POST, "/api/conversions", Some(&admin), Some(body("700", "700", false))).await?;
+    assert_eq!(saved_off.status, StatusCode::BAD_REQUEST);
+    assert!(
+        saved_off.body["message"].as_str().unwrap_or_default().starts_with("Nothing was saved: Payables"),
+        "{}",
+        saved_off.body
+    );
+
+    // A trial balance that doesn't balance is refused.
+    let unbalanced =
+        app.call(Method::POST, "/api/conversions/preview", Some(&admin), Some(body("800", "600", false))).await?;
+    assert!(
+        unbalanced.body.to_string().contains("doesn't balance: debits 61500.00, credits 61400.00"),
+        "{}",
+        unbalanced.body
+    );
+
+    // Saved: documents posted against 3900, the opening entry on the cut-over date.
+    let saved = app.call(Method::POST, "/api/conversions", Some(&admin), Some(body("800", "700", false))).await?;
+    assert_eq!(saved.status, StatusCode::CREATED, "{}", saved.body);
+    let conversion = saved.body["id"].as_str().ok_or("id")?.to_string();
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let accounts: Vec<(String, String)> = accounts
+        .body
+        .as_array()
+        .ok_or("accounts")?
+        .iter()
+        .map(|a| (a["code"].as_str().unwrap_or_default().to_string(), a["id"].as_str().unwrap_or_default().to_string()))
+        .collect();
+    let balance = |code: &str| {
+        let id = code_of(&accounts, code);
+        let (app, admin) = (&app, admin.clone());
+        async move {
+            let b = app.call(Method::GET, &format!("/api/ledger/balance/{id}"), Some(&admin), None).await?;
+            Ok::<Value, Box<dyn std::error::Error>>(b.body["balance"].clone())
+        }
+    };
+    assert_eq!(balance("1000").await?, json!(50000));
+    assert_eq!(balance("1100").await?, json!(1500));
+    assert_eq!(balance("2000").await?, json!(800));
+    assert_eq!(balance("1500").await?, json!(10000));
+    assert_eq!(balance("3900").await?, json!(0), "the clearing account nets to zero");
+    let invoices = app.call(Method::GET, "/api/invoices", Some(&admin), None).await?;
+    let list = invoices.body["data"].as_array().ok_or("invoices")?.clone();
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().all(|i| i["status"] == "POSTED"), "{list:?}");
+    let first = list.iter().find(|i| i["poNumber"] == "1001").ok_or("1001")?;
+    assert_eq!((first["date"].as_str(), first["dueDate"].as_str()), (Some("2026-09-15"), Some("2026-10-15")));
+    let listed = app.call(Method::GET, "/api/conversions", Some(&admin), None).await?;
+    assert_eq!(listed.body[0]["status"], "ACTIVE");
+    let opening = listed.body[0]["openingEntryId"].as_str().ok_or("opening")?.to_string();
+    let entry = app.call(Method::GET, &format!("/api/ledger/entries/{opening}"), Some(&admin), None).await?;
+    assert_eq!(
+        (entry.body["date"].as_str(), entry.body["sourceType"].as_str()),
+        (Some("2026-10-31"), Some("CONVERSION"))
+    );
+
+    // One conversion at a time; the opening entry is reversed with the conversion, not alone.
+    let again =
+        app.call(Method::POST, "/api/conversions/preview", Some(&admin), Some(body("800", "700", false))).await?;
+    assert!(
+        again.body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("Books were already moved in from QuickBooks Online"),
+        "{}",
+        again.body
+    );
+    let alone = app.call(Method::POST, &format!("/api/ledger/entries/{opening}/reverse"), Some(&admin), None).await?;
+    assert_eq!(alone.status, StatusCode::BAD_REQUEST);
+
+    // A paid document holds the reversal back until its payment is voided.
+    let inv_1002 = list.iter().find(|i| i["poNumber"] == "1002").ok_or("1002")?["id"].as_str().ok_or("id")?.to_string();
+    let pay = app
+        .call(
+            Method::POST,
+            "/api/payments",
+            Some(&admin),
+            Some(json!({"type": "AR", "invoiceId": inv_1002, "date": "2026-11-05", "amount": 200,
+                "paymentMethod": "CASH", "paymentAccountId": code_of(&accounts, "1000")})),
+        )
+        .await?;
+    assert_eq!(pay.status, StatusCode::CREATED, "{}", pay.body);
+    let held = app.call(Method::POST, &format!("/api/conversions/{conversion}/reverse"), Some(&admin), None).await?;
+    assert_eq!(held.status, StatusCode::BAD_REQUEST);
+    assert!(
+        held.body["message"].as_str().unwrap_or_default().contains("Cannot void a part-paid invoice"),
+        "{}",
+        held.body
+    );
+    let pay_id = pay.body["id"].as_str().ok_or("pay")?.to_string();
+    app.call(Method::POST, &format!("/api/payments/{pay_id}/void"), Some(&admin), None).await?;
+
+    let reversed =
+        app.call(Method::POST, &format!("/api/conversions/{conversion}/reverse"), Some(&admin), None).await?;
+    assert_eq!(reversed.status, StatusCode::CREATED, "{}", reversed.body);
+    assert_eq!(reversed.body["status"], "REVERSED");
+    for code in ["1000", "1100", "2000", "1500", "3900"] {
+        assert_eq!(balance(code).await?, json!(0), "{code}");
+    }
+    let invoices = app.call(Method::GET, "/api/invoices", Some(&admin), None).await?;
+    assert!(invoices.body["data"].as_array().ok_or("invoices")?.iter().all(|i| i["status"] == "VOID"));
+    let audit = app.call(Method::GET, "/api/audit-logs", Some(&admin), None).await?;
+    let text = audit.body.to_string();
+    assert!(
+        text.contains("Moved books in from another system") && text.contains("Reversed a book conversion"),
+        "{text}"
+    );
+    Ok(())
+}

@@ -142,11 +142,18 @@ pub struct CreateAccount {
 
 pub async fn create(db: &Db, dto: CreateAccount) -> AppResult<Account> {
     let mut tx = db.begin().await?;
-    if code_taken(&mut tx, &dto.code).await? {
+    let account = create_in(&mut tx, dto).await?;
+    tx.commit().await?;
+    Ok(account)
+}
+
+/// The same, inside a transaction the caller commits (D59: moving books in).
+pub async fn create_in(tx: &mut Tx, dto: CreateAccount) -> AppResult<Account> {
+    if code_taken(tx, &dto.code).await? {
         return Err(AppError::Conflict(format!("Account code {} already exists", dto.code)));
     }
     if let Some(parent) = &dto.parent_id {
-        find_one(&mut tx, parent).await?;
+        find_one(tx, parent).await?;
     }
     let id = new_id();
     let now = now_iso();
@@ -163,11 +170,9 @@ pub async fn create(db: &Db, dto: CreateAccount) -> AppResult<Account> {
     .bind(&dto.parent_id)
     .bind(&now)
     .bind(&dto.currency)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
-    let account = find_one(&mut tx, &id).await?;
-    tx.commit().await?;
-    Ok(account)
+    find_one(tx, &id).await
 }
 
 /// A PATCH: `None` leaves a field alone; `Some(None)` clears a nullable field.

@@ -7,6 +7,16 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+### Added
+- Move books in from another system: an administrator brings the books over from QuickBooks,
+  Xero, Zoho, Sage, TallyPrime or a spreadsheet on a cut-over date. The trial balance becomes the
+  opening balances, unpaid invoices and bills come in one by one so they can be paid, and
+  everything is checked to add up before anything is saved. A conversion can be reversed (D59).
+
+### Fixed
+- Import from File reads CSV reports that start with title lines (the delimiter was guessed
+  from the first line only).
+
 ### Changed
 - Only Sri Lanka and the United States can be chosen as the company's country for now (their
   payroll rules are built; more countries will follow). Companies that already use another
