@@ -153,13 +153,13 @@ export default function UsPayroll() {
           </p>
           <form onSubmit={saveSettings}>
             <div className="form-grid mb-3" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-              <label className="block">
+              <div className="block">
                 <span className="text-xs font-medium text-gray-500">Payroll country</span>
-                <select value={form.country} onChange={set('country')}>
-                  <option value="US">United States</option>
-                  <option value="LK">Sri Lanka (EPF / ETF / PAYE)</option>
-                </select>
-              </label>
+                <p className="text-sm mt-1" data-testid="payroll-country">
+                  {form.country === 'US' ? 'United States' : 'Sri Lanka (EPF / ETF / PAYE)'}
+                  <span className="block text-xs text-gray-500">Follows the company's country (Settings → Company).</span>
+                </p>
+              </div>
               <label className="block">
                 <span className="text-xs font-medium text-gray-500">Pay frequency</span>
                 <select value={form.payFrequency} onChange={set('payFrequency')}>
@@ -251,7 +251,7 @@ export default function UsPayroll() {
 
       <Table
         data={runs}
-        emptyMessage={isUs ? 'No US pay runs yet. Start one above.' : 'Switch the payroll country to United States to start US pay runs.'}
+        emptyMessage={isUs ? 'No US pay runs yet. Start one above.' : 'US pay runs are used when the company\'s country is United States (Settings → Company).'}
         columns={[
           {
             header: 'Pay period',

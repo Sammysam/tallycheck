@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import api, { errMsg } from '../api/client';
-import { COUNTRIES } from '../lib/countries';
+import { COUNTRIES, offeredCountries } from '../lib/countries';
+import { syncPayrollCountry } from '../lib/usPayroll';
 import { regionFromSettings, setRegion } from '../lib/region';
 import { setUnsaved } from '../lib/commands';
 import { toast } from '../lib/toast';
@@ -49,6 +50,8 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save', part = 'all
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  // The country saved before (an existing company keeps it in the list, D57).
+  const [savedCountry, setSavedCountry] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     api.get('/settings')
@@ -57,6 +60,7 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save', part = 'all
         const f = { ...EMPTY };
         FIELDS.forEach((k) => { f[k] = s[k] ?? ''; });
         if (!f['region.fiscalYearStart']) f['region.fiscalYearStart'] = '1';
+        setSavedCountry(f['region.country'] || undefined);
         setForm(f);
       })
       .catch((e) => setError(errMsg(e, 'Could not load the company details')))
@@ -116,6 +120,11 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save', part = 'all
       const body = Object.fromEntries(keys.map((k) => [k, form[k].trim()]));
       const r = await api.patch('/settings', body);
       setRegion(regionFromSettings(r.data));
+      if ('region.country' in body) {
+        setSavedCountry(body['region.country']);
+        const problem = await syncPayrollCountry(body['region.country']);
+        if (problem) toast(problem);
+      }
       setSaved(true);
       setUnsaved(false);
       if (part !== 'all') toast('Saved.');
@@ -188,8 +197,9 @@ export default function CompanyForm({ onSaved, submitLabel = 'Save', part = 'all
           Country
           <select className="mt-1" value={COUNTRIES.some((c) => c.code === form['region.country']) ? form['region.country'] : ''} onChange={(e) => chooseCountry(e.target.value)} aria-label="Country">
             <option value="">Choose a country…</option>
-            {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+            {offeredCountries(savedCountry).map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
           </select>
+          <span className="block mt-1 font-normal text-gray-500">TallyCheck is available for Sri Lanka and the United States for now; more countries will follow. Payroll follows the country.</span>
         </label>
         {field('region.currency', 'Currency code *', { required: true, pattern: '[A-Z]{3}', maxLength: 3, placeholder: 'e.g. USD' })}
         {field('region.currencySymbol', 'Currency symbol', { maxLength: 8, placeholder: 'e.g. $' })}

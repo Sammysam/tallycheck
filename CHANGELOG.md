@@ -7,6 +7,12 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Only Sri Lanka and the United States can be chosen as the company's country for now (their
+  payroll rules are built; more countries will follow). Companies that already use another
+  country keep it. Payroll follows the country: Sri Lanka uses EPF / ETF / PAYE, the United
+  States US payroll (D57).
+
 ## [1.1.0] - 2026-11-18
 
 ### Added

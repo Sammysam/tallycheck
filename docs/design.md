@@ -422,7 +422,8 @@ recommendations without answering each one individually; revisit any of them on 
   customers pay, invoice note, then a review). Each page saves on Next and can be skipped; "Set
   up later" leaves it for this session (a sessionStorage flag) and it asks again at the next
   sign-in until a company name is saved. Administration → Company Setup reopens it. The country
-  list now holds every ISO 3166 country with its ISO 4217 currency; those without a preset take
+  list now holds every ISO 3166 country with its ISO 4217 currency (D57 offers only Sri Lanka and the
+  United States for now; the full list stays for companies that already use another); those without a preset take
   their name, currency word and symbol from the system's Intl data and a January year start.
 - **D32 Journal entries on the Ledger screen** (2026-10-21). The reference had no screen for a manual
   journal entry (only the API). The Ledger page now has "+ New Journal Entry": date, description,
@@ -704,6 +705,19 @@ recommendations without answering each one individually; revisit any of them on 
   data folder; audited "Listed the usernames with Windows sign-in". No route reveals whether a
   given username exists (GDPR data minimisation; no username enumeration). "Sign in as this user"
   fills in the sign-in form.
+
+- **D57 Countries with their rules only** (2026-11-18). Companies choose only countries
+  whose country rules are built: **Sri Lanka** and the **United States** (`OFFERED_COUNTRY_CODES` in
+  `frontend/src/lib/countries.ts`, shown in the setup wizard and Settings → Region & currency, with
+  the note that more countries will follow). An existing company with another country keeps it,
+  listed as "(current)"; the server still accepts any ISO country code, so the API, imports and
+  backups are unchanged. **Payroll follows the company's country**: saving Sri Lanka sets
+  `payroll.country` = LK (EPF / ETF / PAYE), saving United States sets US (US payroll; the country
+  preset also sets USD); `syncPayrollCountry` in `lib/usPayroll.ts` calls
+  `PATCH /payroll/us/settings` and, if the switch is refused (e.g. a US payroll account already used
+  for something else), says so while the company details stay saved. The payroll country is no
+  longer chosen on the US payroll screen; it shows the country and where it comes from. Other
+  countries are added to the list once their payroll rules exist.
 
 - **D58 Mac App Store build** (2026-11-18, in progress, not released). A sandboxed build for the
   Mac App Store next to the website `.dmg` (D53), which stays unsandboxed and unchanged:

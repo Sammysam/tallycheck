@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
-import { COUNTRIES } from '../lib/countries';
+import { COUNTRIES, offeredCountries } from '../lib/countries';
+import { toast } from '../lib/toast';
+import { syncPayrollCountry } from '../lib/usPayroll';
 import { regionFromSettings, setRegion, SETUP_LATER } from '../lib/region';
 
 /**
@@ -66,12 +68,17 @@ export default function CompanySetup() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const box = useRef<HTMLDivElement>(null);
+  // The country saved before (an existing company keeps it in the list, D57).
+  const [savedCountry, setSavedCountry] = useState<string | undefined>(undefined);
   const step = STEPS[index];
   const last = STEPS.length - 1;
 
   useEffect(() => {
     api.get('/settings')
-      .then((r) => setValues({ 'region.fiscalYearStart': '1', ...(r.data as Values) }))
+      .then((r) => {
+        setSavedCountry((r.data as Values)['region.country'] || undefined);
+        setValues({ 'region.fiscalYearStart': '1', ...(r.data as Values) });
+      })
       .catch((e) => setError(errMsg(e, 'Could not load the company details')))
       .finally(() => setLoaded(true));
   }, []);
@@ -169,6 +176,10 @@ export default function CompanySetup() {
       const r = await api.patch('/settings', body);
       setValues((v) => ({ ...v, ...(r.data as Values) }));
       setRegion(regionFromSettings(r.data));
+      if (step.id === 'country') {
+        const problem = await syncPayrollCountry(body['region.country']);
+        if (problem) toast(problem);
+      }
       go(index + 1);
     } catch (err) {
       setError(errMsg(err, 'Could not save this'));
@@ -216,8 +227,9 @@ export default function CompanySetup() {
           <div className="space-y-3">
             <select value={COUNTRIES.some((c) => c.code === val('region.country')) ? val('region.country') : ''} onChange={(e) => chooseCountry(e.target.value)} aria-label="Country">
               <option value="">Choose a country…</option>
-              {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+              {offeredCountries(savedCountry).map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
             </select>
+            <p className="text-xs text-gray-500">TallyCheck is available for Sri Lanka and the United States for now; more countries will follow.</p>
             <div className="grid grid-cols-2 gap-3">
               <label className="text-xs font-medium text-gray-600">
                 Currency code
