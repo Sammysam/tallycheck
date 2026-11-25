@@ -7,6 +7,29 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+### Added
+- Estimates / quotes: make a quote for a customer on the same sheet as an invoice (products,
+  discounts, tax, foreign currency), print it or save it as a PDF titled "Estimate", mark it
+  sent, accepted or declined, and turn it into a draft invoice with one click. Estimates never
+  reach the ledger (D60).
+- Move books in from another system: an administrator brings the books over from QuickBooks,
+  Xero, Zoho, Sage, TallyPrime or a spreadsheet on a cut-over date. The trial balance becomes the
+  opening balances, unpaid invoices and bills come in one by one so they can be paid, and
+  everything is checked to add up before anything is saved. A conversion can be reversed (D59).
+- Quick start for moving books in: no files needed. Type the bank balances, who owes you, whom
+  you owe, other assets and loans, and TallyCheck sets up the opening balances. A list of what
+  each customer or supplier owes (such as an ageing summary) works instead of an invoice list.
+
+### Fixed
+- Import from File reads CSV reports that start with title lines (the delimiter was guessed
+  from the first line only).
+
+### Changed
+- Only Sri Lanka and the United States can be chosen as the company's country for now (their
+  payroll rules are built; more countries will follow). Companies that already use another
+  country keep it. Payroll follows the country: Sri Lanka uses EPF / ETF / PAYE, the United
+  States US payroll (D57).
+
 ## [1.1.0] - 2026-11-18
 
 ### Added

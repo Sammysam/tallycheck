@@ -235,6 +235,61 @@ pub fn invoice_query(query: Map<String, Value>) -> Result<operations::invoices::
     })
 }
 
+// ─── Estimates (D60) ────────────────────────────────────────────────────────
+
+/// An estimate: the invoice fields with `expiryDate` (valid until) instead of a due date.
+pub fn estimate(body: Map<String, Value>) -> Result<operations::estimates::EstimateInput, AppError> {
+    let mut v = Validator::new(body);
+    v.field("customerId", true, &[Rule::IsUuid])
+        .field("date", false, &[Rule::IsDateFormat])
+        .field("expiryDate", true, &[Rule::IsDateFormat])
+        .field("paymentTerms", true, &[Rule::IsEnum(PAYMENT_TERMS)])
+        .field("notes", true, &[Rule::IsString])
+        .field("billToName", true, &[Rule::IsString, Rule::MaxLength(160)])
+        .field("billToAddress", true, &[Rule::IsString, Rule::MaxLength(500)])
+        .field("paymentOptions", true, &[Rule::IsArray, Rule::IsStringEach, Rule::MaxLengthEach(300)])
+        .field("signatoryName", true, &[Rule::IsString, Rule::MaxLength(120)])
+        .field("signatoryTitle", true, &[Rule::IsString, Rule::MaxLength(120)])
+        .field("pricesIncludeTax", true, &[Rule::IsBoolean])
+        .field("currency", true, &[Rule::IsString, Rule::MaxLength(3)])
+        .field("exchangeRate", true, &[Rule::IsFiniteNumber]);
+    nested_array(&mut v, "lines", false, 1, invoice_line_rules);
+    let m = v.finish()?;
+    Ok(operations::estimates::EstimateInput {
+        customer_id: opt_string(&m, "customerId"),
+        date: opt_string(&m, "date").unwrap_or_default(),
+        expiry_date: opt_string(&m, "expiryDate"),
+        payment_terms: opt_string(&m, "paymentTerms"),
+        notes: opt_string(&m, "notes"),
+        bill_to_name: opt_string(&m, "billToName"),
+        bill_to_address: opt_string(&m, "billToAddress"),
+        payment_options: string_vec(&m, "paymentOptions").flatten(),
+        signatory_name: opt_string(&m, "signatoryName"),
+        signatory_title: opt_string(&m, "signatoryTitle"),
+        lines: invoice_lines(&m).flatten().unwrap_or_default(),
+        prices_include_tax: m.get("pricesIncludeTax").and_then(Value::as_bool).unwrap_or(false),
+        currency: currency(&m),
+        exchange_rate: exchange_rate(&m)?,
+    })
+}
+
+pub fn estimate_status(body: Map<String, Value>) -> Result<String, AppError> {
+    let mut v = Validator::new(body);
+    v.field("status", false, &[Rule::IsEnum(operations::estimates::SETTABLE)]);
+    Ok(opt_string(&v.finish()?, "status").unwrap_or_default())
+}
+
+pub fn estimate_query(query: Map<String, Value>) -> Result<operations::estimates::EstimateQuery, AppError> {
+    let (page, limit) = pagination(&query)?;
+    let mut v = Validator::new(query);
+    v.field("q", true, &[Rule::IsString, Rule::MaxLength(120)])
+        .field("status", true, &[Rule::IsEnum(operations::estimates::STATUSES)])
+        .field("page", true, &[])
+        .field("limit", true, &[]);
+    let m = v.finish()?;
+    Ok(operations::estimates::EstimateQuery { page, limit, q: opt_string(&m, "q"), status: opt_string(&m, "status") })
+}
+
 // ─── Bills ──────────────────────────────────────────────────────────────────
 
 pub(crate) fn bill_line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>) {

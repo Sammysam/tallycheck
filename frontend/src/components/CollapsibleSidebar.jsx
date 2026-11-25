@@ -41,6 +41,7 @@ export const navigation = [
     label: 'Transactions',
     icon: ArrowLeftRight,
     items: [
+      { label: 'Estimates', to: '/estimates', permission: 'invoices' },
       { label: 'Invoices', to: '/invoices', permission: 'invoices' },
       { label: 'Bills',    to: '/bills',    permission: 'bills' },
       { label: 'Expenses', to: '/expenses', permission: 'expenses' },

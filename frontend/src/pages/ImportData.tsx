@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, Download, FileSpreadsheet, Landmark, AlertTriangle, Receipt, Scale, Truck, Undo2, Upload, Users } from 'lucide-react';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -66,7 +66,7 @@ function cents(text: string): number | null {
 
 export default function ImportData() {
   const navigate = useNavigate();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const kinds = KINDS.filter((k) => hasPermission(k.permission));
   const [step, setStep] = useState<'start' | 'map' | 'preview' | 'done'>('start');
   const [kind, setKind] = useState<ImportKind>(kinds[0]?.kind ?? 'BANK');
@@ -333,7 +333,9 @@ export default function ImportData() {
       <PageHeader
         title="Import from File"
         subtitle="Bring in bank statements, sales, customers, vendors and opening balances from Excel or CSV."
-        action={step !== 'start' ? <button className="btn btn-secondary" onClick={reset}>Start again</button> : undefined}
+        action={step !== 'start'
+          ? <button className="btn btn-secondary" onClick={reset}>Start again</button>
+          : user?.role === 'Admin' ? <Link className="btn btn-secondary" to="/move-books">Moving from QuickBooks or another system?</Link> : undefined}
       />
       {stepper}
       {error && <div className="mb-3 px-3 py-2 rounded border border-red-200 bg-red-50 text-sm text-red-700" role="alert">{error}</div>}

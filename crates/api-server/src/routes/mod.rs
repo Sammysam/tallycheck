@@ -5,6 +5,7 @@ pub mod api_keys;
 pub mod audit_logs;
 pub mod auth;
 pub mod books;
+pub mod conversions;
 pub mod employees;
 pub mod imports;
 pub mod integrations;
@@ -82,6 +83,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/invoices/{id}/post", post(op::invoices_post))
         .route("/invoices/{id}/unpost", post(op::invoices_unpost))
         .route("/invoices/{id}/void", post(op::invoices_void))
+        .route("/estimates", get(op::estimates_list).post(op::estimates_create))
+        .route("/estimates/{id}", get(op::estimates_get).put(op::estimates_update).delete(op::estimates_remove))
+        .route("/estimates/{id}/status", patch(op::estimates_status))
+        .route("/estimates/{id}/convert", post(op::estimates_convert))
         .route("/bills", get(op::bills_list).post(op::bills_create))
         .route("/bills/{id}", get(op::bills_get))
         .route("/bills/{id}/post", post(op::bills_post))
@@ -167,6 +172,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/imports/layouts/{id}", axum::routing::delete(imports::layout_remove))
         .route("/imports", get(imports::list).post(imports::run))
         .route("/imports/{id}", axum::routing::delete(imports::undo))
+        // D59: moving books in from another accounting system.
+        .route("/conversions", get(conversions::list).post(conversions::run))
+        .route("/conversions/preview", post(conversions::preview))
+        .route("/conversions/{id}/reverse", post(conversions::reverse))
         .route("/api-keys", get(api_keys::list).post(api_keys::create))
         .route("/api-keys/me", get(api_keys::me))
         .route("/api-keys/setup", get(api_keys::setup))

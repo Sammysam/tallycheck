@@ -103,6 +103,14 @@ when it was made).
 D52 adds `session_cutoffs` (one row per user: sign-in tokens issued before `validFrom`, Unix
 seconds, are refused).
 
+D59 adds `conversions` (one per move of books from another system: source, cut-over date,
+ACTIVE / REVERSED, the opening entry, a JSON summary of counts and checks) and
+`conversion_items` (every account, customer, vendor, invoice and bill a conversion created).
+
+D60 adds `estimates` (quotes: number, customer / Bill To, date, valid-until date, status DRAFT /
+SENT / ACCEPTED / DECLINED / CONVERTED, totals, tax, currency, the invoice it became) and
+`estimate_lines` (as `invoice_lines`, with the line's tax). Estimates never reach the ledger.
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

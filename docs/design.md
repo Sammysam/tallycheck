@@ -422,7 +422,8 @@ recommendations without answering each one individually; revisit any of them on 
   customers pay, invoice note, then a review). Each page saves on Next and can be skipped; "Set
   up later" leaves it for this session (a sessionStorage flag) and it asks again at the next
   sign-in until a company name is saved. Administration → Company Setup reopens it. The country
-  list now holds every ISO 3166 country with its ISO 4217 currency; those without a preset take
+  list now holds every ISO 3166 country with its ISO 4217 currency (D57 offers only Sri Lanka and the
+  United States for now; the full list stays for companies that already use another); those without a preset take
   their name, currency word and symbol from the system's Intl data and a January year start.
 - **D32 Journal entries on the Ledger screen** (2026-10-21). The reference had no screen for a manual
   journal entry (only the API). The Ledger page now has "+ New Journal Entry": date, description,
@@ -705,6 +706,19 @@ recommendations without answering each one individually; revisit any of them on 
   given username exists (GDPR data minimisation; no username enumeration). "Sign in as this user"
   fills in the sign-in form.
 
+- **D57 Countries with their rules only** (2026-11-18). Companies choose only countries
+  whose country rules are built: **Sri Lanka** and the **United States** (`OFFERED_COUNTRY_CODES` in
+  `frontend/src/lib/countries.ts`, shown in the setup wizard and Settings → Region & currency, with
+  the note that more countries will follow). An existing company with another country keeps it,
+  listed as "(current)"; the server still accepts any ISO country code, so the API, imports and
+  backups are unchanged. **Payroll follows the company's country**: saving Sri Lanka sets
+  `payroll.country` = LK (EPF / ETF / PAYE), saving United States sets US (US payroll; the country
+  preset also sets USD); `syncPayrollCountry` in `lib/usPayroll.ts` calls
+  `PATCH /payroll/us/settings` and, if the switch is refused (e.g. a US payroll account already used
+  for something else), says so while the company details stay saved. The payroll country is no
+  longer chosen on the US payroll screen; it shows the country and where it comes from. Other
+  countries are added to the list once their payroll rules exist.
+
 - **D58 Mac App Store build** (2026-11-18, in progress, not released). A sandboxed build for the
   Mac App Store next to the website `.dmg` (D53), which stays unsandboxed and unchanged:
   `tools/build_macos_appstore.sh` builds with `--features store` (no in-app updater) and
@@ -717,6 +731,67 @@ recommendations without answering each one individually; revisit any of them on 
   as a security-scoped bookmark, the connector, books moved from the website version with Backup &
   restore (container data folder and its own Keychain item), LAN mode, and a full test with the
   sandbox on.
+
+- **D59 Moving books in from another system** (2026-11-20; the treatment of unpaid invoices and
+  bills was chosen explicitly: each one as a document, cleared through 3900). An Administrator
+  brings a company's books over from QuickBooks, Xero, Zoho, Sage, TallyPrime or any spreadsheet
+  on a cut-over date (Admin → File → Move books in from another system…, `/move-books`; Import
+  from File links to it). The screen reads the old system's exports with `/imports/read`:
+  trial balance (needed), chart of accounts, unpaid invoices, unpaid bills, customers, vendors.
+  It understands report layouts (title lines above the headings, a blank first heading, names on
+  their own row above their documents, "Total" rows and footers; `lib/conversionFiles.ts`), and
+  the CSV reader now picks the delimiter from the first 20 lines instead of the first one. Old
+  accounts are matched to TallyCheck accounts or created (receivables to 1100, payables to 2000).
+  `POST /api/conversions/preview` runs everything and rolls back; `POST /api/conversions` saves it
+  in one transaction, only when nothing is wrong:
+  * each unpaid invoice / bill becomes a POSTED document dated as in the old system (old number as
+    the invoice's PO number / in the bill's notes), one line on **3900 Opening Balance Equity**
+    (equity, created when first needed), so it posts Dr 1100 / Cr 3900 or Dr 3900 / Cr 2000 and
+    can be paid, chased and aged here;
+  * the trial balance becomes one opening entry on the cut-over date (source `CONVERSION`), its
+    1100 and 2000 lines posted to 3900 instead, so 3900 nets to zero when the open documents add
+    up to the trial balance; a trial balance that doesn't balance is refused, and a difference
+    between the documents and the receivables / payables must be accepted explicitly
+    (`acceptDifferences`; it stays in 3900);
+  * one conversion at a time; documents dated after the cut-over, credit balances, unknown
+    accounts and lock-date refusals are reported per row and nothing is saved.
+  Tables `conversions` and `conversion_items`. `GET /api/conversions` lists them;
+  `POST /api/conversions/{id}/reverse` voids the documents and reverses the opening entry dated
+  today (refused while a document has payments or notes; accounts, customers and vendors stay).
+  The opening entry can't be reversed from the Ledger (D18). Administrators only, closed to
+  **Two ways to start** (added 2026-11-20): *Quick start* needs no files: the person types bank and
+  cash balances, what each customer owes, what is owed to each supplier, other assets and loans
+  (`components/QuickStartForm.tsx`); each becomes an account (matched by name or created) and a
+  trial-balance line, customer / supplier amounts become one opening invoice / bill each, and the
+  difference (what the business is worth) goes to 3900 Opening Balance Equity for the accountant
+  to move to capital or retained earnings. *From files* also takes a balance list instead of an
+  invoice list (one amount per customer / vendor, e.g. QuickBooks' A/R or A/P Ageing Summary, the
+  name under a blank first heading): an open document without a date is dated the cut-over day.
+  Claude keys, previews not written to the activity log ("Moved books in from another system",
+  "Reversed a book conversion"). Not yet: full history from the general ledger, reading
+  QuickBooks Desktop IIF and TallyPrime XML directly, foreign-currency open documents, tax on
+  open documents (they come in as one untaxed amount).
+
+- **D60 Estimates / quotes** (2026-11-25, roadmap release 1.2 "Everyday selling"; converting
+  makes a DRAFT invoice, as chosen). Tables `estimates` (`estimateNumber` EST-0001, customer or
+  Bill To name, date, `expiryDate` "valid until", status DRAFT / SENT / ACCEPTED / DECLINED /
+  CONVERTED, print details and payment terms as on invoices, totals, tax, currency and rate,
+  `invoiceId` once converted) and `estimate_lines` (as invoice lines). An estimate is priced
+  exactly as an invoice (`invoices::build_lines`: discounts, tax codes and groups, prices
+  including tax, currency) but **posts nothing**. Statuses are set by hand (CONVERTED only by
+  converting); it can be edited while DRAFT or SENT. `POST /api/estimates/{id}/convert` makes a
+  DRAFT invoice dated today with the same customer, lines, discounts, tax codes, currency and
+  rate, notes, payment terms (the invoice's due date follows them) and print details, and marks
+  the estimate CONVERTED with the invoice's id, in one transaction; once only, never from
+  DECLINED. A converted estimate can't be edited or deleted; others can be deleted. Tax on the
+  invoice is worked out again with the tax codes as they are on the day of converting. Routes
+  (permission `invoices`, same visibility as invoices: Admin / `invoices:all` see all, others
+  their own): `GET|POST /api/estimates`, `GET|PUT|DELETE /api/estimates/{id}`,
+  `PATCH /api/estimates/{id}/status`, `POST /api/estimates/{id}/convert`. Audited as "Created /
+  Updated / Deleted an estimate", "Changed an estimate's status", "Turned an estimate into an
+  invoice". Screen: Transactions → Estimates (the invoice sheet in estimate mode: no PO number
+  or due date, "Valid until"; printed and saved as PDF titled "Estimate"). Not yet: e-mailing
+  an estimate, accepting it online, partial conversion.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

@@ -230,10 +230,11 @@ try {
     await page('website');
     await clickText('Skip');
     await page('Which country');
-    const countries = await evaluate(`document.querySelector('select[aria-label="Country"]').options.length`);
-    if (countries < 240) throw new Error('only ' + countries + ' countries listed');
     const choose = (label, value) => evaluate(`(() => { const sel = document.querySelector('select[aria-label="${label}"]');
       sel.value = ${JSON.stringify(value)}; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    // D57: only the countries whose rules are built are offered.
+    const offered = await evaluate(`[...document.querySelector('select[aria-label="Country"]').options].map((o) => o.value).filter(Boolean).join(',')`);
+    if (offered !== 'LK,US') throw new Error('countries offered: ' + offered);
     await choose('Country', 'LK');
     await waitFor(`document.querySelector('[data-testid=money-example]').innerText.includes('LKR')`, 'Sri Lanka preset');
     await choose('Financial year starts in', '1');

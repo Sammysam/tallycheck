@@ -46,6 +46,7 @@ fn key_may_not_reach(path: &str) -> bool {
         "/api/integrations",
         "/api/api-keys",
         "/api/imports",
+        "/api/conversions",
     ];
     path != "/api/api-keys/me"
         && CLOSED

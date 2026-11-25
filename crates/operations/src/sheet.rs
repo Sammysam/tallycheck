@@ -54,9 +54,14 @@ fn decode(bytes: &[u8]) -> String {
     }
 }
 
+/// The delimiter used most in the first 20 lines (a tie goes to the comma). Reports exported
+/// from accounting systems start with title lines that hold no delimiter at all ("Trial
+/// Balance", the company name), so the first line alone is not enough (D59).
 fn delimiter(text: &str) -> u8 {
-    let first = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-    b",;\t".iter().copied().max_by_key(|d| first.bytes().filter(|b| b == d).count()).unwrap_or(b',')
+    let head: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).take(20).collect();
+    let count = |d: u8| head.iter().map(|l| l.bytes().filter(|b| *b == d).count()).sum::<usize>();
+    // max_by_key keeps the last of equal keys, so the comma goes last.
+    b"\t;,".iter().copied().max_by_key(|d| count(*d)).unwrap_or(b',')
 }
 
 fn tidy(mut row: Vec<String>) -> Option<Vec<String>> {
@@ -715,6 +720,16 @@ fn read_workbook(bytes: &[u8]) -> AppResult<Vec<Sheet>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_title_lines_do_not_decide_the_delimiter() {
+        let csv = "\u{feff}Sample Company\r\nTrial Balance\r\nAs of October 31, 2026\r\n\r\n,Debit,Credit\r\nChecking,\"50,000.00\",\r\nSales,,700.00\r\n";
+        let sheet = &read("tb.csv", csv.as_bytes()).expect("csv")[0];
+        assert_eq!(sheet.rows[3], vec!["", "Debit", "Credit"]);
+        assert_eq!(sheet.rows[4], vec!["Checking", "50,000.00"]);
+        let semi = "Report\r\nDate;Amount\r\n01/10/2026;1,50\r\n";
+        assert_eq!(read("s.csv", semi.as_bytes()).expect("csv")[0].rows[1], vec!["Date", "Amount"]);
+    }
 
     #[test]
     fn csv_with_semicolons_bom_and_quotes() {

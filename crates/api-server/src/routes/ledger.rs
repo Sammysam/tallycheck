@@ -110,6 +110,7 @@ fn document_name(source_type: &str) -> Option<&'static str> {
         "PAYROLL" | "PAYROLL_PAYMENT" | "PAYROLL_REMITTANCE" => "a payroll run",
         "US_PAYROLL" | "US_PAYROLL_PAYMENT" | "US_PAYROLL_REMITTANCE" => "a US payroll run",
         "STOCK_ADJUSTMENT" => "a stock adjustment",
+        "CONVERSION" => "a move of books from another system (Move Books In)",
         _ => return None,
     })
 }

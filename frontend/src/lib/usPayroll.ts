@@ -1,6 +1,6 @@
 // US payroll (D42/D43, ported from the web edition): types and labels for /api/payroll/us/*.
 import { useEffect, useState } from 'react';
-import api from '../api/client';
+import api, { errMsg } from '../api/client';
 import { amt, n } from './payroll';
 
 export type PayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
@@ -214,6 +214,24 @@ export const US_STATES = [
 export function usd(v: number | string | null | undefined): string {
   const x = n(v);
   return x < 0 ? `-$${amt(-x)}` : `$${amt(x)}`;
+}
+
+/**
+ * D57: payroll follows the company's country — Sri Lanka uses EPF / ETF / PAYE, the United States
+ * US payroll. Called after the country is saved; answers a message when payroll could not be
+ * switched (e.g. a US payroll account is already used for something else), otherwise null.
+ */
+export async function syncPayrollCountry(country: string | undefined): Promise<string | null> {
+  if (country !== 'LK' && country !== 'US') return null;
+  try {
+    const { data } = await api.get<UsSettings>('/payroll/us/settings');
+    if (data.country === country) return null;
+    await api.patch('/payroll/us/settings', { country });
+    return null;
+  } catch (err) {
+    const name = country === 'US' ? 'United States' : 'Sri Lanka';
+    return `The company was saved, but payroll could not switch to ${name}: ${errMsg(err, 'unknown error')}`;
+  }
 }
 
 /** The company's payroll country, or null while loading / without the payroll permission. */

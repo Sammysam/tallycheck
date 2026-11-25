@@ -257,6 +257,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       ? [{ label: 'Import from file…', onSelect: go('/import') }]
       : []),
     'separator',
+    ...(isAdmin ? [{ label: 'Move books in from another system…', onSelect: go('/move-books') }] : []),
+    'separator',
     ...(isAdmin
       ? [{ label: 'Backup and restore…', onSelect: go('/settings?tab=backup') }, 'separator' as const]
       : []),

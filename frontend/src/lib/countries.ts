@@ -90,6 +90,20 @@ export const COUNTRIES: CountryPreset[] = WORLD.split(/\s+/)
   })
   .sort((x, y) => x.name.localeCompare(y.name));
 
+/**
+ * D57: the countries a company can choose — only those whose country rules (payroll: EPF / ETF /
+ * PAYE for Sri Lanka, federal and state taxes for the United States) are built. Others are added
+ * here once their rules exist.
+ */
+export const OFFERED_COUNTRY_CODES: readonly string[] = ['LK', 'US'];
+
+/** The countries to list; an existing company with another country keeps it in the list. */
+export function offeredCountries(current?: string): CountryPreset[] {
+  const list = COUNTRIES.filter((c) => OFFERED_COUNTRY_CODES.includes(c.code));
+  const own = current && !list.some((c) => c.code === current) ? COUNTRIES.find((c) => c.code === current) : undefined;
+  return own ? [...list, { ...own, name: `${own.name} (current)` }] : list;
+}
+
 /** Currencies offered for foreign-currency invoices and bills (D30); any other code can be typed. */
 export const CURRENCIES: string[] = [...new Set([
   'USD', 'EUR', 'GBP', 'AUD', 'CAD', 'SGD', 'INR', 'LKR', 'AED', 'SAR', 'QAR', 'JPY', 'CNY', 'CHF', 'NZD', 'MYR',

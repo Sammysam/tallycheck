@@ -287,34 +287,41 @@ pub async fn payable_account(conn: &mut SqliteConnection, id: Option<&str>) -> A
     Ok(account)
 }
 
-pub async fn create(db: &Db, mut dto: CreateBill) -> AppResult<Bill> {
+pub async fn create(db: &Db, dto: CreateBill) -> AppResult<Bill> {
     let mut tx = db.begin().await?;
-    parties::find_one(&mut tx, PartyKind::Vendor, &dto.vendor_id).await?;
+    let bill = create_in(&mut tx, dto).await?;
+    tx.commit().await?;
+    Ok(bill)
+}
+
+/// The same, inside a transaction the caller commits (D59: moving books in).
+pub async fn create_in(tx: &mut Tx, mut dto: CreateBill) -> AppResult<Bill> {
+    parties::find_one(tx, PartyKind::Vendor, &dto.vendor_id).await?;
     for l in &mut dto.lines {
         if let Some(item_id) = &l.item_id {
-            let item = crate::stock::find_one(&mut tx, item_id).await?;
+            let item = crate::stock::find_one(tx, item_id).await?;
             if let (true, Some(inventory)) = (item.counted(), item.inventory_account_id.clone()) {
                 l.account_id = inventory;
             }
         }
     }
     for l in &dto.lines {
-        require_account(&mut tx, &l.account_id).await?;
+        require_account(tx, &l.account_id).await?;
     }
     if let Some(p) = &dto.payable_account_id {
-        payable_account(&mut tx, Some(p)).await?;
+        payable_account(tx, Some(p)).await?;
     }
-    let number = counters::next_formatted(&mut tx, "BILL", 6).await?;
+    let number = counters::next_formatted(tx, "BILL", 6).await?;
     let id = new_id();
     let now = now_iso();
-    let (currency, rate) = crate::fx::resolve(&mut tx, dto.currency.as_deref(), dto.exchange_rate).await?;
-    crate::fx::remember_rate(&mut tx, &currency, rate).await?;
+    let (currency, rate) = crate::fx::resolve(tx, dto.currency.as_deref(), dto.exchange_rate).await?;
+    crate::fx::remember_rate(tx, &currency, rate).await?;
     let (mut total, mut tax_total) = (Money::ZERO, Money::ZERO);
     let mut amounts = Vec::with_capacity(dto.lines.len());
     for l in &dto.lines {
         let amount = Money::line_amount(l.quantity, l.unit_price).ok_or_else(overflow)?;
         let (parts, tax) = match &l.tax_code_id {
-            Some(code) => crate::tax::line_tax(&mut tx, code, amount, dto.prices_include_tax).await?,
+            Some(code) => crate::tax::line_tax(tx, code, amount, dto.prices_include_tax).await?,
             None => (Vec::new(), Money::ZERO),
         };
         let gross = if dto.prices_include_tax { amount } else { amount.checked_add(tax).ok_or_else(overflow)? };
@@ -340,7 +347,7 @@ pub async fn create(db: &Db, mut dto: CreateBill) -> AppResult<Bill> {
     .bind(&currency)
     .bind(rate)
     .bind(&dto.payable_account_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
     for (l, (amount, tax, parts)) in dto.lines.iter().zip(amounts) {
         let line_id = new_id();
@@ -358,21 +365,19 @@ pub async fn create(db: &Db, mut dto: CreateBill) -> AppResult<Bill> {
         .bind(&l.tax_code_id)
         .bind(tax.cents())
         .bind(&l.item_id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-        crate::tax::save_parts(&mut tx, "BILL_LINE", &line_id, &parts).await?;
+        crate::tax::save_parts(tx, "BILL_LINE", &line_id, &parts).await?;
     }
-    let bill = find_one(&mut tx, &id).await?;
+    let bill = find_one(tx, &id).await?;
     // D30: what the payable is booked at in the home currency.
-    let base_total = booked(&mut tx, &bill).await?.total;
+    let base_total = booked(tx, &bill).await?.total;
     sqlx::query(r#"UPDATE "bills" SET "baseTotal" = ?1 WHERE "id" = ?2"#)
         .bind(base_total.cents())
         .bind(&id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-    let bill = find_one(&mut tx, &id).await?;
-    tx.commit().await?;
-    Ok(bill)
+    find_one(tx, &id).await
 }
 
 impl Bill {
@@ -436,14 +441,21 @@ pub(crate) async fn set_status(tx: &mut Tx, id: &str, status: &str, journal_entr
 
 pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
     let mut tx = db.begin().await?;
-    let bill = find_one(&mut tx, id).await?;
+    let out = post_in(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// The same, inside a transaction the caller commits (D59: moving books in).
+pub async fn post_in(tx: &mut Tx, id: &str) -> AppResult<Bill> {
+    let bill = find_one(tx, id).await?;
     if bill.status != "DRAFT" {
         return Err(AppError::bad_request(format!("Bill is already {}", bill.status)));
     }
-    let ap = payable_account(&mut tx, bill.payable_account_id.as_deref()).await?;
+    let ap = payable_account(tx, bill.payable_account_id.as_deref()).await?;
     // In the home currency (D30). Each expense line without its tax; the tax goes to the code's
     // purchase account (D26), part by part (D27).
-    let figures = booked(&mut tx, &bill).await?;
+    let figures = booked(tx, &bill).await?;
     let mut lines: Vec<NewLine> = Vec::new();
     for (l, net) in bill.lines.iter().zip(&figures.nets) {
         lines.push(NewLine {
@@ -461,7 +473,7 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
     }));
     lines.push(NewLine { account_id: ap.id, debit: Money::ZERO, credit: figures.total, description: None });
     let entry = entries::post(
-        &mut tx,
+        tx,
         NewEntry {
             date: bill.date.clone(),
             description: format!("Bill {}", bill.bill_number),
@@ -475,18 +487,23 @@ pub async fn post(db: &Db, id: &str) -> AppResult<Bill> {
     // D38: stock bought comes in at the line's cost without tax, in the home currency.
     for (l, net) in bill.lines.iter().zip(&figures.nets) {
         if let Some(item_id) = &l.item_id {
-            crate::stock::receive(&mut tx, item_id, l.quantity, *net, &bill.date, &bill.id, &entry.id).await?;
+            crate::stock::receive(tx, item_id, l.quantity, *net, &bill.date, &bill.id, &entry.id).await?;
         }
     }
-    set_status(&mut tx, id, "POSTED", Some(&entry.id)).await?;
-    let out = find_one(&mut tx, id).await?;
-    tx.commit().await?;
-    Ok(out)
+    set_status(tx, id, "POSTED", Some(&entry.id)).await?;
+    find_one(tx, id).await
 }
 
 pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Bill> {
     let mut tx = db.begin().await?;
-    let bill = find_one(&mut tx, id).await?;
+    let out = void_in(&mut tx, id, today).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// The same, inside a transaction the caller commits (D59: reversing a conversion).
+pub async fn void_in(tx: &mut Tx, id: &str, today: &str) -> AppResult<Bill> {
+    let bill = find_one(tx, id).await?;
     if bill.status == "VOID" {
         return Err(AppError::bad_request("Bill is already voided"));
     }
@@ -502,11 +519,9 @@ pub async fn void(db: &Db, id: &str, today: &str) -> AppResult<Bill> {
         return Err(AppError::bad_request("Cannot void a part-paid bill — reverse the payments first"));
     }
     if let Some(je) = &bill.journal_entry_id {
-        let reversal = entries::reverse(&mut tx, je, today).await?;
-        crate::stock::undo_source(&mut tx, "BILL", "BILL_VOID", id, today, &reversal.id).await?;
+        let reversal = entries::reverse(tx, je, today).await?;
+        crate::stock::undo_source(tx, "BILL", "BILL_VOID", id, today, &reversal.id).await?;
     }
-    set_status(&mut tx, id, "VOID", None).await?;
-    let out = find_one(&mut tx, id).await?;
-    tx.commit().await?;
-    Ok(out)
+    set_status(tx, id, "VOID", None).await?;
+    find_one(tx, id).await
 }

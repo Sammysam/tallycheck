@@ -13,7 +13,9 @@
 pub mod bank_lines;
 pub mod banking;
 pub mod bills;
+pub mod conversion;
 pub mod credit_notes;
+pub mod estimates;
 pub mod expenses;
 pub mod fx;
 pub mod imports;

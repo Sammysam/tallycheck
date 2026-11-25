@@ -22,6 +22,7 @@ import UsPayroll from './pages/UsPayroll';
 import UsPayrollRun from './pages/UsPayrollRun';
 import UsPayrollForms from './pages/UsPayrollForms';
 import Invoices from './pages/Invoices';
+import Estimates from './pages/Estimates';
 import Bills from './pages/Bills';
 import Expenses from './pages/Expenses';
 import Payments from './pages/Payments';
@@ -31,6 +32,7 @@ import TransactionDetail from './pages/TransactionDetail';
 import CreditNotes from './pages/CreditNotes';
 import Ledger from './pages/Ledger';
 import ImportData from './pages/ImportData';
+import MoveBooks from './pages/MoveBooks';
 import Items from './pages/Items';
 import BankTransactions from './pages/BankTransactions';
 import BankReconciliation from './pages/BankReconciliation';
@@ -93,6 +95,7 @@ export default function App() {
                     <ProtectedRoute permission="payroll"><PayrollRun /></ProtectedRoute>
                   } />
                   <Route path="/invoices"                 element={<Invoices />} />
+                  <Route path="/estimates"                element={<ProtectedRoute permission="invoices"><Estimates /></ProtectedRoute>} />
                   <Route path="/bills"                    element={<Bills />} />
                   <Route path="/expenses"                 element={<Expenses />} />
                   <Route path="/payments"                 element={<Payments />} />
@@ -100,6 +103,7 @@ export default function App() {
                   <Route path="/debit-notes"              element={<CreditNotes kind="AP" key="AP" />} />
                   <Route path="/ledger"                   element={<Ledger />} />
                   <Route path="/import"                   element={<ImportData />} />
+                  <Route path="/move-books"               element={<MoveBooks />} />
                   <Route path="/items"                    element={<Items />} />
                   <Route path="/bank-transactions" element={
                     <ProtectedRoute permission="banking"><BankTransactions /></ProtectedRoute>
