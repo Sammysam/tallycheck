@@ -12,6 +12,9 @@ All notable changes to TallyCheck. The format follows
   Xero, Zoho, Sage, TallyPrime or a spreadsheet on a cut-over date. The trial balance becomes the
   opening balances, unpaid invoices and bills come in one by one so they can be paid, and
   everything is checked to add up before anything is saved. A conversion can be reversed (D59).
+- Quick start for moving books in: no files needed. Type the bank balances, who owes you, whom
+  you owe, other assets and loans, and TallyCheck sets up the opening balances. A list of what
+  each customer or supplier owes (such as an ageing summary) works instead of an invoice list.
 
 ### Fixed
 - Import from File reads CSV reports that start with title lines (the delimiter was guessed

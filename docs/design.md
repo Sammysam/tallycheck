@@ -759,6 +759,14 @@ recommendations without answering each one individually; revisit any of them on 
   `POST /api/conversions/{id}/reverse` voids the documents and reverses the opening entry dated
   today (refused while a document has payments or notes; accounts, customers and vendors stay).
   The opening entry can't be reversed from the Ledger (D18). Administrators only, closed to
+  **Two ways to start** (added 2026-11-20): *Quick start* needs no files: the person types bank and
+  cash balances, what each customer owes, what is owed to each supplier, other assets and loans
+  (`components/QuickStartForm.tsx`); each becomes an account (matched by name or created) and a
+  trial-balance line, customer / supplier amounts become one opening invoice / bill each, and the
+  difference (what the business is worth) goes to 3900 Opening Balance Equity for the accountant
+  to move to capital or retained earnings. *From files* also takes a balance list instead of an
+  invoice list (one amount per customer / vendor, e.g. QuickBooks' A/R or A/P Ageing Summary, the
+  name under a blank first heading): an open document without a date is dated the cut-over day.
   Claude keys, previews not written to the activity log ("Moved books in from another system",
   "Reversed a book conversion"). Not yet: full history from the general ledger, reading
   QuickBooks Desktop IIF and TallyPrime XML directly, foreign-currency open documents, tax on

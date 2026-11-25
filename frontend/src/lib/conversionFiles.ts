@@ -32,9 +32,9 @@ const party = (who: 'customer' | 'vendor'): ImportField[] => [
 const openDoc = (who: 'customer' | 'vendor'): ImportField[] => [
   { key: 'number', label: who === 'customer' ? 'Invoice number' : 'Bill number', words: ['num', 'no', 'number', 'invoice no', 'invoice number', 'bill no', 'ref no', 'reference', 'invoice', 'bill'] },
   { key: who, label: who === 'customer' ? 'Customer' : 'Vendor', words: who === 'customer' ? ['customer', 'client', 'name', 'customer name'] : ['vendor', 'supplier', 'payee', 'name', 'vendor name'], hint: 'Leave it if the report lists each name on its own row above its documents.' },
-  { key: 'date', label: 'Date', required: true, words: ['date', 'txn date', 'invoice date', 'bill date', 'transaction date'] },
+  { key: 'date', label: 'Date', words: ['date', 'txn date', 'invoice date', 'bill date', 'transaction date'], hint: 'Leave it for a balance list: each amount is dated the cut-over day.' },
   { key: 'dueDate', label: 'Due date', words: ['due date', 'due'] },
-  { key: 'amount', label: 'Amount still unpaid', required: true, words: ['open balance', 'balance due', 'balance', 'amount due', 'outstanding', 'unpaid', 'open amount', 'amount'] },
+  { key: 'amount', label: 'Amount still unpaid', required: true, words: ['open balance', 'balance due', 'balance', 'amount due', 'outstanding', 'unpaid', 'open amount', 'amount', 'total'] },
 ];
 
 export const SECTIONS: Section[] = [
@@ -82,8 +82,8 @@ export const SECTIONS: Section[] = [
   {
     key: 'invoices',
     label: 'Unpaid invoices',
-    description: 'Customer invoices not fully paid on the cut-over date, with what is still owed on each.',
-    where: 'Reports → Open Invoices (or A/R Ageing Detail) → Export to Excel',
+    description: 'Customer invoices not fully paid on the cut-over date, with what is still owed on each. A list of what each customer owes (no invoice numbers or dates) works too.',
+    where: 'Reports → Open Invoices, or A/R Ageing Summary for one total per customer → Export to Excel',
     optional: true,
     fields: openDoc('customer'),
     groupField: 'customer',
@@ -96,8 +96,8 @@ export const SECTIONS: Section[] = [
   {
     key: 'bills',
     label: 'Unpaid bills',
-    description: 'Supplier bills not fully paid on the cut-over date, with what is still owed on each.',
-    where: 'Reports → Unpaid Bills (or A/P Ageing Detail) → Export to Excel',
+    description: 'Supplier bills not fully paid on the cut-over date, with what is still owed on each. A list of what you owe each supplier works too.',
+    where: 'Reports → Unpaid Bills, or A/P Ageing Summary for one total per supplier → Export to Excel',
     optional: true,
     fields: openDoc('vendor'),
     groupField: 'vendor',
@@ -163,6 +163,18 @@ export function guessColumns(section: Section, rows: string[][]): { headerRow: n
   const missing = section.fields.filter((f) => f.required && mapping[f.key] === undefined);
   if (missing.length === 1 && headings[0]?.trim() === '' && !Object.values(mapping).includes(0)) {
     mapping[missing[0].key] = 0;
+  }
+  // The name under a blank first heading: an ageing summary has it on every row ("Ceylon Tea,
+  // 500.00,…,500.00"); a detail report has it on a row of its own above the documents.
+  const g = section.groupField;
+  if (g && mapping[g] === undefined && headings[0]?.trim() === '' && !Object.values(mapping).includes(0)) {
+    let onRow = 0;
+    let above = 0;
+    for (const r of rows.slice(headerRow + 1)) {
+      if (nonEmpty(r) < 2 || isTotal(r[0] ?? '')) continue;
+      if ((r[0] ?? '').trim()) onRow++; else above++;
+    }
+    if (onRow > above) mapping[g] = 0;
   }
   return { headerRow, mapping };
 }

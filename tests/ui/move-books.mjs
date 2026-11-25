@@ -56,13 +56,12 @@ const FILES = {
     'Total for Lanka Traders,,,,,,"$1,000.00"',
     'TOTAL,,,,,,"$1,500.00"',
   ]),
-  bills: file('Unpaid Bills.csv', [
-    'Sample Company', 'Unpaid Bills', 'All Dates', '',
-    ',Date,Transaction Type,Num,Due Date,Past Due,Amount,Open Balance',
-    'Colombo Packaging',
-    ',10/01/2026,Bill,B-77,10/31/2026,20,800.00,800.00',
-    'Total for Colombo Packaging,,,,,,,$800.00',
-    'TOTAL,,,,,,,$800.00',
+  // An ageing summary: one total per supplier, the name under a blank first heading, no dates.
+  bills: file('AP Ageing Summary.csv', [
+    'Sample Company', 'A/P Aging Summary', 'As of October 31, 2026', '',
+    ',Current,1 - 30,31 - 60,61 - 90,91 and over,Total',
+    'Colombo Packaging,,800.00,,,,800.00',
+    'TOTAL,$0.00,$800.00,$0.00,$0.00,$0.00,$800.00',
   ]),
   customers: file('Customers.csv', [
     'Customer,Phone Numbers,Email,Full Name,Billing Address,Open Balance',
@@ -206,7 +205,7 @@ try {
     await go('/import');
     await waitFor(`[...document.querySelectorAll('a')].some((a) => a.textContent.includes('Moving from QuickBooks'))`, 'link on import page');
     await evaluate(`[...document.querySelectorAll('a')].find((a) => a.textContent.includes('Moving from QuickBooks')).click()`);
-    await waitFor(`location.pathname === '/move-books' && document.body.innerText.includes('How it works')`, 'move books page');
+    await waitFor(`location.pathname === '/move-books' && document.body.innerText.includes('How do you want to start?')`, 'move books page');
     await shot('01-start');
   });
 
@@ -215,6 +214,7 @@ try {
     await evaluate(`(() => { const d = document.querySelector('input[type=date]');
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
       set.call(d, '2026-10-31'); d.dispatchEvent(new Event('input', { bubbles: true })); d.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await evaluate(`[...document.querySelectorAll('[role=radio]')].find((b) => b.textContent.startsWith('From your old system')).click()`);
     await clickText('Next: choose the files');
     await waitFor(`!!document.querySelector('section[aria-label="Trial balance"]')`, 'file cards');
     await pick('Trial balance', FILES.balances);
@@ -223,13 +223,13 @@ try {
     await pick('Unpaid bills', FILES.bills);
     await pick('Customers', FILES.customers);
     const text = await pageText();
-    for (const want of ['Trial Balance.csv · 6 rows', 'Open Invoices.csv · 2 rows', 'Unpaid Bills.csv · 1 row', 'Customers.csv · 3 rows']) {
+    for (const want of ['Trial Balance.csv · 6 rows', 'Open Invoices.csv · 2 rows', 'AP Ageing Summary.csv · 1 row', 'Customers.csv · 3 rows']) {
       if (!text.includes(want)) throw new Error('missing: ' + want);
     }
     if (text.includes('Still to match')) throw new Error('columns not matched');
     // US dates in the QuickBooks files switch the date order.
     await evaluate(`[...document.querySelectorAll('.card ~ div button, div > button')].filter((b) => b.textContent.trim() === 'Back').at(-1).click()`);
-    await waitFor(`document.body.innerText.includes('How it works')`, 'back at the start');
+    await waitFor(`document.body.innerText.includes('How do you want to start?')`, 'back at the start');
     const order = await evaluate(`[...document.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'MDY')).value`);
     if (order !== 'MDY') throw new Error('date order ' + order);
     await clickText('Next: choose the files');
@@ -269,6 +269,8 @@ try {
     if (invoices.length !== 2 || i1001?.status !== 'POSTED' || i1001.date !== '2026-09-15' || i1001.dueDate !== '2026-10-15') {
       throw new Error(JSON.stringify(invoices.map((i) => [i.poNumber, i.status, i.date, i.dueDate])));
     }
+    const bill = (await api('GET', '/bills')).body.data[0];
+    if (bill?.date !== '2026-10-31' || bill?.vendor?.name !== 'Colombo Packaging') throw new Error('bill from the ageing summary: ' + JSON.stringify(bill));
     const customers = (await api('GET', '/customers')).body;
     const lanka = customers.find((c) => c.name === 'Lanka Traders');
     if (customers.length !== 3 || lanka?.email !== 'accounts@lanka.example') throw new Error(JSON.stringify(customers.map((c) => [c.name, c.email])));
@@ -294,6 +296,53 @@ try {
     const invoices = (await api('GET', '/invoices')).body.data;
     if (!invoices.every((i) => i.status === 'VOID')) throw new Error('invoices not voided');
     await shot('07-reversed');
+  });
+
+  await check('quick start: typed figures, no files', async () => {
+    await evaluate(`[...document.querySelectorAll('[role=radio]')].find((b) => b.textContent.startsWith('Quick start')).click()`);
+    await evaluate(`(() => { const d = document.querySelector('input[type=date]');
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      set.call(d, '2026-10-31'); d.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await clickText('Next: enter your figures');
+    await waitFor(`document.body.innerText.includes('Your figures on the cut-over day')`, 'quick form');
+    const fill = async (aria, text) => type(`input[aria-label=${JSON.stringify(aria)}]`, text);
+    const addLine = (legend) => evaluate(`[...document.querySelectorAll('fieldset')].find((f) => f.getAttribute('aria-label') === ${JSON.stringify(legend)}).querySelector('button.text-blue-700').click()`);
+    await fill('Money in the bank and cash Account 1', 'BOC current account');
+    await fill('Money in the bank and cash amount 1', '250,000');
+    await fill('Customers who owe you Customer 1', 'Perera Stores');
+    await fill('Customers who owe you amount 1', '30000');
+    await fill('Suppliers you owe Supplier 1', 'Kandy Wholesale');
+    await fill('Suppliers you owe amount 1', '15000.00');
+    await addLine('Other things the business owns (if any)');
+    await fill('Other things the business owns (if any) What 1', 'Delivery van');
+    await fill('Other things the business owns (if any) amount 1', '1200000');
+    await addLine('Loans and other debts (if any)');
+    await fill('Loans and other debts (if any) What 1', 'Bank loan');
+    await fill('Loans and other debts (if any) amount 1', '800000');
+    await waitFor(`document.body.innerText.includes('So it is worth') && document.body.innerText.includes('665,000.00')`, 'net worth 665,000');
+    await shot('08-quick-start');
+    await clickText('Next: check everything');
+    await waitFor(`document.body.innerText.includes('Everything adds up')`, 'all agree');
+    // Back keeps what was typed.
+    await evaluate(`[...document.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Back').at(-1).click()`);
+    await waitFor(`document.querySelector('input[aria-label="Money in the bank and cash Account 1"]')?.value === 'BOC current account'`, 'figures kept');
+    await clickText('Next: check everything');
+    await waitFor(`document.body.innerText.includes('Everything adds up')`, 'all agree again');
+    await clickText('Move the books in');
+    await waitFor(`!!document.querySelector('[role=dialog]')`, 'confirm dialog');
+    await evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((b) => b.textContent.trim() === 'Move the books in').click()`);
+    await waitFor(`document.body.innerText.includes('Moved books in from Quick start')`, 'done');
+    const want = { '1100': 30000, '2000': 15000, '3900': 665000 };
+    for (const [code, v] of Object.entries(want)) {
+      const got = await balanceOf(code);
+      if (got !== v) throw new Error(`balance ${code} = ${got}, expected ${v}`);
+    }
+    const accounts = (await api('GET', '/accounts')).body;
+    for (const name of ['BOC current account', 'Delivery van', 'Bank loan']) {
+      const a = accounts.find((x) => x.name === name);
+      if (!a) throw new Error('no account ' + name);
+    }
+    await shot('09-quick-done');
   });
 } catch (e) {
   failures.push('harness');

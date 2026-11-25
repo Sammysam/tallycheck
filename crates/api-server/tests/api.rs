@@ -5564,3 +5564,64 @@ async fn books_move_in_from_another_system_and_can_be_reversed() -> TestResult {
     );
     Ok(())
 }
+
+/// D59 quick start: typed-in figures (bank balances, who owes us, whom we owe, other assets, a
+/// loan) with balances per customer / vendor and no dates; the difference is the owner's net
+/// worth, which stays in 3900 Opening Balance Equity.
+#[tokio::test]
+async fn quick_start_builds_opening_balances_from_typed_figures() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let accounts = app.account_ids(&admin).await?;
+    let body = json!({
+        "source": "Quick start", "cutoverDate": "2026-10-31", "dateOrder": "DMY",
+        "accounts": [
+            {"key": "Bank: BOC current account", "code": "1010", "name": "BOC current account", "type": "ASSET"},
+            {"key": "Owed by customers", "accountId": code_of(&accounts, "1100")},
+            {"key": "Owed to suppliers", "accountId": code_of(&accounts, "2000")},
+            {"key": "Asset: Delivery van", "code": "1510", "name": "Delivery van", "type": "ASSET"},
+            {"key": "Loan: Bank loan", "code": "2510", "name": "Bank loan", "type": "LIABILITY"},
+            {"key": "Opening balance equity", "code": "3900", "name": "Opening Balance Equity", "type": "EQUITY"}],
+        "balances": [
+            {"account": "Bank: BOC current account", "debit": "250000"},
+            {"account": "Owed by customers", "debit": "45000"},
+            {"account": "Asset: Delivery van", "debit": "1200000"},
+            {"account": "Owed to suppliers", "credit": "15000"},
+            {"account": "Loan: Bank loan", "credit": "800000"},
+            {"account": "Opening balance equity", "credit": "680000"}],
+        "invoices": [
+            {"customer": "Perera Stores", "amount": "30000"},
+            {"customer": "Silva & Sons", "amount": "15000", "dueDate": "15/11/2026"}],
+        "bills": [{"vendor": "Kandy Wholesale", "amount": "15000"}]
+    });
+    let pv = app.call(Method::POST, "/api/conversions/preview", Some(&admin), Some(body.clone())).await?;
+    assert_eq!(pv.body["canSave"], json!(true), "{}", pv.body);
+    assert_eq!(pv.body["totals"]["accountsCreated"], json!(3), "bank, van, loan (3900 is matched once added)");
+    let saved = app.call(Method::POST, "/api/conversions", Some(&admin), Some(body)).await?;
+    assert_eq!(saved.status, StatusCode::CREATED, "{}", saved.body);
+
+    let all = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let accounts: Vec<(String, String)> = all
+        .body
+        .as_array()
+        .ok_or("accounts")?
+        .iter()
+        .map(|a| (a["code"].as_str().unwrap_or_default().to_string(), a["id"].as_str().unwrap_or_default().to_string()))
+        .collect();
+    for (code, want) in
+        [("1010", 250000), ("1100", 45000), ("1510", 1200000), ("2000", 15000), ("2510", 800000), ("3900", 680000)]
+    {
+        let id = code_of(&accounts, code);
+        let b = app.call(Method::GET, &format!("/api/ledger/balance/{id}"), Some(&admin), None).await?;
+        assert_eq!(b.body["balance"], json!(want), "{code}");
+    }
+    // Balances without a number or date are one invoice each, dated the cut-over day.
+    let invoices = app.call(Method::GET, "/api/invoices", Some(&admin), None).await?;
+    let list = invoices.body["data"].as_array().ok_or("invoices")?;
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().all(|i| i["date"] == "2026-10-31" && i["status"] == "POSTED"), "{list:?}");
+    assert!(list.iter().any(|i| i["dueDate"] == "2026-11-15"));
+    let bills = app.call(Method::GET, "/api/bills", Some(&admin), None).await?;
+    assert_eq!(bills.body["data"][0]["date"], "2026-10-31", "{}", bills.body);
+    Ok(())
+}

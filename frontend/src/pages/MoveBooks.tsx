@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Undo2, Upload }
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import ConfirmDialog from '../components/ConfirmDialog';
+import QuickStartForm, { type QuickStartBody } from '../components/QuickStartForm';
 import { toast } from '../lib/toast';
 import { useAuth } from '../contexts/AuthContext';
 import { fmtDate, region, todayIso } from '../lib/region';
@@ -60,7 +61,10 @@ const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
 export default function MoveBooks() {
   const { user } = useAuth();
-  const [step, setStep] = useState<'start' | 'files' | 'accounts' | 'check' | 'done'>('start');
+  const [step, setStep] = useState<'start' | 'quick' | 'files' | 'accounts' | 'check' | 'done'>('start');
+  // D59: quick start (typed figures) or the old system's files.
+  const [mode, setMode] = useState<'quick' | 'files'>('quick');
+  const [quickBody, setQuickBody] = useState<QuickStartBody | null>(null);
   const [source, setSource] = useState(SOURCES[0]);
   const [cutover, setCutover] = useState(lastMonthEnd());
   const [dateOrder, setDateOrder] = useState<DateOrder>(/^en-US$/i.test(region().locale) ? 'MDY' : 'DMY');
@@ -77,8 +81,10 @@ export default function MoveBooks() {
   const [reversing, setReversing] = useState<Conversion | null>(null);
 
   const loadHistory = () => api.get('/conversions').then((r) => setHistory(r.data)).catch(() => {});
+  // Reloaded whenever a conversion starts, saves or is reversed: new codes must not clash.
+  const loadAccounts = () => api.get('/accounts').then((r) => setExisting(r.data)).catch(() => {});
   useEffect(() => {
-    api.get('/accounts').then((r) => setExisting(r.data)).catch(() => {});
+    loadAccounts();
     loadHistory();
   }, []);
   const active = history.find((c) => c.status === 'ACTIVE');
@@ -172,7 +178,9 @@ export default function MoveBooks() {
   const unchosen = choices.filter((c) => !c.accountId && (!c.code.trim() || !c.name.trim() || !c.type));
 
   // ── Preview and save ────────────────────────────────────────────────────
-  const payload = (acceptDifferences: boolean) => ({
+  const payload = (acceptDifferences: boolean, quick: QuickStartBody | null = quickBody) => (mode === 'quick' && quick ? {
+    source: 'Quick start', cutoverDate: cutover, dateOrder: 'YMD', acceptDifferences, ...quick,
+  } : {
     source, cutoverDate: cutover, dateOrder, acceptDifferences,
     accounts: choices.map((c) => (c.accountId ? { key: c.key, accountId: c.accountId } : { key: c.key, code: c.code.trim(), name: c.name.trim(), type: c.type })),
     balances: rowsFor('balances').map((b) => ({ account: b.account ?? '', debit: b.debit ?? '', credit: b.credit ?? '' })),
@@ -181,11 +189,11 @@ export default function MoveBooks() {
     customers: rowsFor('customers'),
     vendors: rowsFor('vendors'),
   });
-  const preview = async (acceptDifferences = accept) => {
+  const preview = async (acceptDifferences = accept, quick: QuickStartBody | null = quickBody) => {
     setBusy(true);
     setError('');
     try {
-      const r = await api.post('/conversions/preview', payload(acceptDifferences));
+      const r = await api.post('/conversions/preview', payload(acceptDifferences, quick));
       setOutcome(r.data);
       setStep('check');
     } catch (err) {
@@ -204,6 +212,7 @@ export default function MoveBooks() {
       setStep('done');
       toast('The books are moved in');
       loadHistory();
+      loadAccounts();
     } catch (err) {
       setConfirming(false);
       setError(errMsg(err, 'Nothing was saved'));
@@ -219,6 +228,7 @@ export default function MoveBooks() {
       toast('The conversion is reversed');
       setReversing(null);
       loadHistory();
+      loadAccounts();
     } catch (err) {
       toast(errMsg(err, 'Could not reverse it'), 'error');
       setReversing(null);
@@ -227,7 +237,7 @@ export default function MoveBooks() {
     }
   };
   const restart = () => {
-    setStep('start'); setFiles({}); setChoices([]); setOutcome(null); setAccept(false); setError('');
+    setStep('start'); setFiles({}); setChoices([]); setQuickBody(null); setOutcome(null); setAccept(false); setError('');
   };
 
 
@@ -236,13 +246,13 @@ export default function MoveBooks() {
 
   const stepper = (
     <ol className="flex items-center gap-2 text-xs mb-4" aria-label="Steps">
-      {(['Start', 'Files', 'Accounts', 'Check', 'Done'] as const).map((label, i) => {
-        const at = ['start', 'files', 'accounts', 'check', 'done'].indexOf(step);
+      {(mode === 'quick' ? ['Start', 'Your figures', 'Check', 'Done'] : ['Start', 'Files', 'Accounts', 'Check', 'Done']).map((label, i, all) => {
+        const at = (mode === 'quick' ? ['start', 'quick', 'check', 'done'] : ['start', 'files', 'accounts', 'check', 'done']).indexOf(step);
         return (
           <li key={label} className="flex items-center gap-2">
             <span className={`w-5 h-5 rounded-full grid place-items-center text-[11px] font-semibold ${i <= at ? 'bg-orange-600 text-white' : 'bg-gray-200 text-gray-600'}`}>{i + 1}</span>
             <span className={i === at ? 'font-semibold text-gray-900' : 'text-gray-500'}>{label}</span>
-            {i < 4 && <span className="w-6 h-px bg-gray-300" />}
+            {i < all.length - 1 && <span className="w-6 h-px bg-gray-300" />}
           </li>
         );
       })}
@@ -277,30 +287,53 @@ export default function MoveBooks() {
             </div>
           )}
           <section className="card mb-3">
-            <h3 className="text-sm font-semibold text-gray-800 mb-2">How it works</h3>
-            <ol className="text-sm text-gray-700 list-decimal pl-5 space-y-1 mb-4">
-              <li>Pick a <b>cut-over date</b>, usually the last day of a month. The old system keeps the history up to that day; TallyCheck carries on from the next day.</li>
-              <li>Export from the old system: the <b>trial balance</b> on that date, and if you can, the <b>chart of accounts</b>, <b>unpaid invoices</b>, <b>unpaid bills</b>, <b>customers</b> and <b>vendors</b>.</li>
-              <li>Match the old accounts to TallyCheck accounts (or create them), then check: the trial balance must balance and the unpaid invoices and bills must add up to its receivables and payables.</li>
-              <li>Everything comes in at once. Unpaid invoices and bills can then be paid here as usual.</li>
-            </ol>
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">How do you want to start?</h3>
+            <div className="grid gap-2 sm:grid-cols-2 mb-4" role="radiogroup" aria-label="How to start">
+              {([
+                ['quick', 'Quick start (about 5 minutes)', 'No files needed. Type your bank balances, who owes you, whom you owe, and anything else the business owns or owes. Best if your old system is custom-made or you just want to try TallyCheck.'],
+                ['files', 'From your old system’s files', 'Upload the trial balance and, if you have them, the account list, unpaid invoices and bills, customers and vendors exported from QuickBooks, Xero, Tally or Excel.'],
+              ] as const).map(([value, title, text]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === value}
+                  className={`text-left rounded border px-3 py-2 ${mode === value ? 'border-orange-500 bg-orange-50 ring-1 ring-orange-500' : 'border-gray-200 hover:border-gray-300'}`}
+                  onClick={() => setMode(value)}
+                >
+                  <div className="text-sm font-semibold text-gray-900">{title}</div>
+                  <div className="text-xs text-gray-600 mt-0.5">{text}</div>
+                </button>
+              ))}
+            </div>
+            <p className="text-sm text-gray-700 mb-3">
+              Pick a <b>cut-over date</b>, usually the last day of a month: the balances are as at the end of that day, and
+              TallyCheck carries on from the next day. Unpaid invoices and bills come in one by one, so they can be paid here
+              as usual, and everything is checked to add up before anything is saved.
+            </p>
             <div className="grid gap-3 sm:grid-cols-3">
-              <label className="text-xs font-medium text-gray-600">Coming from
-                <select className="mt-1 w-full" value={source} onChange={(e) => setSource(e.target.value)}>
-                  {SOURCES.map((s) => <option key={s}>{s}</option>)}
-                </select>
-              </label>
+              {mode === 'files' && (
+                <label className="text-xs font-medium text-gray-600">Coming from
+                  <select className="mt-1 w-full" value={source} onChange={(e) => setSource(e.target.value)}>
+                    {SOURCES.map((s) => <option key={s}>{s}</option>)}
+                  </select>
+                </label>
+              )}
               <label className="text-xs font-medium text-gray-600">Cut-over date
                 <input className="mt-1 w-full" type="date" value={cutover} max={todayIso()} onChange={(e) => setCutover(e.target.value)} />
               </label>
-              <label className="text-xs font-medium text-gray-600">Dates in the files
-                <select className="mt-1 w-full" value={dateOrder} onChange={(e) => setDateOrder(e.target.value as DateOrder)}>
-                  {DATE_ORDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </label>
+              {mode === 'files' && (
+                <label className="text-xs font-medium text-gray-600">Dates in the files
+                  <select className="mt-1 w-full" value={dateOrder} onChange={(e) => setDateOrder(e.target.value as DateOrder)}>
+                    {DATE_ORDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
             <div className="mt-4 flex gap-2">
-              <button className="btn btn-primary" disabled={!!active || !cutover} onClick={() => setStep('files')}>Next: choose the files</button>
+              <button className="btn btn-primary" disabled={!!active || !cutover} onClick={() => { loadAccounts(); setStep(mode); }}>
+                {mode === 'quick' ? 'Next: enter your figures' : 'Next: choose the files'}
+              </button>
             </div>
           </section>
 
@@ -331,6 +364,18 @@ export default function MoveBooks() {
             )}
           </section>
         </>
+      )}
+
+      {/* Kept mounted on the check step, so Back returns to the figures as typed. */}
+      {mode === 'quick' && (step === 'quick' || step === 'check') && (
+        <div hidden={step !== 'quick'}>
+        <QuickStartForm
+          existing={existing}
+          busy={busy}
+          onBack={() => setStep('start')}
+          onCheck={(body) => { setQuickBody(body); preview(accept, body); }}
+        />
+        </div>
       )}
 
       {step === 'files' && (
@@ -482,7 +527,7 @@ export default function MoveBooks() {
 
           {otherIssues.length > 0 && (
             <div className="mb-3">
-              <p className="text-sm font-semibold text-red-700 mb-1">{otherIssues.length} problem{otherIssues.length === 1 ? '' : 's'} to fix in the files</p>
+              <p className="text-sm font-semibold text-red-700 mb-1">{otherIssues.length} problem{otherIssues.length === 1 ? '' : 's'} to fix{mode === 'files' ? ' in the files' : ''}</p>
               <ul className="text-sm text-red-700 space-y-0.5 max-h-72 overflow-auto">
                 {otherIssues.map((i, n) => (
                   <li key={n}>{SECTION_NAMES[i.section] ?? i.section}{i.row ? `, row ${i.row}` : ''}{i.label ? ` (${i.label})` : ''}: {i.message}</li>
@@ -503,7 +548,7 @@ export default function MoveBooks() {
             <p className="mb-3 text-sm text-green-700 flex items-center gap-1.5"><CheckCircle2 size={16} /> Everything adds up. Nothing has been saved yet.</p>
           )}
           <div className="flex gap-2">
-            <button className="btn btn-secondary" onClick={() => setStep('accounts')}>Back</button>
+            <button className="btn btn-secondary" onClick={() => setStep(mode === 'quick' ? 'quick' : 'accounts')}>Back</button>
             <button className="btn btn-primary" disabled={!outcome.canSave || busy} onClick={() => setConfirming(true)}>Move the books in</button>
           </div>
         </section>

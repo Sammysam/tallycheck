@@ -6,7 +6,8 @@
 //! * Customers / vendors: new names are created; names already in the list are used as they are.
 //! * Unpaid invoices and bills each become a POSTED document against 3900 Opening Balance Equity
 //!   (Dr 1100 / Cr 3900 and Dr 3900 / Cr 2000), dated as in the old system, so they can be paid,
-//!   chased and aged here.
+//!   chased and aged here. A balance list (one amount per customer / vendor, no number or date)
+//!   works too: each amount is one document dated the cut-over day.
 //! * The trial balance on the cut-over date becomes one opening entry (source CONVERSION). Its
 //!   receivables (1100) and payables (2000) lines go to 3900 instead, so 3900 nets to zero when
 //!   the open documents add up to the trial balance; a difference must be accepted explicitly.
@@ -464,9 +465,16 @@ pub async fn run(db: &Db, req: Request, created_by: Option<&str>, commit: bool) 
             if number.is_empty() && d.party.trim().is_empty() && d.amount.trim().is_empty() {
                 continue;
             }
-            let Some(date) = parse_date(&d.date, req.date_order) else {
-                issues.push(section, n, label, format!("\"{}\" is not a date", d.date.trim()));
-                continue;
+            // A balance list (one amount per customer / vendor, no dates) is dated the cut-over day.
+            let date = match d.date.trim() {
+                "" => cutover.clone(),
+                t => match parse_date(t, req.date_order) {
+                    Some(date) => date,
+                    None => {
+                        issues.push(section, n, label, format!("\"{t}\" is not a date"));
+                        continue;
+                    }
+                },
             };
             if date > cutover {
                 issues.push(
