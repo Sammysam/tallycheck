@@ -62,6 +62,8 @@ const APPROVED_EXTRA_COLUMNS: &[(&str, &str, bool)] = &[
 /// Tables this project adds on purpose (approved deviations); the reference has no such table.
 const APPROVED_EXTRA_TABLES: &[&str] = &[
     "credit_notes",
+    "estimates",
+    "estimate_lines",
     "bank_reconciliations",
     "reconciled_lines",
     "tax_codes",

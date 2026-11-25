@@ -5625,3 +5625,134 @@ async fn quick_start_builds_opening_balances_from_typed_figures() -> TestResult 
     assert_eq!(bills.body["data"][0]["date"], "2026-10-31", "{}", bills.body);
     Ok(())
 }
+
+/// D60: an estimate is priced like an invoice (discount, tax), posts nothing, moves through its
+/// statuses by hand and becomes a DRAFT invoice once; visibility and permissions follow invoices.
+#[tokio::test]
+async fn estimates_are_priced_like_invoices_and_become_draft_invoices() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let payable = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "2300", "name": "VAT", "type": "LIABILITY"})),
+        )
+        .await?;
+    let receivable = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "1400", "name": "VAT in", "type": "ASSET"})),
+        )
+        .await?;
+    let vat = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "VAT 18%", "rate": 18,
+                "salesAccountId": payable.body["id"], "purchaseAccountId": receivable.body["id"]})),
+        )
+        .await?;
+    let vat_id = vat.body["id"].as_str().ok_or("vat")?.to_string();
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Perera Stores"}))).await?;
+    let cust_id = cust.body["id"].as_str().ok_or("cust")?.to_string();
+
+    let body = json!({
+    "customerId": cust_id, "date": "2026-11-20", "expiryDate": "2026-12-20", "paymentTerms": "NET_30",
+    "notes": "Valid for 30 days",
+    "lines": [
+        {"description": "Ceylon tea 1kg", "quantity": 10, "unitPrice": 1500, "discountAmount": 1000, "taxCodeId": vat_id},
+        {"description": "Delivery", "unitPrice": 500}
+    ]});
+    let created = app.call(Method::POST, "/api/estimates", Some(&admin), Some(body.clone())).await?;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    assert_eq!(created.body["estimateNumber"], "EST-0001");
+    assert_eq!(created.body["status"], "DRAFT");
+    // 10 × 1500 − 1000 = 14,000 + 18% = 2,520 tax; plus 500 delivery.
+    assert_eq!(created.body["taxAmount"], "2520.00");
+    assert_eq!(created.body["totalAmount"], "17020.00");
+    assert_eq!(created.body["customer"]["name"], "Perera Stores");
+    let id = created.body["id"].as_str().ok_or("id")?.to_string();
+
+    // Nothing reaches the ledger.
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert!(tb.body.as_array().ok_or("tb")?.iter().all(|r| r["balance"] == json!(0)), "{}", tb.body);
+
+    let mut bad = body.clone();
+    bad["expiryDate"] = json!("2026-11-01");
+    let r = app.call(Method::POST, "/api/estimates", Some(&admin), Some(bad)).await?;
+    assert_nest_error(&r, 400, json!("The estimate cannot expire before its date"), "/api/estimates");
+    let r = app.call(Method::GET, "/api/estimates", Some(&viewer), None).await?;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "estimates need the invoices permission");
+
+    // Edit while a draft, then send and accept.
+    let mut edited = body.clone();
+    edited["lines"][1]["unitPrice"] = json!(750);
+    let r = app.call(Method::PUT, &format!("/api/estimates/{id}"), Some(&admin), Some(edited.clone())).await?;
+    assert_eq!(r.body["totalAmount"], "17270.00", "{}", r.body);
+    for status in ["SENT", "ACCEPTED"] {
+        let r = app
+            .call(Method::PATCH, &format!("/api/estimates/{id}/status"), Some(&admin), Some(json!({"status": status})))
+            .await?;
+        assert_eq!(r.body["status"], status, "{}", r.body);
+    }
+    let r = app.call(Method::PUT, &format!("/api/estimates/{id}"), Some(&admin), Some(edited)).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "an accepted estimate is not edited: {}", r.body);
+    let r = app
+        .call(Method::PATCH, &format!("/api/estimates/{id}/status"), Some(&admin), Some(json!({"status": "CONVERTED"})))
+        .await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "CONVERTED is not set by hand");
+
+    // Convert: a DRAFT invoice dated today with the same lines, tax and total.
+    let conv = app.call(Method::POST, &format!("/api/estimates/{id}/convert"), Some(&admin), None).await?;
+    assert_eq!(conv.status, StatusCode::CREATED, "{}", conv.body);
+    let inv = &conv.body["invoice"];
+    assert_eq!(inv["status"], "DRAFT");
+    assert_eq!(inv["date"], json!(app_core::time::today_local().to_string()));
+    assert_eq!(inv["totalAmount"], "17270.00");
+    assert_eq!(inv["taxAmount"], "2520.00");
+    assert_eq!(inv["customerId"], json!(cust_id));
+    assert_eq!(inv["notes"], "Valid for 30 days");
+    assert_eq!(inv["lines"][0]["discountAmount"], "1000.00");
+    assert_eq!(conv.body["estimate"]["status"], "CONVERTED");
+    assert_eq!(conv.body["estimate"]["invoiceNumber"], inv["invoiceNumber"]);
+    let again = app.call(Method::POST, &format!("/api/estimates/{id}/convert"), Some(&admin), None).await?;
+    assert_eq!(again.status, StatusCode::BAD_REQUEST, "an estimate becomes an invoice once");
+    let del = app.call(Method::DELETE, &format!("/api/estimates/{id}"), Some(&admin), None).await?;
+    assert_eq!(del.status, StatusCode::BAD_REQUEST, "a converted estimate is kept");
+
+    // A declined estimate cannot be converted; a draft one can be deleted.
+    let second = app.call(Method::POST, "/api/estimates", Some(&admin), Some(body)).await?;
+    let second_id = second.body["id"].as_str().ok_or("second")?.to_string();
+    app.call(
+        Method::PATCH,
+        &format!("/api/estimates/{second_id}/status"),
+        Some(&admin),
+        Some(json!({"status": "DECLINED"})),
+    )
+    .await?;
+    let r = app.call(Method::POST, &format!("/api/estimates/{second_id}/convert"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let list = app.call(Method::GET, "/api/estimates?status=DECLINED", Some(&admin), None).await?;
+    assert_eq!(list.body["total"], json!(1));
+    let del = app.call(Method::DELETE, &format!("/api/estimates/{second_id}"), Some(&admin), None).await?;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+
+    let log = app.call(Method::GET, "/api/audit-logs", Some(&admin), None).await?;
+    let text = log.body.to_string();
+    for action in [
+        "Created an estimate",
+        "Turned an estimate into an invoice",
+        "Changed an estimate's status",
+        "Deleted an estimate",
+    ] {
+        assert!(text.contains(action), "missing {action}");
+    }
+    Ok(())
+}

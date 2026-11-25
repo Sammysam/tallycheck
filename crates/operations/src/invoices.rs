@@ -301,7 +301,7 @@ pub async fn find_one(conn: &mut SqliteConnection, id: &str, scope: &Scope) -> A
 }
 
 /// Trims and collapses blanks to null, so the printer falls back to defaults.
-fn or_null(v: Option<&str>) -> Option<String> {
+pub(crate) fn or_null(v: Option<&str>) -> Option<String> {
     v.map(str::trim).filter(|t| !t.is_empty()).map(str::to_string)
 }
 
@@ -315,7 +315,7 @@ pub fn resolve_due_date(date: &str, due_date: Option<&str>, terms: Option<&str>)
     start.checked_add_days(Days::new(days)).map(|d| d.format("%Y-%m-%d").to_string())
 }
 
-fn join_options(options: &[String]) -> Option<String> {
+pub(crate) fn join_options(options: &[String]) -> Option<String> {
     let joined = options.iter().map(|o| o.trim()).filter(|o| !o.is_empty()).collect::<Vec<_>>().join("\n");
     or_null(Some(&joined))
 }
@@ -355,18 +355,18 @@ pub struct CreateInvoice {
 }
 
 /// A line ready to store: its input plus resolved quantity, unit price, amount and tax.
-struct PricedLine {
-    input: LineInput,
-    quantity: Money,
-    unit_price: Money,
-    amount: Money,
-    tax: Money,
-    parts: Vec<crate::tax::TaxPart>,
+pub(crate) struct PricedLine {
+    pub(crate) input: LineInput,
+    pub(crate) quantity: Money,
+    pub(crate) unit_price: Money,
+    pub(crate) amount: Money,
+    pub(crate) tax: Money,
+    pub(crate) parts: Vec<crate::tax::TaxPart>,
 }
 
 /// Blank quantity means one; blank price means the line carries no money. Returns the lines,
 /// the invoice total (tax included) and the tax.
-async fn build_lines(
+pub(crate) async fn build_lines(
     conn: &mut SqliteConnection,
     inputs: &[LineInput],
     prices_include_tax: bool,

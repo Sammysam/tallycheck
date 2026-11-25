@@ -41,6 +41,8 @@ export interface SheetPayload {
   poNumber?: string;
   date: string;
   dueDate?: string;
+  /** D60: estimates only, the date the estimate is valid until. */
+  expiryDate?: string;
   paymentTerms?: string;
   billToName?: string;
   billToAddress?: string;
@@ -60,6 +62,8 @@ interface Props {
   settings: InvoiceSettings;
   /** A DRAFT invoice to edit. Omit to raise a new one. */
   initial?: any;
+  /** D60: 'estimate' edits an estimate (no PO number or due date; a "valid until" date instead). */
+  kind?: 'invoice' | 'estimate';
   /** Should reject with a message when saving fails. */
   onSubmit: (payload: SheetPayload) => Promise<void>;
   onCancel: () => void;
@@ -104,16 +108,18 @@ const addDays = (date: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-export default function InvoiceSheetForm({ customers, accounts, settings, initial, onSubmit, onCancel }: Props) {
+export default function InvoiceSheetForm({ customers, accounts, settings, initial, kind = 'invoice', onSubmit, onCancel }: Props) {
   const co = company();
   const editing = Boolean(initial);
+  const estimate = kind === 'estimate';
+  const docLabel = estimate ? 'estimate' : 'invoice';
 
   const [customerId, setCustomerId] = useState<string>(initial?.customerId ?? '');
   const [billToName, setBillToName] = useState<string>(initial?.billToName ?? initial?.customer?.name ?? '');
   const [billToAddress, setBillToAddress] = useState<string>(initial?.billToAddress ?? initial?.customer?.address ?? '');
   const [poNumber, setPoNumber] = useState<string>(initial?.poNumber ?? '');
   const [date, setDate] = useState<string>(initial?.date ?? today());
-  const [dueDate, setDueDate] = useState<string>(initial?.dueDate ?? '');
+  const [dueDate, setDueDate] = useState<string>((estimate ? initial?.expiryDate : initial?.dueDate) ?? '');
   const [terms, setTerms] = useState<string>(initial?.paymentTerms ?? '');
   const fallbackAccount = defaultAccountId(accounts);
   const [lines, setLines] = useState<SheetLine[]>(
@@ -221,17 +227,18 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
   /** Terms drive the due date; typing a due date by hand switches back to Custom. */
   const pickTerms = (value: string) => {
     setTerms(value);
-    if (value) setDueDate(addDays(date, TERM_DAYS[value]));
+    // On an estimate the terms are kept for the invoice it becomes; they don't set "valid until".
+    if (value && !estimate) setDueDate(addDays(date, TERM_DAYS[value]));
   };
 
   const changeDate = (value: string) => {
     setDate(value);
-    if (terms) setDueDate(addDays(value, TERM_DAYS[terms]));
+    if (terms && !estimate) setDueDate(addDays(value, TERM_DAYS[terms]));
   };
 
   const changeDueDate = (value: string) => {
     setDueDate(value);
-    setTerms('');
+    if (!estimate) setTerms('');
   };
 
   const setPayOption = (i: number, text: string) =>
@@ -239,6 +246,9 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
 
   /** The exact shape the PDF generator prints, built from unsaved state. */
   const asPdfInvoice = () => ({
+    docType: kind,
+    estimateNumber: estimate ? initial?.estimateNumber ?? 'DRAFT' : undefined,
+    expiryDate: estimate ? dueDate : undefined,
     invoiceNumber: initial?.invoiceNumber ?? 'DRAFT',
     poNumber,
     date,
@@ -272,9 +282,10 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
       await onSubmit({
         customerId: customerId || undefined,
         date,
-        dueDate: dueDate || undefined,
+        ...(estimate
+          ? { expiryDate: dueDate || undefined }
+          : { dueDate: dueDate || undefined, poNumber: poNumber.trim() || undefined }),
         paymentTerms: terms || undefined,
-        poNumber: poNumber.trim() || undefined,
         billToName: billToName.trim() || undefined,
         billToAddress: billToAddress.trim() || undefined,
         paymentOptions: payOptions.map((o) => o.text.trim()).filter(Boolean),
@@ -295,7 +306,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
         exchangeRate: currency ? Number(rate) : undefined,
       });
     } catch (err: any) {
-      setError(errMsg(err, 'Failed to save invoice'));
+      setError(errMsg(err, `Failed to save ${docLabel}`));
     } finally {
       setSaving(false);
     }
@@ -311,7 +322,9 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
         {/* ── Bookkeeping panel — none of this prints on the invoice ── */}
         <aside className="inv-side">
           <div className="inv-side-title">Bookkeeping</div>
-          <p className="inv-side-note">Not printed — it only tells the ledger where this invoice belongs.</p>
+          <p className="inv-side-note">{estimate
+            ? 'Not printed — used when the estimate becomes an invoice.'
+            : 'Not printed — it only tells the ledger where this invoice belongs.'}</p>
 
           <label className="inv-side-field">
             Customer record
@@ -331,7 +344,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
             <select value={terms} onChange={(e) => pickTerms(e.target.value)}>
               {TERMS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
-            <span className="inv-side-hint">Sets the due date on the invoice.</span>
+            <span className="inv-side-hint">{estimate ? 'Used for the invoice this estimate becomes.' : 'Sets the due date on the invoice.'}</span>
           </label>
 
           <div className="inv-side-title" style={{ marginTop: '1rem' }}>Revenue accounts</div>
@@ -420,7 +433,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
           <div className="contact">{co.contactLine}{co.emailWebLine && <><br />{co.emailWebLine}</>}{co.taxNumber && <><br />Tax No: {co.taxNumber}</>}</div>
           <div className="rule" />
 
-          <h1>{anyTax ? 'Tax Invoice' : 'Invoice'}</h1>
+          <h1>{estimate ? 'Estimate' : anyTax ? 'Tax Invoice' : 'Invoice'}</h1>
 
           {/* ── Remit To / invoice meta ────────────────────────── */}
           <div className="meta">
@@ -435,17 +448,19 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
                 <input required type="date" className="inv-input" value={date} onChange={(e) => changeDate(e.target.value)} />
               </div>
               <div className="meta-row">
-                <span className="meta-key"><strong>Invoice No:</strong></span>
+                <span className="meta-key"><strong>{estimate ? 'Estimate' : 'Invoice'} No:</strong></span>
                 {editing
-                  ? <span>{initial.invoiceNumber}</span>
+                  ? <span>{estimate ? initial.estimateNumber : initial.invoiceNumber}</span>
                   : <span className="auto">auto-generated on save</span>}
               </div>
+              {!estimate && (
               <div className="meta-row">
                 <span className="meta-key"><strong>PO No:</strong></span>
                 <input className="inv-input" placeholder="optional" value={poNumber} onChange={(e) => setPoNumber(e.target.value)} />
               </div>
+              )}
               <div className="meta-row">
-                <span className="meta-key"><strong>Due Date:</strong></span>
+                <span className="meta-key"><strong>{estimate ? 'Valid until:' : 'Due Date:'}</strong></span>
                 <input type="date" className="inv-input" value={dueDate} onChange={(e) => changeDueDate(e.target.value)} />
               </div>
             </div>
@@ -608,7 +623,7 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
         {/* ── Actions ──────────────────────────────────────────── */}
         <div className="inv-actions">
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : editing ? 'Save Changes' : 'Save Invoice'}
+            {saving ? 'Saving…' : editing ? 'Save Changes' : estimate ? 'Save Estimate' : 'Save Invoice'}
           </button>
           <button type="button" onClick={() => previewInvoice(asPdfInvoice(), settings)} className="btn btn-secondary">
             Preview
@@ -621,9 +636,11 @@ export default function InvoiceSheetForm({ customers, accounts, settings, initia
           </button>
           <button type="button" onClick={onCancel} className="btn btn-secondary">Cancel</button>
           <span className="text-xs text-gray-500">
-            {editing
-              ? 'Still a draft — post it from the list to hit the ledger.'
-              : 'Saves as a draft — post it from the list to hit the ledger.'}
+            {estimate
+              ? 'An estimate never reaches the ledger — turn it into an invoice from the list.'
+              : editing
+                ? 'Still a draft — post it from the list to hit the ledger.'
+                : 'Saves as a draft — post it from the list to hit the ledger.'}
           </span>
         </div>
         </div>

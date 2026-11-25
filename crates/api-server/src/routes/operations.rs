@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use operations::invoices::{self, Scope, View};
 use operations::parties::{self, Party, PartyKind};
-use operations::{banking, bills, credit_notes, expenses, payments};
+use operations::{banking, bills, credit_notes, estimates, expenses, payments};
 use serde_json::{json, Value};
 
 type Pairs = Query<Vec<(String, String)>>;
@@ -262,6 +262,75 @@ pub async fn invoices_void(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let inv = invoices::void(&s.db, &id, &scope(a.user()), &today()).await?;
     Ok((StatusCode::CREATED, Json(inv.to_json(View::Read))))
+}
+
+// ─── Estimates (D60; `invoices`, same visibility as invoices) ───────────────
+
+pub async fn estimates_list(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Query(p): Pairs,
+) -> AppResult<Json<Value>> {
+    let q = ops::estimate_query(validate::query_map(p))?;
+    let (rows, total) = estimates::find_all(&s.db, &q, &scope(a.user())).await?;
+    Ok(paginated(rows.iter().map(|e| e.to_json()).collect(), total, q.page, q.limit))
+}
+
+pub async fn estimates_get(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let mut c = s.db.read().acquire().await?;
+    Ok(Json(estimates::find_one(&mut c, &id, &scope(a.user())).await?.to_json()))
+}
+
+pub async fn estimates_create(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    body: JsonBody,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let dto = ops::estimate(body.object())?;
+    let est = estimates::create(&s.db, dto, Some(&a.user().id)).await?;
+    Ok((StatusCode::CREATED, Json(est.to_json())))
+}
+
+pub async fn estimates_update(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    let dto = ops::estimate(body.object())?;
+    Ok(Json(estimates::update(&s.db, &id, dto, &scope(a.user())).await?.to_json()))
+}
+
+pub async fn estimates_status(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    let status = ops::estimate_status(body.object())?;
+    Ok(Json(estimates::set_status(&s.db, &id, &status, &scope(a.user())).await?.to_json()))
+}
+
+pub async fn estimates_convert(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let (est, inv) = estimates::convert(&s.db, &id, &scope(a.user()), &today()).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "estimate": est.to_json(), "invoice": inv.to_json(View::Read) }))))
+}
+
+pub async fn estimates_remove(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+) -> AppResult<StatusCode> {
+    estimates::remove(&s.db, &id, &scope(a.user())).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── Bills ──────────────────────────────────────────────────────────────────

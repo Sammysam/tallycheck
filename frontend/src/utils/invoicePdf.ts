@@ -30,6 +30,10 @@ interface PdfLine {
 }
 
 interface PdfInvoice {
+  /** D60: an estimate prints as "Estimate", with its number and the date it is valid until. */
+  docType?: 'invoice' | 'estimate';
+  estimateNumber?: string;
+  expiryDate?: string | null;
   invoiceNumber: string;
   poNumber?: string | null;
   date: string;
@@ -72,8 +76,12 @@ const fmtDate = (d?: string | null) => {
 const esc = (s?: string | null) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
+const isEstimate = (d: PdfInvoice) => d.docType === 'estimate' || Boolean(d.estimateNumber);
+const docNumber = (d: PdfInvoice) => (isEstimate(d) ? d.estimateNumber ?? d.invoiceNumber : d.invoiceNumber);
+
 function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
   const co = company();
+  const estimate = isEstimate(invoice);
   const cur = invoice.currency || region().currencySymbol;
   const signatoryName =
     invoice.signatoryName?.trim() || settings?.signatoryName?.trim() || '';
@@ -151,7 +159,7 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
     <div class="contact">${esc(co.contactLine)}${co.emailWebLine ? `<br/>${esc(co.emailWebLine)}` : ''}${co.taxNumber ? `<br/>Tax No: ${esc(co.taxNumber)}` : ''}</div>
     <div class="rule"></div>
 
-    <h1>${hasTax ? 'Tax Invoice' : 'Invoice'}</h1>
+    <h1>${estimate ? 'Estimate' : hasTax ? 'Tax Invoice' : 'Invoice'}</h1>
 
     <div class="meta">
       <div>
@@ -161,9 +169,10 @@ function buildMarkup(invoice: PdfInvoice, settings?: InvoiceSettings): string {
       </div>
       <div>
         <div>${esc(fmtDate(invoice.date))}</div>
-        <div style="margin-top:10px;"><strong>Invoice No:</strong> ${esc(invoice.invoiceNumber)}</div>
-        ${invoice.poNumber ? `<div><strong>PO No:</strong> ${esc(invoice.poNumber)}</div>` : ''}
-        ${invoice.dueDate ? `<div><strong>Due Date:</strong> ${esc(fmtDate(invoice.dueDate))}</div>` : ''}
+        <div style="margin-top:10px;"><strong>${estimate ? 'Estimate' : 'Invoice'} No:</strong> ${esc(docNumber(invoice))}</div>
+        ${!estimate && invoice.poNumber ? `<div><strong>PO No:</strong> ${esc(invoice.poNumber)}</div>` : ''}
+        ${!estimate && invoice.dueDate ? `<div><strong>Due Date:</strong> ${esc(fmtDate(invoice.dueDate))}</div>` : ''}
+        ${estimate && invoice.expiryDate ? `<div><strong>Valid until:</strong> ${esc(fmtDate(invoice.expiryDate))}</div>` : ''}
       </div>
     </div>
 
@@ -249,7 +258,7 @@ function openInvoiceWindow(
   win.document.open();
   win.document.write(
     `<!doctype html><html><head><meta charset="utf-8" />` +
-      `<title>Invoice ${esc(invoice.invoiceNumber)}</title>` +
+      `<title>${isEstimate(invoice) ? 'Estimate' : 'Invoice'} ${esc(docNumber(invoice))}</title>` +
       `<style>` +
       `body{margin:0;background:#e5e7eb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;}` +
       `#sheet{width:794px;margin:0 auto;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.18);}` +
@@ -353,7 +362,7 @@ export async function openInvoicePdf(invoice: PdfInvoice, settings?: InvoiceSett
       heightLeft -= pageH;
     }
 
-    const safeName = `Invoice-${invoice.invoiceNumber || 'invoice'}`.replace(/[\\/:*?"<>|]+/g, '-');
+    const safeName = `${isEstimate(invoice) ? 'Estimate' : 'Invoice'}-${docNumber(invoice) || 'invoice'}`.replace(/[\\/:*?"<>|]+/g, '-');
     pdf.save(`${safeName}.pdf`);
   } finally {
     document.body.removeChild(root);

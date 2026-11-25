@@ -8,6 +8,11 @@ const colors: Record<string, [string, string]> = {
   ACTIVE:  ['bg-emerald-50 text-emerald-700 ring-emerald-200', 'bg-emerald-500'],
   ON_LEAVE:['bg-amber-50 text-amber-700 ring-amber-200',       'bg-amber-500'],
   LEFT:    ['bg-gray-100 text-gray-600 ring-gray-200',         'bg-gray-400'],
+  // D60: estimates.
+  SENT:     ['bg-blue-50 text-blue-700 ring-blue-200',          'bg-blue-500'],
+  ACCEPTED: ['bg-emerald-50 text-emerald-700 ring-emerald-200', 'bg-emerald-500'],
+  DECLINED: ['bg-red-50 text-red-600 ring-red-200',             'bg-red-500'],
+  CONVERTED:['bg-violet-50 text-violet-700 ring-violet-200',    'bg-violet-500'],
 };
 
 export default function StatusBadge({ status }: { status: string }) {

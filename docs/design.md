@@ -772,6 +772,27 @@ recommendations without answering each one individually; revisit any of them on 
   QuickBooks Desktop IIF and TallyPrime XML directly, foreign-currency open documents, tax on
   open documents (they come in as one untaxed amount).
 
+- **D60 Estimates / quotes** (2026-11-25, roadmap release 1.2 "Everyday selling"; converting
+  makes a DRAFT invoice, as chosen). Tables `estimates` (`estimateNumber` EST-0001, customer or
+  Bill To name, date, `expiryDate` "valid until", status DRAFT / SENT / ACCEPTED / DECLINED /
+  CONVERTED, print details and payment terms as on invoices, totals, tax, currency and rate,
+  `invoiceId` once converted) and `estimate_lines` (as invoice lines). An estimate is priced
+  exactly as an invoice (`invoices::build_lines`: discounts, tax codes and groups, prices
+  including tax, currency) but **posts nothing**. Statuses are set by hand (CONVERTED only by
+  converting); it can be edited while DRAFT or SENT. `POST /api/estimates/{id}/convert` makes a
+  DRAFT invoice dated today with the same customer, lines, discounts, tax codes, currency and
+  rate, notes, payment terms (the invoice's due date follows them) and print details, and marks
+  the estimate CONVERTED with the invoice's id, in one transaction; once only, never from
+  DECLINED. A converted estimate can't be edited or deleted; others can be deleted. Tax on the
+  invoice is worked out again with the tax codes as they are on the day of converting. Routes
+  (permission `invoices`, same visibility as invoices: Admin / `invoices:all` see all, others
+  their own): `GET|POST /api/estimates`, `GET|PUT|DELETE /api/estimates/{id}`,
+  `PATCH /api/estimates/{id}/status`, `POST /api/estimates/{id}/convert`. Audited as "Created /
+  Updated / Deleted an estimate", "Changed an estimate's status", "Turned an estimate into an
+  invoice". Screen: Transactions → Estimates (the invoice sheet in estimate mode: no PO number
+  or due date, "Valid until"; printed and saved as PDF titled "Estimate"). Not yet: e-mailing
+  an estimate, accepting it online, partial conversion.
+
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check
   (`LoginThrottle::begin`, so parallel guesses stop at 5), keys are per username **and** per side

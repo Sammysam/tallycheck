@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Estimates / quotes: make a quote for a customer on the same sheet as an invoice (products,
+  discounts, tax, foreign currency), print it or save it as a PDF titled "Estimate", mark it
+  sent, accepted or declined, and turn it into a draft invoice with one click. Estimates never
+  reach the ledger (D60).
 - Move books in from another system: an administrator brings the books over from QuickBooks,
   Xero, Zoho, Sage, TallyPrime or a spreadsheet on a cut-over date. The trial balance becomes the
   opening balances, unpaid invoices and bills come in one by one so they can be paid, and
