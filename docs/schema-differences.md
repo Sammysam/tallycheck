@@ -111,6 +111,10 @@ D60 adds `estimates` (quotes: number, customer / Bill To, date, valid-until date
 SENT / ACCEPTED / DECLINED / CONVERTED, totals, tax, currency, the invoice it became) and
 `estimate_lines` (as `invoice_lines`, with the line's tax). Estimates never reach the ledger.
 
+D61 adds `recurring_invoices` (a schedule with a JSON copy of an invoice, frequency, start / end
+and next date, status) and `recurring_invoice_items` (one row per schedule and date, the
+invoice made for it).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

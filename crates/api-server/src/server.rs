@@ -78,6 +78,7 @@ pub struct ServerHandle {
     join: JoinHandle<()>,
     scheduler: JoinHandle<()>,
     shopify_sync: JoinHandle<()>,
+    recurring: JoinHandle<()>,
     /// Held for the server's lifetime: one server per data folder.
     _lock: std::fs::File,
 }
@@ -87,6 +88,7 @@ impl ServerHandle {
     pub async fn shutdown(mut self) {
         self.scheduler.abort();
         self.shopify_sync.abort();
+        self.recurring.abort();
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
@@ -180,8 +182,10 @@ pub async fn start_with_shell(
     let scheduler = backup::schedule::spawn(db.clone(), config.data_dir.clone());
     // D39: automatic Shopify sync, when it is switched on.
     let shopify_sync = integrations::spawn(db.clone(), config.data_dir.clone());
+    // D61: recurring invoices, made at start-up and every hour while the app runs.
+    let recurring = crate::recurring_runner::spawn(db.clone());
     tracing::info!(%addr, lan = config.lan_enabled, "accounting server listening");
-    Ok(ServerHandle { addr, db, shutdown: Some(tx), join, scheduler, shopify_sync, _lock: lock })
+    Ok(ServerHandle { addr, db, shutdown: Some(tx), join, scheduler, shopify_sync, recurring, _lock: lock })
 }
 
 /// An exclusive lock on `<data_dir>/.lock`: a second server (or a CLI restore) on the same

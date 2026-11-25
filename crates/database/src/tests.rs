@@ -64,6 +64,8 @@ const APPROVED_EXTRA_TABLES: &[&str] = &[
     "credit_notes",
     "estimates",
     "estimate_lines",
+    "recurring_invoices",
+    "recurring_invoice_items",
     "bank_reconciliations",
     "reconciled_lines",
     "tax_codes",

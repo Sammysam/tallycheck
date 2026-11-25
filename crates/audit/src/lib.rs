@@ -268,6 +268,17 @@ pub fn summarize(method: &str, path: &str) -> String {
         return if last == "reverse" { "Reversed a book conversion" } else { "Moved books in from another system" }
             .into();
     }
+    // D61: recurring invoices.
+    if resource == "recurring-invoices" {
+        return match (method, last) {
+            (_, "pause") => "Paused a recurring invoice",
+            (_, "resume") => "Resumed a recurring invoice",
+            ("POST", _) => "Made an invoice recurring",
+            ("DELETE", _) => "Stopped a recurring invoice",
+            _ => "Changed a recurring invoice",
+        }
+        .into();
+    }
     // D60: estimates.
     if resource == "estimates" {
         return match (method, last) {

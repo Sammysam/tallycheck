@@ -43,6 +43,7 @@ export const navigation = [
     items: [
       { label: 'Estimates', to: '/estimates', permission: 'invoices' },
       { label: 'Invoices', to: '/invoices', permission: 'invoices' },
+      { label: 'Recurring Invoices', to: '/recurring-invoices', permission: 'invoices' },
       { label: 'Bills',    to: '/bills',    permission: 'bills' },
       { label: 'Expenses', to: '/expenses', permission: 'expenses' },
       { label: 'Payments', to: '/payments', permission: 'payments' },

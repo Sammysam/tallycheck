@@ -792,6 +792,32 @@ recommendations without answering each one individually; revisit any of them on 
   invoice". Screen: Transactions → Estimates (the invoice sheet in estimate mode: no PO number
   or due date, "Valid until"; printed and saved as PDF titled "Estimate"). Not yet: e-mailing
   an estimate, accepting it online, partial conversion.
+- **D61 Recurring invoices** (2026-11-25, roadmap release 1.2; chosen: each date makes a
+  draft to check, missed dates are made one by one, schedules are made from an invoice).
+  Tables `recurring_invoices` (name, the source invoice, a JSON copy of it as the template:
+  customer / Bill To, lines with discounts and tax codes, currency and rate, payment terms or
+  the days to the due date, notes and print details; frequency WEEKLY / MONTHLY / QUARTERLY /
+  YEARLY every 1–99, start date, optional end date, `nextDate` = date number `dateIndex` counted
+  from the start date so months never drift (31 Jan, 28 Feb, 31 Mar), status ACTIVE / PAUSED /
+  ENDED, `lastError`) and `recurring_invoice_items` (schedule + date → the invoice made; primary
+  key on schedule and date, so a date is never made twice). `operations::recurring::run_due`
+  runs a few seconds after start-up, every hour, and right after a schedule is made, changed or
+  resumed: for every active schedule whose next date has come it makes a **DRAFT** invoice per
+  date (`invoices::create_in`, dated that date, made as the schedule's owner), dates missed
+  while the app was closed included, each with its own date (at most 60 per schedule per run);
+  one transaction per schedule; a schedule that fails (say the customer was deleted) keeps its
+  date, shows the reason and is tried again; the others go on. Nothing is posted. Activity log:
+  "Made N recurring invoices for …" / "Could not make the recurring invoice …" (user "system"),
+  plus "Made an invoice recurring", "Changed / Paused / Resumed / Stopped a recurring invoice".
+  Pausing skips dates (resuming continues from today); changing the schedule recounts the next
+  date from today without remaking made dates; stopping deletes the schedule and keeps its
+  invoices. A foreign-currency template keeps the rate it was copied with (the draft can be
+  corrected before posting). Routes (permission `invoices`, visibility as invoices):
+  `GET|POST /api/recurring-invoices`, `GET /api/recurring-invoices/waiting` (drafts made by
+  schedules still to post), `PATCH|DELETE /api/recurring-invoices/{id}`, `POST …/{id}/pause`,
+  `POST …/{id}/resume`. Screens: "Make recurring" in an invoice's ⋮ menu, a notice on Invoices
+  while made drafts wait, Transactions → Recurring Invoices. Not yet: recurring bills and
+  expenses, posting automatically, e-mailing them.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

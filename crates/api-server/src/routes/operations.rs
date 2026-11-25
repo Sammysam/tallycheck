@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use operations::invoices::{self, Scope, View};
 use operations::parties::{self, Party, PartyKind};
-use operations::{banking, bills, credit_notes, estimates, expenses, payments};
+use operations::{banking, bills, credit_notes, estimates, expenses, payments, recurring};
 use serde_json::{json, Value};
 
 type Pairs = Query<Vec<(String, String)>>;
@@ -330,6 +330,80 @@ pub async fn estimates_remove(
     Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
     estimates::remove(&s.db, &id, &scope(a.user())).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── Recurring invoices (D61; `invoices`, same visibility as invoices) ───────
+
+/// Makes whatever has come due straight away, so a schedule starting today shows its draft now
+/// instead of at the next hourly run.
+async fn run_recurring_now(s: &AppState) {
+    crate::recurring_runner::run_and_record(&s.db).await;
+}
+
+pub async fn recurring_list(State(s): State<AppState>, a: Authorized<perm::Invoices>) -> AppResult<Json<Value>> {
+    let rows = recurring::find_all(&s.db, &scope(a.user())).await?;
+    Ok(Json(Value::Array(rows.iter().map(|r| r.to_json()).collect())))
+}
+
+pub async fn recurring_waiting(State(s): State<AppState>, a: Authorized<perm::Invoices>) -> AppResult<Json<Value>> {
+    Ok(Json(json!({ "drafts": recurring::drafts_waiting(&s.db, &scope(a.user())).await? })))
+}
+
+pub async fn recurring_create(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    body: JsonBody,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let (invoice_id, schedule) = ops::recurring(body.object(), true)?;
+    let sc = scope(a.user());
+    let r = recurring::create(&s.db, invoice_id.as_deref().unwrap_or_default(), schedule, &sc).await?;
+    run_recurring_now(&s).await;
+    let mut c = s.db.read().acquire().await?;
+    Ok((StatusCode::CREATED, Json(recurring::find_one(&mut c, &r.id, &sc).await?.to_json())))
+}
+
+pub async fn recurring_update(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    let (invoice_id, schedule) = ops::recurring(body.object(), false)?;
+    let sc = scope(a.user());
+    recurring::update(&s.db, &id, schedule, invoice_id.as_deref(), &sc, &today()).await?;
+    run_recurring_now(&s).await;
+    let mut c = s.db.read().acquire().await?;
+    Ok(Json(recurring::find_one(&mut c, &id, &sc).await?.to_json()))
+}
+
+pub async fn recurring_pause(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let r = recurring::set_paused(&s.db, &id, true, &scope(a.user()), &today()).await?;
+    Ok((StatusCode::CREATED, Json(r.to_json())))
+}
+
+pub async fn recurring_resume(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let sc = scope(a.user());
+    recurring::set_paused(&s.db, &id, false, &sc, &today()).await?;
+    run_recurring_now(&s).await;
+    let mut c = s.db.read().acquire().await?;
+    Ok((StatusCode::CREATED, Json(recurring::find_one(&mut c, &id, &sc).await?.to_json())))
+}
+
+pub async fn recurring_remove(
+    State(s): State<AppState>,
+    a: Authorized<perm::Invoices>,
+    Path(id): Path<String>,
+) -> AppResult<StatusCode> {
+    recurring::remove(&s.db, &id, &scope(a.user())).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

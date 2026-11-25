@@ -13,6 +13,9 @@ const colors: Record<string, [string, string]> = {
   ACCEPTED: ['bg-emerald-50 text-emerald-700 ring-emerald-200', 'bg-emerald-500'],
   DECLINED: ['bg-red-50 text-red-600 ring-red-200',             'bg-red-500'],
   CONVERTED:['bg-violet-50 text-violet-700 ring-violet-200',    'bg-violet-500'],
+  // D61: recurring invoice schedules.
+  PAUSED:   ['bg-amber-50 text-amber-700 ring-amber-200',       'bg-amber-500'],
+  ENDED:    ['bg-gray-100 text-gray-600 ring-gray-200',         'bg-gray-400'],
 };
 
 export default function StatusBadge({ status }: { status: string }) {

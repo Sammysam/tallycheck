@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Recurring invoices: "Make recurring" on any invoice repeats it every week, month, quarter or
+  year. Each date makes a draft invoice to check and post; dates missed while TallyCheck was
+  closed are made when it next opens, each with its own date. Pause, resume, change or stop
+  them under Transactions → Recurring Invoices (D61).
 - Estimates / quotes: make a quote for a customer on the same sheet as an invoice (products,
   discounts, tax, foreign currency), print it or save it as a PDF titled "Estimate", mark it
   sent, accepted or declined, and turn it into a draft invoice with one click. Estimates never

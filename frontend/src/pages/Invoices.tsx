@@ -12,6 +12,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { moneyIn } from '../lib/money';
 import { useTaxCodes } from '../lib/taxes';
 import TxnLink from '../components/TxnLink';
+import { useNavigate } from 'react-router-dom';
+import RecurringScheduleForm from '../components/RecurringScheduleForm';
+import { nextAfter, type Schedule } from '../lib/recurring';
+import { toast } from '../lib/toast';
+import { fmtDate } from '../lib/region';
 
 interface Invoice {
   id: string;
@@ -49,6 +54,10 @@ export default function Invoices() {
   const [editDraft, setEditDraft] = useState<any | null>(null);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState<InvoiceSettings>({});
+  // D61: the invoice being made recurring, and drafts made by recurring schedules still to post.
+  const [recurringFrom, setRecurringFrom] = useState<Invoice | null>(null);
+  const [waiting, setWaiting] = useState(0);
+  const navigate = useNavigate();
 
   // List filters — all optional, combined with AND by the API.
   const [filters, setFilters] = useState(emptyFilters);
@@ -82,6 +91,7 @@ export default function Invoices() {
         setRows(r.data.data);
         setTotal(r.data.total);
         setTotalPages(r.data.totalPages);
+        api.get('/recurring-invoices/waiting').then((w) => setWaiting(w.data.drafts)).catch(() => setWaiting(0));
       });
 
   useEffect(() => { load(); }, [page]);
@@ -186,6 +196,16 @@ export default function Invoices() {
     }
   };
 
+  const makeRecurring = async (s: Schedule) => {
+    if (!recurringFrom) return;
+    const { data } = await api.post('/recurring-invoices', { invoiceId: recurringFrom.id, ...s, endDate: s.endDate || undefined });
+    setRecurringFrom(null);
+    toast(data.invoicesMade > 0
+      ? `${data.name} is recurring — ${data.invoicesMade} draft invoice(s) made for dates that have come`
+      : `${data.name} is recurring — first invoice ${fmtDate(data.nextDate)}`);
+    load();
+  };
+
   const action = async (id: string, ep: string) => {
     try { await api.post(`/invoices/${id}/${ep}`); load(); }
     catch (err: any) { alert(errMsg(err, 'Action failed')); }
@@ -288,6 +308,29 @@ export default function Invoices() {
       />
 
       {error && <div className="mb-4 px-4 py-2.5 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">{error}</div>}
+
+      {!showForm && waiting > 0 && (
+        <div className="mb-3 px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg flex items-center gap-3">
+          <span>{waiting} invoice{waiting === 1 ? '' : 's'} made by recurring schedules {waiting === 1 ? 'is' : 'are'} waiting as draft{waiting === 1 ? '' : 's'} — check and post {waiting === 1 ? 'it' : 'them'}.</span>
+          <button className="btn-link" onClick={() => setFilters({ ...emptyFilters, status: 'DRAFT' })}>Show drafts</button>
+          <button className="btn-link" onClick={() => navigate('/recurring-invoices')}>Recurring invoices</button>
+        </div>
+      )}
+
+      {!showForm && recurringFrom && (
+        <RecurringScheduleForm
+          key={recurringFrom.id}
+          title={`Make ${recurringFrom.invoiceNumber} recurring`}
+          note="The invoice is copied as it is now (customer, lines, prices, tax). Later changes to it don't change the schedule."
+          submitLabel="Make recurring"
+          initial={{
+            name: recurringFrom.customer?.name || recurringFrom.billToName || recurringFrom.invoiceNumber,
+            frequency: 'MONTHLY', every: 1, startDate: nextAfter(recurringFrom.date, 'MONTHLY'), endDate: '',
+          }}
+          onSubmit={makeRecurring}
+          onCancel={() => setRecurringFrom(null)}
+        />
+      )}
 
       {!showForm && !hasPermission('invoices:all') && (
         <p className="mb-3 text-xs text-gray-500">Showing only the invoices you created.</p>
@@ -438,6 +481,7 @@ export default function Invoices() {
                 { label: 'Print',    onSelect: () => printPdf(r.id) },
                 { label: 'Download', onSelect: () => downloadPdf(r.id) },
                 { label: 'Copy',     onSelect: () => duplicate(r.id) },
+                ...(r.status !== 'VOID' ? [{ label: 'Make recurring', onSelect: () => { setRecurringFrom(r); window.scrollTo(0, 0); } }] : []),
                 ...(r.status === 'DRAFT'  ? [{ label: 'Post',   onSelect: () => action(r.id, 'post') }] : []),
                 ...(r.status === 'POSTED' ? [{ label: 'Void',   onSelect: () => action(r.id, 'void'), danger: true }] : []),
                 ...(r.status === 'DRAFT' && user?.role === 'Admin' ? [{ label: 'Delete', onSelect: () => remove(r), danger: true }] : []),

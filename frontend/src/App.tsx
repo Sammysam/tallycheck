@@ -23,6 +23,7 @@ import UsPayrollRun from './pages/UsPayrollRun';
 import UsPayrollForms from './pages/UsPayrollForms';
 import Invoices from './pages/Invoices';
 import Estimates from './pages/Estimates';
+import RecurringInvoices from './pages/RecurringInvoices';
 import Bills from './pages/Bills';
 import Expenses from './pages/Expenses';
 import Payments from './pages/Payments';
@@ -95,6 +96,7 @@ export default function App() {
                     <ProtectedRoute permission="payroll"><PayrollRun /></ProtectedRoute>
                   } />
                   <Route path="/invoices"                 element={<Invoices />} />
+                  <Route path="/recurring-invoices"       element={<ProtectedRoute permission="invoices"><RecurringInvoices /></ProtectedRoute>} />
                   <Route path="/estimates"                element={<ProtectedRoute permission="invoices"><Estimates /></ProtectedRoute>} />
                   <Route path="/bills"                    element={<Bills />} />
                   <Route path="/expenses"                 element={<Expenses />} />

@@ -22,6 +22,7 @@ pub mod imports;
 pub mod invoices;
 pub mod parties;
 pub mod payments;
+pub mod recurring;
 pub mod sheet;
 pub mod statements;
 pub mod stock;

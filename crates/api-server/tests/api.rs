@@ -5756,3 +5756,133 @@ async fn estimates_are_priced_like_invoices_and_become_draft_invoices() -> TestR
     }
     Ok(())
 }
+
+/// D61: "Make recurring" copies an invoice into a schedule; dates that have come (missed ones
+/// included, each with its own date) become DRAFT invoices once each; pause, resume, change
+/// and stop; visibility and permissions follow invoices.
+#[tokio::test]
+async fn recurring_invoices_make_one_draft_per_date_and_catch_up_missed_dates() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Lanka Rentals"}))).await?;
+    let today = app_core::time::today_local();
+    let day = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+    let two_weeks_ago = day(today - chrono::Days::new(14));
+    let inv = app
+        .call(
+            Method::POST,
+            "/api/invoices",
+            Some(&admin),
+            Some(json!({"customerId": cust.body["id"], "date": two_weeks_ago, "dueDate": day(today - chrono::Days::new(4)),
+                "notes": "Monthly rent", "lines": [{"description": "Office rent", "unitPrice": 50000}]})),
+        )
+        .await?;
+    let inv_id = inv.body["id"].as_str().ok_or("inv")?.to_string();
+
+    let r = app
+        .call(
+            Method::POST,
+            "/api/recurring-invoices",
+            Some(&viewer),
+            Some(json!({"invoiceId": inv_id, "frequency": "WEEKLY", "startDate": two_weeks_ago})),
+        )
+        .await?;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "recurring invoices need the invoices permission");
+    let bad = app
+        .call(
+            Method::POST,
+            "/api/recurring-invoices",
+            Some(&admin),
+            Some(json!({"invoiceId": inv_id, "frequency": "DAILY", "startDate": two_weeks_ago})),
+        )
+        .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    // Weekly from two weeks ago: three dates have come (−14, −7, today), each made once.
+    let made = app
+        .call(
+            Method::POST,
+            "/api/recurring-invoices",
+            Some(&admin),
+            Some(json!({"invoiceId": inv_id, "frequency": "WEEKLY", "startDate": two_weeks_ago})),
+        )
+        .await?;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.body);
+    assert_eq!(made.body["name"], "Lanka Rentals");
+    assert_eq!(made.body["invoicesMade"], json!(3), "{}", made.body);
+    assert_eq!(made.body["draftsWaiting"], json!(3));
+    assert_eq!(made.body["nextDate"], json!(day(today + chrono::Days::new(7))));
+    let rid = made.body["id"].as_str().ok_or("rid")?.to_string();
+
+    let list = app.call(Method::GET, "/api/invoices?status=DRAFT&limit=100", Some(&admin), None).await?;
+    let drafts = list.body["data"].as_array().ok_or("drafts")?;
+    // The original draft plus three made ones, each dated its own date, due 10 days later as the original.
+    assert_eq!(drafts.len(), 4);
+    for back in [14u64, 7, 0] {
+        let d = day(today - chrono::Days::new(back));
+        let due = day(today - chrono::Days::new(back) + chrono::Days::new(10));
+        let n = drafts.iter().filter(|i| i["date"] == json!(d) && i["notes"] == "Monthly rent").count();
+        let expected = if back == 14 { 2 } else { 1 };
+        assert_eq!(n, expected, "drafts dated {d}");
+        assert!(drafts.iter().any(|i| i["date"] == json!(d) && i["dueDate"] == json!(due)), "due date for {d}");
+    }
+    let waiting = app.call(Method::GET, "/api/recurring-invoices/waiting", Some(&admin), None).await?;
+    assert_eq!(waiting.body["drafts"], json!(3));
+
+    // Running again makes nothing new; nothing reached the ledger.
+    app.call(Method::POST, &format!("/api/recurring-invoices/{rid}/resume"), Some(&admin), None).await?;
+    let list = app.call(Method::GET, "/api/recurring-invoices", Some(&admin), None).await?;
+    assert_eq!(list.body[0]["invoicesMade"], json!(3));
+    let tb = app.call(Method::GET, "/api/ledger/trial-balance", Some(&admin), None).await?;
+    assert!(tb.body.as_array().ok_or("tb")?.iter().all(|r| r["balance"] == json!(0)));
+
+    // Pause, change to monthly ending yesterday (so it ends), resume refuses an ended schedule.
+    let p = app.call(Method::POST, &format!("/api/recurring-invoices/{rid}/pause"), Some(&admin), None).await?;
+    assert_eq!(p.body["status"], "PAUSED");
+    let changed = app
+        .call(
+            Method::PATCH,
+            &format!("/api/recurring-invoices/{rid}"),
+            Some(&admin),
+            Some(json!({"name": "Rent", "frequency": "MONTHLY", "every": 1, "startDate": two_weeks_ago,
+                "endDate": day(today - chrono::Days::new(1))})),
+        )
+        .await?;
+    assert_eq!(changed.body["name"], "Rent", "{}", changed.body);
+    assert_eq!(changed.body["status"], "PAUSED");
+    assert_eq!(changed.body["nextDate"], Value::Null, "no date left before the end date");
+    let bad_end = app
+        .call(
+            Method::PATCH,
+            &format!("/api/recurring-invoices/{rid}"),
+            Some(&admin),
+            Some(json!({"frequency": "MONTHLY", "startDate": two_weeks_ago, "endDate": day(today - chrono::Days::new(30))})),
+        )
+        .await?;
+    assert_nest_error(
+        &bad_end,
+        400,
+        json!("The end date cannot be before the start date"),
+        &format!("/api/recurring-invoices/{rid}"),
+    );
+
+    // Stop it: the invoices it made stay.
+    let del = app.call(Method::DELETE, &format!("/api/recurring-invoices/{rid}"), Some(&admin), None).await?;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+    let list = app.call(Method::GET, "/api/invoices?status=DRAFT&limit=100", Some(&admin), None).await?;
+    assert_eq!(list.body["total"], json!(4));
+
+    let log = app.call(Method::GET, "/api/audit-logs", Some(&admin), None).await?;
+    let text = log.body.to_string();
+    for action in [
+        "Made an invoice recurring",
+        "Made 3 recurring invoices for",
+        "Paused a recurring invoice",
+        "Stopped a recurring invoice",
+    ] {
+        assert!(text.contains(action), "missing {action}");
+    }
+    Ok(())
+}

@@ -290,6 +290,33 @@ pub fn estimate_query(query: Map<String, Value>) -> Result<operations::estimates
     Ok(operations::estimates::EstimateQuery { page, limit, q: opt_string(&m, "q"), status: opt_string(&m, "status") })
 }
 
+// ─── Recurring invoices (D61) ───────────────────────────────────────────────
+
+/// A schedule: `{invoiceId?, name?, frequency, every?, startDate, endDate?}`.
+pub fn recurring(
+    body: Map<String, Value>,
+    invoice_required: bool,
+) -> Result<(Option<String>, operations::recurring::ScheduleInput), AppError> {
+    let mut v = Validator::new(body);
+    v.field("invoiceId", !invoice_required, &[Rule::IsUuid])
+        .field("name", true, &[Rule::IsString, Rule::MaxLength(120)])
+        .field("frequency", false, &[Rule::IsEnum(operations::recurring::FREQUENCIES)])
+        .field("every", true, &[Rule::IsInt, Rule::MinNum(1.0, "1"), Rule::MaxNum(99.0, "99")])
+        .field("startDate", false, &[Rule::IsDateFormat])
+        .field("endDate", true, &[Rule::IsDateFormat]);
+    let m = v.finish()?;
+    Ok((
+        opt_string(&m, "invoiceId"),
+        operations::recurring::ScheduleInput {
+            name: opt_string(&m, "name"),
+            frequency: opt_string(&m, "frequency").unwrap_or_default(),
+            every: m.get("every").and_then(Value::as_i64).unwrap_or(1),
+            start_date: opt_string(&m, "startDate").unwrap_or_default(),
+            end_date: opt_string(&m, "endDate"),
+        },
+    ))
+}
+
 // ─── Bills ──────────────────────────────────────────────────────────────────
 
 pub(crate) fn bill_line_rules(item: &Value, prefix: String) -> (Vec<String>, Map<String, Value>) {
