@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Second round of first-time-user fixes: tax codes never default to a payroll account, the first
+  backup is made the moment backups are switched on, new products are not stock-counted unless
+  chosen (with a one-click fix when stock is short), opening balances are not overdue on day one,
+  and Quick start explains its figures in plain words (D75).
 - Easier first setup: a Getting started checklist on the dashboard that ticks itself off, backups
   turned on in the setup wizard, and an opening-balances question that leads an existing business
   to Quick start (D73).

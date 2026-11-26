@@ -30,9 +30,9 @@ interface Account { id: string; code: string; name: string; type: string; curren
 interface Move { id: string; date: string; quantity: number; value: number; sourceType: string; journalEntryId?: string | null; note?: string | null; number?: string | null }
 
 const TYPE_HINT: Record<ItemType, string> = {
-  INVENTORY: 'Counted and valued. Bills add stock, invoices take it out at average cost.',
+  NON_INVENTORY: 'Things you sell without keeping count — most small businesses start here (e.g. bread you bake, made to order).',
   SERVICE: 'Work you sell or buy, such as delivery, repairs or consulting.',
-  NON_INVENTORY: 'Goods you sell or buy without keeping count, e.g. made to order.',
+  INVENTORY: 'TallyCheck counts how many you have: bills add stock, invoices take it out. You can’t sell more than you have.',
 };
 const MOVE_LABEL: Record<string, string> = {
   BILL: 'Bought (bill)', BILL_VOID: 'Bill voided', INVOICE: 'Sold (invoice)', INVOICE_REVERSAL: 'Sale reversed', ADJUSTMENT: 'Adjustment',
@@ -175,7 +175,7 @@ function ItemDialog({ item, accounts, onClose, onSaved }: { item: Item | null; a
   const byType = (t: string) => accounts.filter((a) => a.isActive && !a.currency && a.type === t);
   const code = (c: string) => accounts.find((a) => a.code === c)?.id ?? '';
   const [f, setF] = useState({
-    name: item?.name ?? '', sku: item?.sku ?? '', type: (item?.type ?? 'INVENTORY') as ItemType, description: item?.description ?? '',
+    name: item?.name ?? '', sku: item?.sku ?? '', type: (item?.type ?? 'NON_INVENTORY') as ItemType, description: item?.description ?? '',
     salePrice: item?.salePrice != null ? String(item.salePrice) : '', purchaseCost: item?.purchaseCost != null ? String(item.purchaseCost) : '',
     incomeAccountId: item?.incomeAccountId ?? code('4000'), expenseAccountId: item?.expenseAccountId ?? '',
     inventoryAccountId: item?.inventoryAccountId ?? code('1200'), cogsAccountId: item?.cogsAccountId ?? code('5000'),

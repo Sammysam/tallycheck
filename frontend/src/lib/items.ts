@@ -2,7 +2,7 @@
 
 export type ItemType = 'INVENTORY' | 'SERVICE' | 'NON_INVENTORY';
 
-export const TYPE_LABEL: Record<ItemType, string> = { INVENTORY: 'Stock item', SERVICE: 'Service', NON_INVENTORY: 'Non-stock item' };
+export const TYPE_LABEL: Record<ItemType, string> = { NON_INVENTORY: 'Goods, not counted', SERVICE: 'Service', INVENTORY: 'Stock item (counted)' };
 
 /** A quantity as people write it: 3, 2.5. */
 export const qty = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));

@@ -6676,3 +6676,41 @@ async fn us_payroll_state_forms() -> TestResult {
     );
     Ok(())
 }
+
+/// D75: switching automatic backups on makes the first copy at once (and says where), so "on" is
+/// never shown while no backup exists; without a backup password it says why instead.
+#[tokio::test]
+async fn switching_backups_on_makes_the_first_copy() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let folder = tempfile::tempdir()?;
+    let path = folder.path().to_string_lossy().to_string();
+
+    let no_password = app
+        .local(Method::PUT, "/api/system/backup/settings", &admin, Some(json!({"enabled": true, "folder": path})))
+        .await?;
+    assert_eq!(no_password.status, StatusCode::OK, "{}", no_password.body);
+    assert!(
+        no_password.body["firstBackupError"].as_str().is_some_and(|m| m.contains("password")),
+        "{}",
+        no_password.body
+    );
+    app.local(Method::PUT, "/api/system/backup/settings", &admin, Some(json!({"enabled": false}))).await?;
+
+    let set = app
+        .local(Method::POST, "/api/system/backup/password", &admin, Some(json!({"password": "backup-secret-1"})))
+        .await?;
+    assert_eq!(set.status, StatusCode::NO_CONTENT, "{}", set.body);
+    let on = app.local(Method::PUT, "/api/system/backup/settings", &admin, Some(json!({"enabled": true}))).await?;
+    assert_eq!(on.status, StatusCode::OK, "{}", on.body);
+    let file = on.body["firstBackup"]["file"].as_str().unwrap_or_default().to_string();
+    assert!(!file.is_empty() && std::path::Path::new(&file).exists(), "{}", on.body);
+    let st = app.local(Method::GET, "/api/system/backup", &admin, None).await?;
+    assert!(st.body["status"]["lastSuccessAt"].is_string(), "{}", st.body);
+    assert_ne!(st.body["nextBackupDue"], "now", "the copy just made counts");
+
+    // Saving again while on does not make another copy.
+    let again = app.local(Method::PUT, "/api/system/backup/settings", &admin, Some(json!({"keep": 7}))).await?;
+    assert!(again.body.get("firstBackup").is_none(), "{}", again.body);
+    Ok(())
+}

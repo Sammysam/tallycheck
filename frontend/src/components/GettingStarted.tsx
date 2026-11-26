@@ -42,19 +42,23 @@ export default function GettingStarted() {
       if (settings) {
         list.push({ key: 'company', label: 'Enter your company details', hint: 'Name, address and country — printed on your invoices.', to: '/company-setup', done: !!String(settings['company.name'] ?? '').trim() });
       }
+      // D75: customers and invoices brought in with the opening balances don't count as the user's first ones.
+      type Conv = { status?: string; summary?: { totals?: { invoices?: number; customersCreated?: number } } };
+      const active: Conv[] = Array.isArray(conversions) ? conversions.filter((c: Conv) => c.status !== 'REVERSED') : [];
+      const broughtIn = (k: 'invoices' | 'customersCreated') => active.reduce((n, c) => n + Number(c.summary?.totals?.[k] ?? 0), 0);
       if (conversions !== undefined) {
-        const moved = Array.isArray(conversions) && conversions.some((c: { status?: string }) => c.status !== 'REVERSED');
+        const moved = active.length > 0;
         list.push({ key: 'opening', label: 'Bring in your opening balances', hint: 'Bank balance, what customers owe you and what you owe — or mark it as a new business.', to: '/move-books', done: moved || read(NO_OPENING_BALANCES) === '1' });
       }
       if (customers !== undefined) {
         const n = Array.isArray(customers) ? customers.length : Number(customers?.total ?? 0);
-        list.push({ key: 'customer', label: 'Add your first customer', hint: 'Who you sell to.', to: '/customers', done: n > 0 });
+        list.push({ key: 'customer', label: 'Add your first customer', hint: 'Who you sell to.', to: '/customers', done: n > broughtIn('customersCreated') });
       }
       if (invoices !== undefined) {
-        list.push({ key: 'invoice', label: 'Create and post your first invoice', hint: 'Then record the payment when the money comes in.', to: '/invoices', done: Number(invoices?.total ?? 0) > 0 });
+        list.push({ key: 'invoice', label: 'Create and post your first invoice', hint: 'Then record the payment when the money comes in.', to: '/invoices', done: Number(invoices?.total ?? 0) > broughtIn('invoices') });
       }
       if (backup) {
-        list.push({ key: 'backup', label: 'Turn on automatic backups', hint: 'A copy of your books every day, in a folder you choose.', to: '/settings?tab=backup', done: !!backup?.settings?.enabled });
+        list.push({ key: 'backup', label: 'Turn on automatic backups', hint: backup?.settings?.enabled ? 'Backups are switched on, but no copy has been made yet — open Backup and press Back up now.' : 'A copy of your books every day, in a folder you choose.', to: '/settings?tab=backup', done: !!backup?.settings?.enabled && !!backup?.status?.lastSuccessAt });
       }
       if (Array.isArray(users)) {
         list.push({ key: 'user', label: 'Add a second person', hint: 'An accountant, or a second administrator who can reset your password.', to: '/users', done: users.filter((u: { isActive?: boolean }) => u.isActive !== false).length > 1 });

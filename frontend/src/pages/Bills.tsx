@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api from '../api/client';
+import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
@@ -113,7 +113,7 @@ export default function Bills() {
       toast(ep === 'post' ? 'Bill posted to the books' : ep === 'void' ? 'Bill voided' : 'Done');
       load();
     }
-    catch (err: any) { alert(err?.response?.data?.message ?? 'Action failed'); }
+    catch (err: any) { toast(errMsg(err, 'Action failed'), 'error'); }
   };
 
 

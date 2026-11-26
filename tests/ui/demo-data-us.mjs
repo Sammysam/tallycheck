@@ -431,9 +431,9 @@ try {
   await phase('Taxes: Texas sales tax 8.25% (state 6.25% + local 2%), the default on sales', async () => {
     await go('/taxes');
     await clickText('+ New Tax Code');
-    await set('input[placeholder="e.g. VAT 18%"]', 'Sales Tax 8.25%');
-    await set('input[placeholder="e.g. 18"]', '8.25');
-    await clickText('Add Tax Payable and Tax Receivable');
+    await set('input[placeholder="e.g. Sales tax 6.25%"]', 'Sales Tax 8.25%');
+    await set('input[placeholder="e.g. 6.25"]', '8.25');
+    await clickText('Add Sales Tax Payable and Sales Tax Receivable');
     await waitFor(`!!document.querySelector('select[aria-label="Sales tax account"]')?.value`, 'sales tax account');
     await clickText('Save Tax Code');
     await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('Sales Tax 8.25%'))`, 'sales tax row');
@@ -740,8 +740,8 @@ try {
 
   await phase(`Employees (${EMPLOYEES.length}) with US pay details (Form W-4)`, async () => {
     // US payroll settings first, so the profile shows the US pay section.
-    // A payroll account whose default code is already used by another account (here 2300, which the
-    // sales tax code took) gets an account of its own, as the settings page asks.
+    // A payroll account whose default code is already used by another account (for example a
+    // company's own account on that code) gets an account of its own, as the settings page asks.
     const roles = (await api('GET', '/api/payroll/us/settings')).body.accounts ?? [];
     const all = (await api('GET', '/api/accounts')).body;
     const used = new Set(all.map((a) => a.code));
@@ -805,11 +805,11 @@ try {
   await phase('Texas sales tax paid to the Comptroller for each quarter (journal entries)', async () => {
     for (const [qEnd, paid, label] of [['2026-06-30', '2026-07-20', 'Q2 2026 (Apr – Jun)'], ['2026-09-30', '2026-10-20', 'Q3 2026 (Jul – Sep)']]) {
       const entries = (await api('GET', '/api/ledger/entries')).body;
-      const owed = -entries.filter((e) => e.date <= qEnd).flatMap((e) => e.lines).filter((l) => l.account?.code === '2300')
+      const owed = -entries.filter((e) => e.date <= qEnd).flatMap((e) => e.lines).filter((l) => l.account?.code === '2400')
         .reduce((t, l) => t + Math.round(Number(l.debit) * 100) - Math.round(Number(l.credit) * 100), 0);
       if (!(owed > 0)) continue;
       await journal(paid, `Texas sales & use tax return ${label} – paid to the Comptroller`, `STX-${qEnd.slice(0, 7)}`,
-        [['2300', (owed / 100).toFixed(2), 0, 'Sales tax collected for the quarter'], ['1010', 0, (owed / 100).toFixed(2), 'Paid online (Webfile)']]);
+        [['2400', (owed / 100).toFixed(2), 0, 'Sales tax collected for the quarter'], ['1010', 0, (owed / 100).toFixed(2), 'Paid online (Webfile)']]);
     }
   });
 

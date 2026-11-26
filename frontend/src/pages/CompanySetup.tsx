@@ -41,7 +41,7 @@ const STEPS: Step[] = [
   { id: 'payment', title: 'How do customers pay you?', help: 'Printed on invoices and statements — for example your bank and account number.', keys: ['company.paymentInstructions'] },
   { id: 'footer', title: 'A note at the bottom of your invoices', help: 'For example “Thank you for your business”.', keys: ['company.footerNote'] },
   // D73: keep the books safe, and bring in what an existing business already has.
-  { id: 'backup', title: 'Keep your books safe', help: 'TallyCheck can copy your books to a folder every day, protected by a password. Choose a folder that is not on this PC’s main drive if you can (a USB drive or a synced folder).', keys: [] },
+  { id: 'backup', title: 'Keep your books safe', help: 'TallyCheck copies your books to a folder every day, protected by a password. The folder below works; a USB drive or a folder that syncs to the cloud is safer, because it survives this PC breaking. The first copy is made as soon as you press Next.', keys: [] },
   { id: 'opening', title: 'Do you already have a business running?', help: 'If you do, bring in what you have today — your bank balance, what customers owe you and what you owe — so your reports start from the right figures.', keys: [] },
   { id: 'review', title: 'All done — check your details', help: 'Click a row to change it. You can change everything later under Administration → Settings.', keys: [] },
 ];
@@ -176,8 +176,14 @@ export default function CompanySetup() {
       if (backupPassword !== backupConfirm) { setError('The two backup passwords are not the same.'); return false; }
       await api.post('/system/backup/password', { password: backupPassword });
     }
-    await api.put('/system/backup/settings', { enabled: daily, folder: backup.folder.trim(), everyDays: 1 });
+    const r = await api.put('/system/backup/settings', { enabled: daily, folder: backup.folder.trim(), everyDays: 1 });
     setBackup((b) => ({ ...b, passwordSet: true, enabled: daily }));
+    // D75: turning backups on makes the first copy at once; say where it went, or why it failed.
+    if (r.data?.firstBackupError) {
+      setError(`Backups are on, but the first copy could not be made: ${r.data.firstBackupError}`);
+      return false;
+    }
+    if (r.data?.firstBackup?.file) toast(`Your first backup is saved: ${r.data.firstBackup.file}`);
     setBackupPassword('');
     setBackupConfirm('');
     return true;
@@ -295,7 +301,7 @@ export default function CompanySetup() {
             </label>
             <label className={`flex items-start gap-3 p-3 border rounded cursor-pointer ${opening === 'existing' ? 'border-orange-500 bg-orange-50' : 'border-[#ddd]'}`}>
               <input type="radio" name="opening" checked={opening === 'existing'} onChange={() => setOpening('existing')} className="mt-1" />
-              <span><span className="block text-sm font-medium text-gray-900">It’s already running</span><span className="block text-xs text-gray-600">After this setup you enter your bank and cash balances, what each customer owes you and what you owe each supplier — about two minutes. You can also bring in files from QuickBooks, Xero or a spreadsheet.</span></span>
+              <span><span className="block text-sm font-medium text-gray-900">It’s already running</span><span className="block text-xs text-gray-600">After this setup you enter your bank and cash balances, what each customer owes you and what you owe each supplier — it takes a few minutes. You can also bring in files from QuickBooks, Xero or a spreadsheet.</span></span>
             </label>
           </div>
         );
@@ -395,13 +401,14 @@ export default function CompanySetup() {
 
             <div ref={box}>
               {step.id === 'review' ? (
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
+                  <colgroup><col style={{ width: '9.5rem' }} /><col /><col style={{ width: '4.5rem' }} /></colgroup>
                   <tbody>
                     {STEPS.slice(0, last).map((s, i) => (
                       <tr key={s.id} className="border-b border-[#eee] cursor-pointer hover:bg-[#f7f7f7]" onClick={() => go(i)} title="Change">
                         <td className="py-2 pr-3 text-gray-600 whitespace-nowrap align-top">{SHORT[s.id]}</td>
-                        <td className="py-2 text-gray-900">{summary(s) || <span className="text-gray-400">Not entered</span>}</td>
-                        <td className="py-2 pl-2 text-xs text-orange-600 align-top">Change</td>
+                        <td className="py-2 text-gray-900 break-all" style={{ overflowWrap: 'anywhere' }}>{summary(s) || <span className="text-gray-400">Not entered</span>}</td>
+                        <td className="py-2 pl-2 text-xs text-orange-600 align-top whitespace-nowrap"><button type="button" className="underline" onClick={(e) => { e.stopPropagation(); go(i); }}>Change</button></td>
                       </tr>
                     ))}
                   </tbody>

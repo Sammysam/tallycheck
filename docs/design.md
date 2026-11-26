@@ -1095,6 +1095,22 @@ recommendations without answering each one individually; revisit any of them on 
   checksum of the baseline only when it is exactly the old file's SHA-384, so installations that
   applied the old file keep opening (saved settings are untouched); any other mismatch is still
   refused. Older commits in the history still contain the old file.
+- **D75 Second first-time-user fixes** (2026-11-26).
+  Fixes from the second first-time-user test. Taxes: a new tax code no longer guesses a payroll or
+  income-tax account (e.g. 2300 Federal Income Tax Withheld) as its sales / purchase account; the
+  accounts it offers to add are 2400 Tax Payable (Sales Tax Payable for a US company) and 1400 Tax
+  Receivable, withholding 1450 / 2450 — outside 2300–2390, which US payroll uses — with US examples
+  for a US company. Backups: `PUT /system/backup/settings` that switches automatic backups on makes
+  the first copy at once when one is due and answers `firstBackup` (or `firstBackupError`); the
+  wizard says where it went, and the checklist ticks backups only once a copy exists. Products: a
+  new product is "Goods, not counted" unless stock counting is chosen; a post refused for short
+  stock opens the app's own window with "Stop counting <product> and post" (invoice and bill
+  actions no longer use browser pop-ups). Opening balances: an open invoice or bill brought in
+  without a due date is due 30 days after its date, so it is not overdue the day it comes in; the
+  checklist does not count the customers and invoices a conversion brought in; Quick start shows
+  its check in its own words (owns / owes / worth, customers owe you, you owe suppliers), country
+  examples, dates in the company style and a "Go to my dashboard" button. The wizard's review page
+  wraps long values and keeps its Change buttons visible.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

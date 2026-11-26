@@ -17,6 +17,7 @@ import RecurringScheduleForm from '../components/RecurringScheduleForm';
 import { nextAfter, type Schedule } from '../lib/recurring';
 import { toast } from '../lib/toast';
 import { fmtDate } from '../lib/region';
+import Dialog from '../components/desktop/Dialog';
 
 interface Invoice {
   id: string;
@@ -58,6 +59,9 @@ export default function Invoices() {
   const [recurringFrom, setRecurringFrom] = useState<Invoice | null>(null);
   const [waiting, setWaiting] = useState(0);
   const navigate = useNavigate();
+  // D75: an invoice refused for short stock, and the product it was refused for.
+  const [stockProblem, setStockProblem] = useState<{ invoiceId: string; item: string; message: string } | null>(null);
+  const [fixing, setFixing] = useState(false);
 
   // List filters — all optional, combined with AND by the API.
   const [filters, setFilters] = useState(emptyFilters);
@@ -145,7 +149,7 @@ export default function Invoices() {
       setShowSignatory(false);
       setShowForm(true);
     } catch (err: any) {
-      alert(errMsg(err, 'Failed to load invoice'));
+      toast(errMsg(err, 'Failed to load invoice'), 'error');
     }
   };
 
@@ -156,7 +160,7 @@ export default function Invoices() {
       await api.delete(`/invoices/${r.id}`);
       load();
     } catch (err: any) {
-      alert(errMsg(err, 'Failed to delete invoice'));
+      toast(errMsg(err, 'Failed to delete invoice'), 'error');
     }
   };
 
@@ -165,9 +169,9 @@ export default function Invoices() {
       const { data } = await api.post(`/invoices/${id}/duplicate`);
       setPage(1);
       await load(1);
-      alert(`Copied to draft ${data.invoiceNumber}`);
+      toast(`Copied to draft ${data.invoiceNumber}`);
     } catch (err: any) {
-      alert(errMsg(err, 'Failed to duplicate invoice'));
+      toast(errMsg(err, 'Failed to duplicate invoice'), 'error');
     }
   };
 
@@ -193,7 +197,7 @@ export default function Invoices() {
       toast(status === 'POSTED' ? `${r.invoiceNumber} posted to the books` : status === 'VOID' ? `${r.invoiceNumber} voided` : `${r.invoiceNumber} is a draft again`);
       load();
     } catch (err: any) {
-      alert(errMsg(err, 'Failed to change status'));
+      toast(errMsg(err, 'Failed to change status'), 'error');
     }
   };
 
@@ -213,7 +217,33 @@ export default function Invoices() {
       toast(ep === 'post' ? 'Invoice posted to the books' : ep === 'void' ? 'Invoice voided' : 'Done');
       load();
     }
-    catch (err: any) { alert(errMsg(err, 'Action failed')); }
+    catch (err: any) {
+      const message = errMsg(err, 'Action failed');
+      // D75: a stock refusal gets the app's own box, with a one-click way out.
+      const short = ep === 'post' ? /^Not enough stock of (.+?): /.exec(message) : null;
+      if (short) setStockProblem({ invoiceId: id, item: short[1], message });
+      else toast(message, 'error');
+    }
+  };
+
+  /** D75: stops counting the product the post was refused for, then posts again. */
+  const stopCounting = async () => {
+    if (!stockProblem) return;
+    setFixing(true);
+    try {
+      const { data: list } = await api.get('/items');
+      const item = (list as { id: string; name: string; type: string }[]).find((i) => i.name === stockProblem.item && i.type === 'INVENTORY');
+      if (!item) throw new Error(`Could not find ${stockProblem.item} under Products & Services`);
+      await api.patch(`/items/${item.id}`, { type: 'NON_INVENTORY' });
+      await api.post(`/invoices/${stockProblem.invoiceId}/post`);
+      toast(`${stockProblem.item} is no longer counted. Invoice posted to the books`);
+      setStockProblem(null);
+      load();
+    } catch (err) {
+      setStockProblem((p) => (p ? { ...p, message: errMsg(err, err instanceof Error ? err.message : 'Could not change the product') } : p));
+    } finally {
+      setFixing(false);
+    }
   };
 
   const downloadPdf = async (id: string) => {
@@ -221,7 +251,7 @@ export default function Invoices() {
       const { data } = await api.get(`/invoices/${id}`);
       openInvoicePdf(data, settings);
     } catch (err: any) {
-      alert(errMsg(err, 'Failed to load invoice'));
+      toast(errMsg(err, 'Failed to load invoice'), 'error');
     }
   };
 
@@ -234,7 +264,7 @@ export default function Invoices() {
       previewInvoice(data, settings, tab);
     } catch (err: any) {
       tab?.close();
-      alert(errMsg(err, 'Failed to load invoice'));
+      toast(errMsg(err, 'Failed to load invoice'), 'error');
     }
   };
 
@@ -245,7 +275,7 @@ export default function Invoices() {
       printInvoice(data, settings, tab);
     } catch (err: any) {
       tab?.close();
-      alert(errMsg(err, 'Failed to load invoice'));
+      toast(errMsg(err, 'Failed to load invoice'), 'error');
     }
   };
 
@@ -265,7 +295,7 @@ export default function Invoices() {
       await api.patch(`/invoices/${r.id}`, { poNumber: next });
       load();
     } catch (err: any) {
-      alert(errMsg(err, 'Failed to update PO No'));
+      toast(errMsg(err, 'Failed to update PO No'), 'error');
     }
   };
 
@@ -292,6 +322,17 @@ export default function Invoices() {
 
   return (
     <div>
+      {stockProblem && (
+        <Dialog title="Not enough stock to post this invoice" width={520} onClose={() => !fixing && setStockProblem(null)}
+          buttons={<>
+            <button className="btn btn-primary" disabled={fixing} onClick={stopCounting}>{fixing ? 'Posting…' : `Stop counting ${stockProblem.item} and post`}</button>
+            <button className="btn btn-secondary" disabled={fixing} onClick={() => navigate('/items')}>Open Products &amp; Services</button>
+            <button className="btn btn-secondary" disabled={fixing} onClick={() => setStockProblem(null)}>Close</button>
+          </>}>
+          <p className="text-sm text-gray-800">{stockProblem.message}</p>
+          <p className="text-sm text-gray-600 mt-3">TallyCheck is counting how many <strong>{stockProblem.item}</strong> you have, and the count is lower than this invoice. If you don’t need TallyCheck to count it (for example you make it yourself), stop counting it and the invoice is posted. If you do, record the bill that brought it in, or adjust the stock, then post again.</p>
+        </Dialog>
+      )}
       <PageHeader
         title={showForm ? (editDraft ? `Edit ${editDraft.invoiceNumber}` : 'New Invoice') : 'Invoices'}
         action={

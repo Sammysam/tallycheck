@@ -485,8 +485,13 @@ pub async fn run(db: &Db, req: Request, created_by: Option<&str>, commit: bool) 
                 );
                 continue;
             }
+            // D75: without a due date an opening document is due 30 days after its date, so it is not
+            // shown as overdue the day it comes in (ageing counts a document without one from its date).
             let due = match d.due_date.trim() {
-                "" => None,
+                "" => chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                    .ok()
+                    .and_then(|d| d.checked_add_days(chrono::Days::new(30)))
+                    .map(|d| d.format("%Y-%m-%d").to_string()),
                 t => match parse_date(t, req.date_order) {
                     Some(due) => Some(due),
                     None => {

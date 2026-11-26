@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { money } from '../lib/money';
+import { region } from '../lib/region';
 import { freeCode, type ExistingAccount } from '../lib/conversionFiles';
 
 /**
@@ -17,8 +18,8 @@ type ListKey = 'banks' | 'customers' | 'suppliers' | 'assets' | 'loans';
 
 const LISTS: { key: ListKey; title: string; help: string; name: string; example: string; due?: boolean }[] = [
   { key: 'banks', title: 'Money in the bank and cash', help: 'Each bank account, cash box or wallet, with its balance on the cut-over day.', name: 'Account', example: 'e.g. BOC current account' },
-  { key: 'customers', title: 'Customers who owe you', help: 'What each customer still owes you. One line per customer is enough.', name: 'Customer', example: 'e.g. Perera Stores', due: true },
-  { key: 'suppliers', title: 'Suppliers you owe', help: 'What you still owe each supplier.', name: 'Supplier', example: 'e.g. Kandy Wholesale', due: true },
+  { key: 'customers', title: 'Customers who owe you', help: 'What each customer still owes you. One line per customer is enough. No due date? It is set to 30 days after the cut-over date.', name: 'Customer', example: 'e.g. Perera Stores', due: true },
+  { key: 'suppliers', title: 'Suppliers you owe', help: 'What you still owe each supplier. No due date? It is set to 30 days after the cut-over date.', name: 'Supplier', example: 'e.g. Kandy Wholesale', due: true },
   { key: 'assets', title: 'Other things the business owns (if any)', help: 'Vehicles, equipment, stock, deposits paid… at their value today.', name: 'What', example: 'e.g. Delivery van' },
   { key: 'loans', title: 'Loans and other debts (if any)', help: 'Bank loans, credit cards, money owed to the owner…', name: 'What', example: 'e.g. Bank loan' },
 ];
@@ -33,6 +34,17 @@ function toCents(text: string): number | null {
 }
 
 const plain = (cents: number) => (cents / 100).toFixed(2);
+/** D75: examples in the company's own country. */
+const EXAMPLES: Record<string, Partial<Record<ListKey, string>>> = {
+  US: { banks: 'e.g. Business checking', customers: 'e.g. Corner Cafe', suppliers: 'e.g. Main Street Supply' },
+  LK: {},
+  OTHER: { banks: 'e.g. Business current account', customers: 'e.g. City Traders', suppliers: 'e.g. Main Street Supply' },
+};
+const exampleFor = (key: ListKey, fallback: string) => {
+  const c = region().country;
+  return EXAMPLES[c === 'US' || c === 'LK' ? c : 'OTHER'][key] ?? fallback;
+};
+
 const blank = (): Row => ({ name: '', amount: '', due: '' });
 const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -143,7 +155,7 @@ export default function QuickStartForm({ existing, busy, onBack, onCheck }: {
                 {lists[l.key].map((r, i) => (
                   <tr key={i}>
                     <td className="pr-2 py-0.5">
-                      <input className="w-64" placeholder={l.example} value={r.name} aria-label={`${l.title} ${l.name} ${i + 1}`} onChange={(e) => set(l.key, i, { name: e.target.value })} />
+                      <input className="w-64" placeholder={exampleFor(l.key, l.example)} value={r.name} aria-label={`${l.title} ${l.name} ${i + 1}`} onChange={(e) => set(l.key, i, { name: e.target.value })} />
                     </td>
                     <td className="pr-2">
                       <input className="w-36 text-right" inputMode="decimal" placeholder="0.00" value={r.amount} aria-label={`${l.title} amount ${i + 1}`} onChange={(e) => set(l.key, i, { amount: e.target.value })} />
@@ -171,7 +183,7 @@ export default function QuickStartForm({ existing, busy, onBack, onCheck }: {
         <div className="flex justify-between"><span>The business owns</span><span>{money(owns / 100)}</span></div>
         <div className="flex justify-between"><span>The business owes</span><span>{money(owes / 100)}</span></div>
         <div className="flex justify-between font-semibold border-t border-gray-200 mt-1 pt-1"><span>So it is worth</span><span>{money(worth / 100)}</span></div>
-        <p className="text-xs text-gray-500 mt-1">This goes to 3900 Opening Balance Equity; your accountant can later move it to the owner’s capital or retained earnings.</p>
+        <p className="text-xs text-gray-500 mt-1">This is the owner’s share of the business. TallyCheck keeps it in an account called Opening Balance Equity (3900); your accountant can later move it to the owner’s capital or retained earnings.</p>
       </div>
 
       {problems.length > 0 && (

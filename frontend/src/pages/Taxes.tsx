@@ -18,6 +18,11 @@ import type { TaxCode, TaxKind } from '../lib/taxes';
 interface Account { id: string; code: string; name: string; type: string; isActive: boolean }
 interface Part { taxCodeId: string; isCompound: boolean }
 
+/** D75: payroll and income-tax accounts are never offered as a sales / purchase tax account guess. */
+const PAYROLL = /withh|payroll|income tax|social security|medicare|futa|suta|unemployment|epf|etf|paye|stamp|401|section 125|disability|leave|local income|salar|wage/i;
+const isSalesTaxAccount = (a: Account) => /tax|vat|gst/i.test(a.name) && !PAYROLL.test(a.name);
+const isWithholdingAccount = (a: Account) => /withholding tax|wht/i.test(a.name) && !/federal|state|local|income/i.test(a.name);
+
 const KIND_LABEL: Record<TaxKind, string> = { STANDARD: 'Standard', GROUP: 'Group', WITHHOLDING: 'Withholding' };
 const emptyForm = {
   name: '', kind: 'STANDARD' as TaxKind, rate: '', description: '', salesAccountId: '', purchaseAccountId: '',
@@ -59,10 +64,10 @@ export default function Taxes() {
 
   const guess = (kind: TaxKind) => {
     const [sales, purchase] = choices(kind);
-    const match = (list: Account[], re: RegExp) => list.find((a) => re.test(a.name))?.id ?? '';
+    const match = (list: Account[], ok: (a: Account) => boolean) => list.find(ok)?.id ?? '';
     return kind === 'WITHHOLDING'
-      ? { salesAccountId: match(sales, /withh|wht/i), purchaseAccountId: match(purchase, /withh|wht/i) }
-      : { salesAccountId: match(sales, /tax|vat|gst/i), purchaseAccountId: match(purchase, /tax|vat|gst/i) };
+      ? { salesAccountId: match(sales, isWithholdingAccount), purchaseAccountId: match(purchase, isWithholdingAccount) }
+      : { salesAccountId: match(sales, isSalesTaxAccount), purchaseAccountId: match(purchase, isSalesTaxAccount) };
   };
 
   const startNew = () => {
@@ -94,14 +99,16 @@ export default function Taxes() {
     try {
       const taken = new Set(accounts.map((a) => a.code));
       const pick = (preferred: string[]) => preferred.find((c) => !taken.has(c)) ?? '';
+      // D75: codes outside 2300–2390, which US payroll uses for its own payable accounts.
+      const us = region().country === 'US';
       const pair = form.kind === 'WITHHOLDING'
         ? [
           { code: pick(['1450', '1460', '1470']), name: 'Withholding Tax Receivable', type: 'ASSET', subtype: 'current_asset' },
-          { code: pick(['2350', '2360', '2370']), name: 'Withholding Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
+          { code: pick(['2450', '2460', '2470']), name: 'Withholding Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
         ]
         : [
-          { code: pick(['2300', '2310', '2390']), name: 'Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
-          { code: pick(['1400', '1410', '1490']), name: 'Tax Receivable', type: 'ASSET', subtype: 'current_asset' },
+          { code: pick(['2400', '2410', '2420']), name: us ? 'Sales Tax Payable' : 'Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
+          { code: pick(['1400', '1410', '1490']), name: us ? 'Sales Tax Receivable' : 'Tax Receivable', type: 'ASSET', subtype: 'current_asset' },
         ];
       const made = await Promise.all(pair.map((a) => api.post('/accounts', a)));
       await loadAccounts();
@@ -163,8 +170,9 @@ export default function Taxes() {
   const lineCodes = codes.filter((c) => c.isActive && c.kind !== 'WITHHOLDING');
   const [salesChoices, purchaseChoices] = choices(form.kind);
   const hasAccounts = form.kind === 'WITHHOLDING'
-    ? accounts.some((a) => /withh|wht/i.test(a.name))
-    : accounts.some((a) => a.type === 'LIABILITY' && /tax|vat|gst/i.test(a.name));
+    ? accounts.some((a) => a.isActive && isWithholdingAccount(a))
+    : accounts.some((a) => a.isActive && a.type === 'LIABILITY' && isSalesTaxAccount(a));
+  const us = region().country === 'US';
 
   return (
     <div>
@@ -180,7 +188,7 @@ export default function Taxes() {
           <form onSubmit={submit} className="form-grid" style={{ gridTemplateColumns: '2fr 1fr 1fr' }} aria-label="Tax code">
             <label className="text-xs font-medium text-gray-600">
               Name (as printed on invoices)
-              <input className="mt-1" required maxLength={60} placeholder="e.g. VAT 18%" value={form.name}
+              <input className="mt-1" required maxLength={60} placeholder={us ? 'e.g. Sales tax 6.25%' : 'e.g. VAT 18%'} value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </label>
             <label className="text-xs font-medium text-gray-600">
@@ -194,7 +202,7 @@ export default function Taxes() {
             {form.kind !== 'GROUP' ? (
               <label className="text-xs font-medium text-gray-600">
                 Rate %
-                <input className="mt-1" required type="number" min="0" max="100" step="0.0001" placeholder="e.g. 18" value={form.rate}
+                <input className="mt-1" required type="number" min="0" max="100" step="0.0001" placeholder={us ? 'e.g. 6.25' : 'e.g. 18'} value={form.rate}
                   onChange={(e) => setForm({ ...form, rate: e.target.value })} />
               </label>
             ) : <span />}
@@ -243,9 +251,9 @@ export default function Taxes() {
                 </label>
                 {!hasAccounts && (
                   <p className="text-xs text-gray-600" style={{ gridColumn: '1 / -1' }}>
-                    No {form.kind === 'WITHHOLDING' ? 'withholding' : ''} tax accounts in the chart yet.{' '}
+                    No {form.kind === 'WITHHOLDING' ? 'withholding tax' : us ? 'sales tax' : 'tax'} accounts in the chart yet.{' '}
                     <button type="button" className="btn-link" disabled={busy} onClick={createAccounts}>
-                      {form.kind === 'WITHHOLDING' ? 'Add Withholding Tax Receivable and Payable' : 'Add Tax Payable and Tax Receivable'}
+                      {form.kind === 'WITHHOLDING' ? 'Add Withholding Tax Receivable and Payable' : us ? 'Add Sales Tax Payable and Sales Tax Receivable' : 'Add Tax Payable and Tax Receivable'}
                     </button>
                   </p>
                 )}

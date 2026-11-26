@@ -836,7 +836,7 @@ try {
       const entries = (await api('GET', '/api/ledger/entries')).body;
       const bal = (code) => entries.filter((e) => e.date <= qEnd).flatMap((e) => e.lines).filter((l) => l.account?.code === code)
         .reduce((t, l) => t + Math.round(Number(l.debit) * 100) - Math.round(Number(l.credit) * 100), 0);
-      const payable = -bal('2300');  // VAT charged on sales, not yet settled
+      const payable = -bal('2400');  // VAT charged on sales, not yet settled
       const reclaim = bal('1400');   // VAT paid on purchases, not yet set off
       await go('/ledger');
       await clickText('+ New Journal Entry');
@@ -845,7 +845,7 @@ try {
       await set('input[placeholder^="Description"]', `VAT return ${label} – paid to Inland Revenue`);
       await set('input[placeholder^="Reference"]', `VAT-${qEnd.slice(0, 7)}`);
       await clickText('+ Add line'); await sleep(150);
-      const rows = [['2300', payable, 0, 'Output VAT for the quarter'], ['1400', 0, reclaim, 'Input VAT set off'], ['1010', 0, payable - reclaim, 'Paid by bank transfer']];
+      const rows = [['2400', payable, 0, 'Output VAT for the quarter'], ['1400', 0, reclaim, 'Input VAT set off'], ['1010', 0, payable - reclaim, 'Paid by bank transfer']];
       for (let i = 0; i < rows.length; i++) {
         const [code, dr, cr, note] = rows[i];
         await choose(`select[aria-label="Account for line ${i + 1}"]`, code + ' ');

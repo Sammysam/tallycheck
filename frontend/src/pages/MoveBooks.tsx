@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Undo2, Upload } from 'lucide-react';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -65,6 +65,7 @@ export default function MoveBooks() {
   // D59: quick start (typed figures) or the old system's files.
   const [mode, setMode] = useState<'quick' | 'files'>('quick');
   const [quickBody, setQuickBody] = useState<QuickStartBody | null>(null);
+  const navigate = useNavigate();
   const [source, setSource] = useState(SOURCES[0]);
   const [cutover, setCutover] = useState(lastMonthEnd());
   const [dateOrder, setDateOrder] = useState<DateOrder>(/^en-US$/i.test(region().locale) ? 'MDY' : 'DMY');
@@ -178,6 +179,16 @@ export default function MoveBooks() {
   const unchosen = choices.filter((c) => !c.accountId && (!c.code.trim() || !c.name.trim() || !c.type));
 
   // ── Preview and save ────────────────────────────────────────────────────
+  // D75: what the Quick start figures say, in the form's own words (owns / owes / worth).
+  const quickSummary = useMemo(() => {
+    if (!quickBody) return null;
+    const cents = (v: string) => Math.round(Number(v || 0) * 100);
+    const lines = quickBody.balances.filter((b) => b.account !== 'Opening balance equity');
+    const owns = lines.reduce((n, b) => n + cents(b.debit), 0) / 100;
+    const owes = lines.reduce((n, b) => n + cents(b.credit), 0) / 100;
+    return { owns, owes };
+  }, [quickBody]);
+
   const payload = (acceptDifferences: boolean, quick: QuickStartBody | null = quickBody) => (mode === 'quick' && quick ? {
     source: 'Quick start', cutoverDate: cutover, dateOrder: 'YMD', acceptDifferences, ...quick,
   } : {
@@ -290,7 +301,7 @@ export default function MoveBooks() {
             <h3 className="text-sm font-semibold text-gray-800 mb-2">How do you want to start?</h3>
             <div className="grid gap-2 sm:grid-cols-2 mb-4" role="radiogroup" aria-label="How to start">
               {([
-                ['quick', 'Quick start (about 5 minutes)', 'No files needed. Type your bank balances, who owes you, whom you owe, and anything else the business owns or owes. Best if your old system is custom-made or you just want to try TallyCheck.'],
+                ['quick', 'Quick start (a few minutes)', 'No files needed. Type your bank balances, who owes you, whom you owe, and anything else the business owns or owes. Best if your old system is custom-made or you just want to try TallyCheck.'],
                 ['files', 'From your old system’s files', 'Upload the trial balance and, if you have them, the account list, unpaid invoices and bills, customers and vendors exported from QuickBooks, Xero, Tally or Excel.'],
               ] as const).map(([value, title, text]) => (
                 <button
@@ -516,14 +527,27 @@ export default function MoveBooks() {
               </div>
             ))}
           </div>
+          {/* D75: Quick start checks in the words of its own form; the accountant's table is for files. */}
+          {mode === 'quick' && quickSummary ? (
+            <table className="text-sm mb-3 report-table" aria-label="Your business today">
+              <tbody>
+                <tr><td className="pr-6">The business owns (bank, cash, what customers owe, other things)</td><td className="text-right">{money(quickSummary.owns)}</td></tr>
+                <tr><td className="pr-6">The business owes (suppliers, loans, other debts)</td><td className="text-right">{money(quickSummary.owes)}</td></tr>
+                <tr className="font-semibold"><td className="pr-6">So it is worth (the owner’s share)</td><td className="text-right">{money(quickSummary.owns - quickSummary.owes)}</td></tr>
+                <tr><td className="pr-6">Customers owe you</td><td className="text-right">{money(outcome.check.openInvoices)}</td></tr>
+                <tr><td className="pr-6">You owe suppliers</td><td className="text-right">{money(outcome.check.openBills)}</td></tr>
+              </tbody>
+            </table>
+          ) : (
           <table className="text-sm mb-3 report-table">
             <tbody>
               <tr><td className="pr-6">Trial balance debits / credits</td><td className="text-right">{money(outcome.check.debits)}</td><td className="text-right pl-4">{money(outcome.check.credits)}</td></tr>
               <tr><td className="pr-6">Receivables in the trial balance / unpaid invoices</td><td className="text-right">{money(outcome.check.receivablesBalance)}</td><td className="text-right pl-4">{money(outcome.check.openInvoices)}</td></tr>
               <tr><td className="pr-6">Payables in the trial balance / unpaid bills</td><td className="text-right">{money(outcome.check.payablesBalance)}</td><td className="text-right pl-4">{money(outcome.check.openBills)}</td></tr>
-              <tr><td className="pr-6">Left in 3900 Opening Balance Equity</td><td className="text-right" colSpan={2}>{money(outcome.check.leftInOpeningEquity)}</td></tr>
+              <tr><td className="pr-6">Difference left in 3900 Opening Balance Equity</td><td className="text-right" colSpan={2}>{money(outcome.check.leftInOpeningEquity)}</td></tr>
             </tbody>
           </table>
+          )}
 
           {otherIssues.length > 0 && (
             <div className="mb-3">
@@ -556,13 +580,18 @@ export default function MoveBooks() {
 
       {step === 'done' && outcome && (
         <section className="card">
-          <p className="text-sm text-green-700 flex items-center gap-1.5 mb-2"><CheckCircle2 size={16} /> {outcome.name}.</p>
+          <p className="text-sm text-green-700 flex items-center gap-1.5 mb-2"><CheckCircle2 size={16} /> {outcome.name.replace(/\d{4}-\d{2}-\d{2}/g, (d) => fmtDate(d))}.</p>
           <ul className="text-sm list-disc pl-5 space-y-1 mb-3">
-            <li>Open the <Link className="text-blue-700 hover:underline" to="/reports/trial-balance">Trial Balance</Link> as of {fmtDate(cutover)} and compare it with the old system’s.</li>
+            {mode === 'quick'
+              ? <li>See where the business stands on the <Link className="text-blue-700 hover:underline" to="/reports/balance-sheet">Balance Sheet</Link> as of {fmtDate(cutover)}.</li>
+              : <li>Open the <Link className="text-blue-700 hover:underline" to="/reports/trial-balance">Trial Balance</Link> as of {fmtDate(cutover)} and compare it with the old system’s.</li>}
             <li>The unpaid invoices and bills are on the <Link className="text-blue-700 hover:underline" to="/invoices">Invoices</Link> and <Link className="text-blue-700 hover:underline" to="/bills">Bills</Link> screens, ready to be paid.</li>
             <li>Then <Link className="text-blue-700 hover:underline" to="/settings?tab=closing">lock the books</Link> through {fmtDate(cutover)}, so nothing is changed before the cut-over by mistake.</li>
           </ul>
-          <button className="btn btn-secondary" onClick={restart}>Back to the start</button>
+          <div className="flex gap-2">
+            <button className="btn btn-primary" onClick={() => navigate('/')}>Go to my dashboard</button>
+            <button className="btn btn-secondary" onClick={restart}>Back to the start</button>
+          </div>
         </section>
       )}
 

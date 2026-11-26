@@ -138,6 +138,7 @@ pub async fn update_settings(State(s): State<AppState>, _a: LocalAdmin, body: Js
     let dir = data_dir(&s)?;
     let b = body.object();
     let mut settings = schedule::load_settings(dir);
+    let was_enabled = settings.enabled;
     if let Some(v) = b.get("enabled") {
         settings.enabled =
             v.as_bool().ok_or_else(|| AppError::validation(vec!["enabled must be a boolean value".into()]))?;
@@ -170,7 +171,20 @@ pub async fn update_settings(State(s): State<AppState>, _a: LocalAdmin, body: Js
         std::fs::create_dir_all(&folder).map_err(|e| AppError::bad_request(format!("Cannot use that folder: {e}")))?;
     }
     schedule::save_settings(dir, &settings).map_err(AppError::internal)?;
-    Ok(Json(json!(settings)))
+    // D75: switching automatic backups on makes the first copy straight away (when one is due),
+    // so "on" is never shown while no backup exists. A failure is reported, the settings stay saved.
+    let mut answer = json!(settings);
+    if settings.enabled && !was_enabled {
+        match schedule::run_if_due(&s.db, dir).await {
+            Some(Ok(info)) => {
+                tracing::info!(file = %info.file, "first scheduled backup written and verified");
+                answer["firstBackup"] = json!(info);
+            }
+            Some(Err(e)) => answer["firstBackupError"] = json!(e.to_string()),
+            None => {}
+        }
+    }
+    Ok(Json(answer))
 }
 
 /// D62: opens the system's folder window on the main PC (desktop app only) and answers the
