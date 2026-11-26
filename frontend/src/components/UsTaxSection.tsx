@@ -38,6 +38,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
       stateAnnualCredit: t.stateAnnualCredit ? String(t.stateAnnualCredit) : '',
       stateElectedRate: t.stateElectedRate == null ? '' : String(t.stateElectedRate),
       stateAnnualDeduction: t.stateAnnualDeduction ? String(t.stateAnnualDeduction) : '',
+      stateCode: t.stateCode ?? '',
     };
     for (const k of AMOUNTS) f[k] = t[k] ? String(t[k]) : '';
     setForm(f);
@@ -74,6 +75,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
         stateAnnualCredit: num(form.stateAnnualCredit ?? ''),
         stateElectedRate: (form.stateElectedRate ?? '') === '' ? null : Number(form.stateElectedRate),
         stateAnnualDeduction: num(form.stateAnnualDeduction ?? ''),
+        stateCode: (form.stateCode ?? '') === '' ? null : form.stateCode,
         ...flags,
       };
       for (const k of AMOUNTS) body[k] = num(form[k] ?? '');
@@ -254,8 +256,17 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
           {stateForm?.override && <Money label={stateForm.override} k="stateDeductionOverride" form={form} set={set} />}
           {stateForm?.credit && <Money label={stateForm.credit} k="stateAnnualCredit" form={form} set={set} />}
           {stateForm?.deduction && <Money label={stateForm.deduction} k="stateAnnualDeduction" form={form} set={set} />}
+          {stateForm?.code && (
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500">{stateForm.code.label}</span>
+              <select value={form.stateCode ?? ''} onChange={set('stateCode')} aria-label="State form code">
+                {stateForm.code.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+          )}
           <Money label="Extra state withholding $ per paycheck" k="stateExtraWithholding" form={form} set={set} />
         </div>
+        {stateForm?.hint && <p className="text-xs text-gray-500 mb-2">{stateForm.hint}</p>}
         <label className="flex items-center gap-2 text-sm mb-4">
           <input type="checkbox" checked={flags.stateExempt} onChange={(e) => { setSaved(false); setFlags({ ...flags, stateExempt: e.target.checked }); }} />
           Exempt from state income tax withholding

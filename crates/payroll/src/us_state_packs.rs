@@ -23,9 +23,11 @@
 //! Mexico, North Dakota (allowances only on a W-4 from 2019 or earlier), Ohio (from 1 August 2026),
 //! Oklahoma, Rhode Island, Vermont, Virginia (VA-4 personal exemptions $930, 65+ / blind $800) and
 //! West Virginia (IT-104 two-earner table = single, one-earner table = married).
-//! Not built in: Alabama, Arkansas, Connecticut, Maine, Massachusetts, New Jersey, Oregon, Utah,
-//! Wisconsin (their own formulas, step 3); South Carolina and DC (no 2026 withholding method
-//! published for the 2026 law); California, Maryland, New York (step 3).
+//! D66, step 3: Alabama, Arkansas, California, Connecticut, Maine, Maryland, New Jersey, New York
+//! and Wisconsin use their own formula ([`crate::us_state_formulas`]).
+//! Not built in: Oregon (its formula and its tables disagree by $263 a year), Utah and
+//! Massachusetts (2026 publications not yet read), South Carolina and DC (no 2026 withholding
+//! method published).
 
 use crate::us_state::StateRule;
 
@@ -56,7 +58,13 @@ const fn flat(rate: i64, single: i64, married: i64) -> StateRule {
         brackets_hoh: None,
         allowance_wage_limit: None,
         round_annual_to_dollar: false,
+        formula: None,
     }
+}
+
+/// A rule worked out by its state's own formula (D66).
+fn formula(id: &str) -> StateRule {
+    StateRule { method: "FORMULA".into(), formula: Some(id.into()), ..flat(0, 0, 0) }
 }
 
 /// Brackets from `(upper bound in dollars, rate in ppm)`, the last bound 0 meaning no limit.
@@ -166,6 +174,61 @@ pub fn all() -> Vec<Pack> {
             "2026-01-01",
             StateRule { excludes_401k: false, ..flat(30_700, 0, 0) },
             "Pennsylvania REV-415 (SU) 01-23, Employer Withholding Information Guide, and pa.gov Employer Withholding: 3.07% of compensation; 401(k) deferrals are taxable (section 125 health plans are not)",
+        ),
+        // ── D66, step 3: states with their own formula (crate::us_state_formulas) ──
+        pack(
+            "AL",
+            "2026-01-01",
+            formula("AL-2026"),
+            "Alabama Withholding Tax Tables and Instructions for Employers and Withholding Agents (Revised January 2026): standard deduction phased out by income, federal income tax withheld subtracted, A4 personal exemption and dependents; 2% / 4% / 5%",
+        ),
+        pack(
+            "AR",
+            "2026-01-01",
+            formula("AR-2026"),
+            "Arkansas Withholding Tax Formula Method, effective 1 January 2026 (revised for H.B. 1001, top rate 3.7%): $2,470 standard deduction, $100 midrange table, $29 credit per AR4EC exemption (low-income tables not offered)",
+        ),
+        pack(
+            "CA",
+            "2026-01-01",
+            formula("CA-2026"),
+            "California Withholding Schedules for 2026, Method B (Exact Calculation Method), EDD: low-income exemption, $1,000 per DE 4 estimated-deduction allowance, standard deduction, annual rate tables, $168.30 credit per regular allowance (annualized)",
+        ),
+        pack(
+            "MD",
+            "2026-01-01",
+            formula("MD-2026"),
+            "Maryland Employer Withholding Guide effective January 2026 (Revised December 2025): $3,400 standard deduction, $3,200 per MW507 exemption, state rates from 4.75% plus the county rate (2026 county rates, Comptroller memo of 4 February 2026)",
+        ),
+        pack(
+            "ME",
+            "2026-01-01",
+            formula("ME-2026"),
+            "Maine 2026 Withholding Tables for Individual Income Tax (Revised August 2026, retroactive to 1 January 2026): standard deduction phased out by wages, $5,300 per W-4ME allowance, 5.8% / 6.75% / 7.15% and the 2% surcharge; whole dollars",
+        ),
+        pack(
+            "NY",
+            "2026-01-01",
+            formula("NY-2026"),
+            "New York State NYS-50-T-NYS (1/26), Method II exact calculation tables II-A to II-D and Method III (New York City and Yonkers taxes are not included)",
+        ),
+        pack(
+            "CT",
+            "2026-01-01",
+            formula("CT-2026"),
+            "Connecticut TPG-211, 2026 Withholding Calculation Rules (Rev. 12/25): CT-W4 withholding code A, B, C, D, E or F; Tables A–E (exemption, initial tax, 2% add-back, recapture, personal credit); no CT-W4 on file: 6.99%",
+        ),
+        pack(
+            "NJ",
+            "2026-01-01",
+            formula("NJ-2026"),
+            "New Jersey NJ-WT (September 2025) and Tables for Percentage Method of Withholding (from 1 October 2020, current for 2026): rate tables A–E per pay period, NJ-W4 rate letter or A (single / separate) / B (joint / head of household)",
+        ),
+        pack(
+            "WI",
+            "2026-01-01",
+            formula("WI-2026"),
+            "Wisconsin Publication W-166 (1/26), alternate method: deduction phased out by wages, $400 per WT-4 exemption, 3.54% / 4.65% / 5.30% / 7.65% (rates unchanged for 2026, Withholding Tax Update 2026-1)",
         ),
         // ── D65, step 2: bracket states ──────────────────────────────────────────
         pack(
@@ -566,6 +629,9 @@ mod tests {
             assert!(p.from.len() == 10 && p.from.starts_with("2026-"), "{} {}", p.state, p.from);
             assert!((0..=1_000_000).contains(&p.rule.flat_rate), "{}", p.state);
             assert!(!p.source.is_empty());
+            // Every built-in formula exists and works out a paycheck.
+            let e = crate::us_state::StateEmployee { allowances: 1, ..Default::default() };
+            assert!(crate::us_state::withholding(Money::from_cents(250_000), 26, &p.rule, &e).is_ok(), "{}", p.state);
             assert_eq!(
                 crate::us_state::StateRule::from_snapshot(&p.rule.to_snapshot()).as_ref(),
                 Some(&p.rule),

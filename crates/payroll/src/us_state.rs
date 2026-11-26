@@ -32,7 +32,9 @@ pub const NO_INCOME_TAX: &[&str] = &["AK", "FL", "NV", "NH", "SD", "TN", "TX", "
 
 /// What a company may enter (`EMPLOYEE_RATE` is built in only, for Arizona).
 pub const METHODS: &[&str] = &["NONE", "FLAT", "BRACKETS"];
-pub const ALL_METHODS: &[&str] = &["NONE", "FLAT", "BRACKETS", "EMPLOYEE_RATE"];
+/// `FORMULA` (D66) is built in only: a state whose own method is worked out in
+/// [`crate::us_state_formulas`].
+pub const ALL_METHODS: &[&str] = &["NONE", "FLAT", "BRACKETS", "EMPLOYEE_RATE", "FORMULA"];
 
 /// `(upper bound of annual taxable income in cents, None = no limit; rate in ppm)`, ascending.
 pub type Bracket = (Option<i64>, i64);
@@ -67,6 +69,8 @@ pub struct StateRule {
     pub allowance_wage_limit: Option<i64>,
     /// D65: round the yearly tax to the whole dollar before dividing it (Virginia).
     pub round_annual_to_dollar: bool,
+    /// D66: for method FORMULA, the state's formula in [`crate::us_state_formulas`] (e.g. "AL-2026").
+    pub formula: Option<String>,
 }
 
 impl StateRule {
@@ -89,6 +93,7 @@ impl StateRule {
             brackets_hoh: None,
             allowance_wage_limit: None,
             round_annual_to_dollar: false,
+            formula: None,
         }
     }
 
@@ -113,6 +118,7 @@ impl StateRule {
             "bracketsHeadOfHousehold": self.brackets_hoh.as_deref().map(b),
             "allowanceWageLimit": self.allowance_wage_limit,
             "roundAnnualToDollar": self.round_annual_to_dollar,
+            "formula": self.formula,
         })
     }
 
@@ -143,6 +149,7 @@ impl StateRule {
             },
             allowance_wage_limit: v["allowanceWageLimit"].as_i64(),
             round_annual_to_dollar: v["roundAnnualToDollar"].as_bool().unwrap_or(false),
+            formula: v["formula"].as_str().map(str::to_string),
         })
     }
 }
@@ -182,6 +189,9 @@ pub struct StateEmployee {
     pub elected_rate: Option<i64>,
     /// D65: cents a year deducted besides the standard deduction (Mississippi Form 89-350 line 6).
     pub annual_deduction: i64,
+    /// D66: the state form's own status or table letter (Alabama A4 "0" / "MS", Connecticut
+    /// CT-W4 code, New Jersey NJ-W4 rate table, …); None = from the filing status.
+    pub code: Option<String>,
 }
 
 fn too_large() -> AppError {
@@ -194,13 +204,39 @@ pub fn state_wages(gross: Money, pretax_401k: Money, pretax_125: Money, rule: &S
     Money::from_cents((gross.cents() - off).max(0))
 }
 
+/// D66: figures from the rest of the paycheck that some states' formulas use (Alabama and
+/// Oregon subtract federal income tax; Massachusetts deducts social security and Medicare).
+/// Amounts for this pay period.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PayContext {
+    pub federal_income_tax: Money,
+    /// Employee social security + Medicare (incl. Additional Medicare).
+    pub fica: Money,
+}
+
 /// State income tax to withhold this period.
 pub fn withholding(wages: Money, periods: i64, rule: &StateRule, e: &StateEmployee) -> AppResult<Money> {
+    withholding_in(wages, periods, rule, e, &PayContext::default())
+}
+
+/// State income tax to withhold this period, with the rest of the paycheck known.
+pub fn withholding_in(
+    wages: Money,
+    periods: i64,
+    rule: &StateRule,
+    e: &StateEmployee,
+    pay: &PayContext,
+) -> AppResult<Money> {
     if periods <= 0 {
         return Err(AppError::bad_request("Pay periods per year must be positive"));
     }
     if e.exempt || rule.method == "NONE" {
         return Ok(Money::ZERO);
+    }
+    if rule.method == "FORMULA" {
+        let id = rule.formula.as_deref().unwrap_or_default();
+        let tax = crate::us_state_formulas::compute(id, wages, periods, e, pay)?;
+        return tax.checked_add(e.extra).ok_or_else(too_large);
     }
     if rule.method == "EMPLOYEE_RATE" {
         // A percentage of this paycheck's state wages, as the employee elected.
@@ -297,6 +333,7 @@ fn rule_from_row(r: &SqliteRow) -> AppResult<StateRule> {
         brackets_hoh: None,
         allowance_wage_limit: None,
         round_annual_to_dollar: false,
+        formula: None,
     })
 }
 

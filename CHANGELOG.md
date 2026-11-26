@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Built-in 2026 state income tax for Alabama, Arkansas, California, Connecticut, Maine,
+  Maryland (with county tax), New Jersey, New York State and Wisconsin, each worked out with
+  the state's own formula, and the state form's code (A4 status, CT-W4 code, NJ-W4 rate
+  table, Maryland county) on the employee's state certificate (D66).
 - Built-in 2026 state income tax rules for Delaware, Hawaii, Kansas, Minnesota, Mississippi,
   Missouri, Montana, Nebraska, New Mexico, North Dakota, Ohio, Oklahoma, Rhode Island, Vermont,
   Virginia and West Virginia, from each state's own 2026 withholding guide, with each state's form

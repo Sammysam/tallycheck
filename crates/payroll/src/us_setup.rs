@@ -287,6 +287,8 @@ pub struct UsTax {
     pub state_elected_rate: Option<i64>,
     /// D65: Mississippi's exemption dollars.
     pub state_annual_deduction: Money,
+    /// D66: the state form's status code or table letter.
+    pub state_code: Option<String>,
     /// D63: the home state (None = lives in the work state) and the other states worked in,
     /// with shares in hundredths of a percent (the work state has the rest).
     pub resident_state: Option<String>,
@@ -307,6 +309,7 @@ impl UsTax {
             annual_credit: self.state_annual_credit.cents(),
             elected_rate: self.state_elected_rate,
             annual_deduction: self.state_annual_deduction.cents(),
+            code: self.state_code.clone(),
         }
     }
 
@@ -357,6 +360,7 @@ impl UsTax {
             state_annual_credit: Money::ZERO,
             state_elected_rate: None,
             state_annual_deduction: Money::ZERO,
+            state_code: None,
             resident_state: None,
             other_work_states: Vec::new(),
         }
@@ -391,6 +395,7 @@ fn from_row(r: &SqliteRow) -> AppResult<UsTax> {
         state_annual_credit: m("stateAnnualCredit")?,
         state_elected_rate: r.try_get("stateElectedRate")?,
         state_annual_deduction: m("stateAnnualDeduction")?,
+        state_code: r.try_get("stateCode")?,
         resident_state: r.try_get::<Option<String>, _>("residentState")?.filter(|s| !s.is_empty()),
         other_work_states: crate::us_states::parse_others(&r.try_get::<String, _>("otherWorkStates")?),
     })
@@ -436,6 +441,7 @@ fn tax_json(employee_id: &str, t: &UsTax, updated_at: Option<String>) -> Value {
         "stateAnnualCredit": t.state_annual_credit.to_json_number(),
         "stateElectedRate": t.state_elected_rate.map(ppm_to_percent),
         "stateAnnualDeduction": t.state_annual_deduction.to_json_number(),
+        "stateCode": t.state_code,
         "residentState": t.resident_state,
         "otherWorkStates": t.other_work_states.iter()
             .map(|(s, share)| json!({"state": s, "percent": Money::from_cents(*share).to_json_number()}))
@@ -470,8 +476,8 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
              "filingStatus","multipleJobs","dependentsCredit","otherIncome","deductions","extraWithholding","allowances",
              "exemptFromWithholding","pretax401k","pretaxSection125","stateFilingStatus","stateAllowances",
              "stateExtraWithholding","stateExempt","residentState","otherWorkStates","stateHeadOfHousehold",
-             "stateSecondAllowances","stateDeductionOverride","stateAnnualCredit","stateElectedRate","stateAnnualDeduction","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?22,?23,?24,?25,?26,?27,?28,?29,?21,?21)
+             "stateSecondAllowances","stateDeductionOverride","stateAnnualCredit","stateElectedRate","stateAnnualDeduction","stateCode","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?22,?23,?24,?25,?26,?27,?28,?29,?30,?21,?21)
            ON CONFLICT ("employeeId") DO UPDATE SET
              "workState" = excluded."workState", "payType" = excluded."payType",
              "annualSalary" = excluded."annualSalary", "hourlyRate" = excluded."hourlyRate",
@@ -488,6 +494,7 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
              "stateDeductionOverride" = excluded."stateDeductionOverride",
              "stateAnnualCredit" = excluded."stateAnnualCredit", "stateElectedRate" = excluded."stateElectedRate",
              "stateAnnualDeduction" = excluded."stateAnnualDeduction",
+             "stateCode" = excluded."stateCode",
              "updatedAt" = excluded."updatedAt""#,
     )
     .bind(employee_id)
@@ -519,6 +526,7 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
     .bind(t.state_annual_credit.cents())
     .bind(t.state_elected_rate)
     .bind(t.state_annual_deduction.cents())
+    .bind(&t.state_code)
     .execute(&mut *tx)
     .await?;
     let (saved, at) = load_tax(&mut tx, employee_id).await?.ok_or_else(|| AppError::internal("US tax row missing"))?;
@@ -609,8 +617,13 @@ pub async fn preview(db: &Db, employee_id: &str, req: PreviewRequest) -> AppResu
     let plan =
         crate::us_states::plan(&mut c, &t.work_state, &t.other_work_states, t.resident_state.as_deref(), &pay_date)
             .await?;
-    let pay =
-        crate::us_states::Paycheck { gross, pretax_401k: t.pretax_401k, pretax_125: t.pretax_section125, periods };
+    let pay = crate::us_states::Paycheck {
+        gross,
+        pretax_401k: t.pretax_401k,
+        pretax_125: t.pretax_section125,
+        periods,
+        context: crate::us_states::context(&figures)?,
+    };
     let parts = plan.split(&pay, &t.state_employee())?;
     let too_large = || AppError::bad_request("Amount is too large");
     let state_tax = parts.iter().try_fold(Money::ZERO, |a, p| a.checked_add(p.tax)).ok_or_else(too_large)?;

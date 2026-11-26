@@ -920,6 +920,34 @@ recommendations without answering each one individually; revisit any of them on 
   A–E), Oregon (federal tax subtraction) — step 3 with Utah, Massachusetts, California, New York
   and Maryland; South Carolina (a March 2026 law changed the rates; no new withholding formula
   yet) and the District of Columbia (no 2026 withholding tables) wait for the states to publish.
+- **D66 State formulas** (2026-11-27, step 3 of the US state payroll plan).
+  States whose method is not one rate or one bracket table get their own formula in
+  `payroll::us_state_formulas` (method FORMULA, built in only; the rule names the formula, e.g.
+  `AL-2026`), worked out as each state's own 2026 publication writes it: Alabama (standard
+  deduction phased out by income, the annual federal income tax withheld subtracted, A4 status
+  0 / S / MS / M / H and dependents), Arkansas (revised 3.7% formula, $100 midrange table,
+  annual tax rounded to the dollar, $29 per exemption; low-income tables not offered),
+  California (Method B annualized: low-income exemption, estimated-deduction allowances,
+  standard deduction, annual rate tables, $168.30 credit per regular allowance), Connecticut
+  (TPG-211 Tables A–E by CT-W4 code; no code on file = 6.99%), Maine (revised August 2026:
+  phased standard deduction, 2% surcharge, whole dollars), Maryland ($3,400 deduction, $3,200
+  per exemption, state rates from 4.75% plus the county rate of the chosen county — chart
+  rates as the guide directs, Anne Arundel and Frederick progressive; no county = 3.30%,
+  nonresident 2.25%), New Jersey (rate tables A–E per pay period, as printed; NJ-W4 rate letter
+  or A / B by filing status), New York State (Method II per-period tables as printed and Method
+  III; New York City and Yonkers not included) and Wisconsin (W-166 alternate method, deduction
+  phased out by wages). The state formulas see the paycheck's federal income tax and employee
+  social security / Medicare (`PayContext`). The state certificate gains `stateCode` (the
+  form's status code, rate letter or Maryland county). Each state's published examples are
+  unit tests; where a state's examples come from rounded per-period tables (California C and D,
+  New York's two examples printed one cent off half-up, New Jersey's examples from an older
+  table, Connecticut's wage-bracket tables worked on row midpoints) the tests say so. Held:
+  Oregon (its 2026 formula and worked example add $263 a year that its own tables do not —
+  to be confirmed with the Oregon Department of Revenue), Utah and Massachusetts (their 2026
+  publications could not be read; figures only from secondary sources), South Carolina and DC
+  (no 2026 withholding method published). Known limits: New Jersey and Pennsylvania tax some
+  section 125 amounts the app takes off state wages; Maryland's 401(k) treatment follows the
+  federal one as the guide says in general terms.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

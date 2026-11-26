@@ -126,6 +126,7 @@ override, an annual credit and an elected rate for the state certificate. The bu
 rules live in code (`payroll::us_state_packs`), not in the database.
 
 D65 adds `employee_us_tax.stateAnnualDeduction` (exemption dollars on the state certificate).
+D66 adds `employee_us_tax.stateCode` (the state form's status code, rate letter or Maryland county).
 
 ## Seeds
 

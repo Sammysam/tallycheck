@@ -19,6 +19,11 @@ use serde_json::{Map, Value};
 
 const AMOUNT: &[Rule] = &[Rule::IsMoneyNumber, Rule::MinZero];
 
+/// A state form's status code or table letter (D66).
+fn is_state_code(s: &str) -> bool {
+    (1..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
 fn is_state(s: &str) -> bool {
     STATES.contains(&s)
 }
@@ -124,13 +129,15 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
             "stateAnnualDeduction",
         ],
     );
-    for k in ["workState", "residentState"] {
+    for k in ["workState", "residentState", "stateCode"] {
         if let Some(Value::String(s)) = v.input.get_mut(k) {
             *s = s.trim().to_ascii_uppercase();
         }
     }
-    if v.input.get("residentState").and_then(Value::as_str) == Some("") {
-        v.input.insert("residentState".into(), Value::Null);
+    for k in ["residentState", "stateCode"] {
+        if v.input.get(k).and_then(Value::as_str) == Some("") {
+            v.input.insert(k.into(), Value::Null);
+        }
     }
     let others = other_work_states(v.input.get("otherWorkStates"))?;
     v.field("workState", false, &[Rule::IsString, WORK_STATE])
@@ -153,6 +160,14 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         .field("stateDeductionOverride", true, AMOUNT)
         .field("stateAnnualCredit", true, AMOUNT)
         .field("stateAnnualDeduction", true, AMOUNT)
+        .field(
+            "stateCode",
+            true,
+            &[
+                Rule::IsString,
+                Rule::Matches(is_state_code, "stateCode must be 1 to 8 letters or digits, as on the state form"),
+            ],
+        )
         .field("stateElectedRate", true, &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(100.0, "100")]);
     for k in TAX_AMOUNTS {
         v.field(k, true, AMOUNT);
@@ -187,6 +202,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         state_annual_credit: amount("stateAnnualCredit")?,
         state_elected_rate: percent(&m, "stateElectedRate")?,
         state_annual_deduction: amount("stateAnnualDeduction")?,
+        state_code: opt_string(&m, "stateCode"),
         state_allowances: m.get("stateAllowances").and_then(Value::as_i64).unwrap_or(0),
         state_extra_withholding: amount("stateExtraWithholding")?,
         state_exempt: flag("stateExempt"),
@@ -489,6 +505,7 @@ pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>
         brackets_hoh: None,
         allowance_wage_limit: None,
         round_annual_to_dollar: false,
+        formula: None,
         method,
     };
     if rule.method == "FLAT" && m.get("flatRate").is_none_or(Value::is_null) {

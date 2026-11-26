@@ -13,6 +13,7 @@ pub mod us_reports;
 pub mod us_runs;
 pub mod us_setup;
 pub mod us_state;
+pub mod us_state_formulas;
 pub mod us_state_packs;
 pub mod us_states;
 

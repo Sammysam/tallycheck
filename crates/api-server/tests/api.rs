@@ -6244,3 +6244,57 @@ async fn us_payroll_built_in_bracket_states() -> TestResult {
     }
     Ok(())
 }
+
+/// D66: states with their own formulas through a pay run (biweekly $52,000, gross 2,000.00):
+///   NJ rate table E chosen on the NJ-W4: 23.00 + 5.8% × 654 = 60.93
+///   MD Montgomery, single, 2 exemptions: (52,000 − 3,400 − 6,400) × 7.95% ÷ 26 = 129.03
+///   CT code A: (2,110 + 25 add-back) × 0.98 ÷ 26 = 80.47
+///   NY single, 1 allowance: 1,676.90 net → 22.54 + 5.4% × 1,141.90 = 84.20
+#[tokio::test]
+async fn us_payroll_state_formulas() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    us_company(&app, &admin, json!({})).await?;
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    let tax = |extra: Value| merged(&salary, extra);
+    let nj = us_employee(&app, &admin, "US-NJ", json!({}), tax(json!({"workState": "NJ", "stateCode": "e"}))).await?;
+    us_employee(
+        &app,
+        &admin,
+        "US-MD",
+        json!({}),
+        tax(json!({"workState": "MD", "stateAllowances": 2, "stateCode": "MONT"})),
+    )
+    .await?;
+    us_employee(&app, &admin, "US-CT", json!({}), tax(json!({"workState": "CT", "stateCode": "A"}))).await?;
+    us_employee(&app, &admin, "US-NY", json!({}), tax(json!({"workState": "NY", "stateAllowances": 1}))).await?;
+    let saved = app.call(Method::GET, &format!("/api/payroll/employees/{nj}/us-tax"), Some(&admin), None).await?;
+    assert_eq!(saved.body["stateCode"], json!("E"), "codes are kept in capitals");
+    let bad = app
+        .call(
+            Method::PUT,
+            &format!("/api/payroll/employees/{nj}/us-tax"),
+            Some(&admin),
+            Some(tax(json!({"workState": "NJ", "stateCode": "A-1"}))),
+        )
+        .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.body);
+
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    for (code, want) in
+        [("US-NJ", json!(60.93)), ("US-MD", json!(129.03)), ("US-CT", json!(80.47)), ("US-NY", json!(84.2))]
+    {
+        assert_eq!(us_line(&r.body, code)["stateIncomeTax"], want, "{code}");
+    }
+    // The rules list shows the built-in formulas with their sources.
+    let rules = app.call(Method::GET, "/api/payroll/us/state-taxes", Some(&admin), None).await?;
+    let ca = rules.body.as_array().and_then(|a| a.iter().find(|r| r["state"] == "CA")).cloned().unwrap_or_default();
+    assert_eq!(ca["kind"], json!("BUILT_IN"), "{ca}");
+    assert!(ca["source"].as_str().unwrap_or_default().contains("Method B"), "{ca}");
+    Ok(())
+}

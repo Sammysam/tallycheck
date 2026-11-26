@@ -101,6 +101,18 @@ pub struct Paycheck {
     pub pretax_401k: Money,
     pub pretax_125: Money,
     pub periods: i64,
+    /// D66: federal income tax and employee FICA on this paycheck (see `PayContext`).
+    pub context: us_state::PayContext,
+}
+
+/// The rest of the paycheck as state formulas see it (D66).
+pub fn context(f: &crate::us::UsFigures) -> AppResult<us_state::PayContext> {
+    let fica = f
+        .social_security_employee
+        .checked_add(f.medicare_employee)
+        .and_then(|x| x.checked_add(f.additional_medicare))
+        .ok_or_else(too_large)?;
+    Ok(us_state::PayContext { federal_income_tax: f.federal_income_tax, fica })
 }
 
 /// Each state's share, wages and tax for one paycheck (see the module notes). `rules` must hold
@@ -117,7 +129,7 @@ pub fn split(
     // The whole paycheck under a state's rule: (state wages, tax without the extra).
     let whole = |rule: &StateRule| -> AppResult<(Money, Money)> {
         let wages = us_state::state_wages(pay.gross, pay.pretax_401k, pay.pretax_125, rule);
-        Ok((wages, us_state::withholding(wages, pay.periods, rule, &no_extra)?))
+        Ok((wages, us_state::withholding_in(wages, pay.periods, rule, &no_extra, &pay.context)?))
     };
     let mut parts: Vec<StateTax> = Vec::new();
     let mut add = |state: &str, kind: &str, share: i64, wages: Money, tax: Money| -> AppResult<()> {
@@ -460,7 +472,13 @@ mod tests {
     }
 
     fn pay(gross: &str) -> Paycheck {
-        Paycheck { gross: usd(gross), pretax_401k: Money::ZERO, pretax_125: Money::ZERO, periods: 26 }
+        Paycheck {
+            gross: usd(gross),
+            pretax_401k: Money::ZERO,
+            pretax_125: Money::ZERO,
+            periods: 26,
+            context: us_state::PayContext::default(),
+        }
     }
 
     fn rules(list: &[(&str, StateRule)]) -> BTreeMap<String, StateRule> {

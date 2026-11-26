@@ -820,6 +820,7 @@ fn work_out(l: &mut Line, run: &Run, reciprocity: &BTreeSet<(String, String)>) -
         pretax_401k: l.pretax_401k,
         pretax_125: l.pretax_section125,
         periods: periods_per_year(&run.pay_frequency),
+        context: us_states::context(&l.figures)?,
     };
     l.state_taxes = plan.split(&pay, &cert_from_snapshot(&l.state_cert))?;
     l.state_tax = sum(&l.state_taxes.iter().map(|p| p.tax).collect::<Vec<_>>())?;
@@ -843,6 +844,7 @@ fn cert_snapshot(t: &UsTax) -> Value {
         "annualCredit": t.state_annual_credit.cents(),
         "electedRate": t.state_elected_rate,
         "annualDeduction": t.state_annual_deduction.cents(),
+        "code": t.state_code,
     })
 }
 
@@ -858,6 +860,7 @@ fn cert_from_snapshot(v: &Value) -> StateEmployee {
         annual_credit: v["annualCredit"].as_i64().unwrap_or(0),
         elected_rate: v["electedRate"].as_i64(),
         annual_deduction: v["annualDeduction"].as_i64().unwrap_or(0),
+        code: v["code"].as_str().map(str::to_string),
     }
 }
 
@@ -1788,6 +1791,7 @@ mod tests {
             state_annual_credit: Money::ZERO,
             state_elected_rate: None,
             state_annual_deduction: Money::ZERO,
+            state_code: None,
             resident_state: None,
             other_work_states: Vec::new(),
         };

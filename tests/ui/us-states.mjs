@@ -233,6 +233,10 @@ try {
     await evaluate(`(() => { const s = [...document.querySelectorAll('select')].find((x) => x.required && [...x.options].some((o) => o.value === 'WV'));
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'WV'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await waitFor(`[...document.querySelectorAll('select[aria-label="State filing status"] option')].some((o) => o.textContent.includes('One-earner table'))`, 'West Virginia table choice');
+    // D66: Connecticut asks for the CT-W4 withholding code.
+    await evaluate(`(() => { const s = [...document.querySelectorAll('select')].find((x) => x.required && [...x.options].some((o) => o.value === 'CT'));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'CT'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`[...document.querySelectorAll('select[aria-label="State form code"] option')].some((o) => o.textContent.includes('no withholding'))`, 'Connecticut withholding codes');
     await shot('04-built-in');
   });
 } catch (e) {

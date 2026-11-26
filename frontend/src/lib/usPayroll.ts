@@ -61,6 +61,8 @@ export interface UsTax {
   stateElectedRate: number | null;
   /** D65: exemption dollars (Mississippi Form 89-350 line 6). */
   stateAnnualDeduction: number;
+  /** D66: the state form's status code or rate-table letter (null = from the filing status). */
+  stateCode: string | null;
   stateAllowances: number;
   stateExtraWithholding: number;
   stateExempt: boolean;
@@ -265,6 +267,8 @@ export const STATE_FORM: Record<string, {
   form: string; allowances?: string; second?: string; override?: string; credit?: string; rate?: boolean;
   /** D65: exemption dollars field label; labels for the SINGLE / MARRIED / HEAD_OF_HOUSEHOLD choices; a hint. */
   deduction?: string; status?: [string, string, string]; hint?: string;
+  /** D66: the state form's own code: field label and [value, label] choices ('' = none given). */
+  code?: { label: string; options: [string, string][] };
 }> = {
   AZ: { form: 'Form A-4', rate: true },
   CO: { form: 'Form DR 0004', override: 'DR 0004 line 2: annual withholding allowance $ (blank = standard)' },
@@ -289,6 +293,16 @@ export const STATE_FORM: Record<string, {
   RI: { form: 'RI W-4', allowances: 'RI W-4 line 1E exemptions' },
   VT: { form: 'W-4VT', allowances: 'W-4VT allowances (line 5)' },
   VA: { form: 'VA-4', allowances: 'VA-4 personal and dependent exemptions', second: 'VA-4 age 65+ / blind exemptions' },
+  // D66, step 3.
+  AL: { form: 'A4', allowances: 'A4 line 4 dependents', code: { label: 'A4 status', options: [['', 'From the filing status (S / M / H)'], ['0', '0 — no personal exemption'], ['S', 'S — single'], ['MS', 'MS — married filing separately'], ['M', 'M — married filing jointly'], ['H', 'H — head of family']] } },
+  AR: { form: 'AR4EC', allowances: 'AR4EC line 3 total exemptions', hint: 'The low-income tables (AR4EC line 5) are not offered.' },
+  CA: { form: 'DE 4', allowances: 'DE 4 line 1a regular allowances', second: 'DE 4 line 1b estimated-deduction allowances', status: ['Single, or married with two or more incomes', 'Married (one income)', 'Head of household'] },
+  CT: { form: 'CT-W4', allowances: 'Not used (choose the withholding code)', hint: 'Without a CT-W4 code, 6.99% of wages is withheld.', code: { label: 'CT-W4 line 1 withholding code', options: [['', 'No CT-W4 on file (6.99%)'], ['A', 'A'], ['B', 'B'], ['C', 'C'], ['D', 'D'], ['E', 'E — no withholding'], ['F', 'F']] } },
+  MD: { form: 'MW507', allowances: 'MW507 line 1 exemptions', status: ['Single, or married withholding at the single rate', 'Married (joint)', 'Head of household (joint rate)'], code: { label: 'County of residence (local tax)', options: [['', 'Not given (3.30%)'], ['ALLE', 'Allegany'], ['ANNE', 'Anne Arundel'], ['BALT', 'Baltimore County'], ['BCITY', 'Baltimore City'], ['CALV', 'Calvert'], ['CARO', 'Caroline'], ['CARR', 'Carroll'], ['CECI', 'Cecil'], ['CHAR', 'Charles'], ['DORC', 'Dorchester'], ['FRED', 'Frederick'], ['GARR', 'Garrett'], ['HARF', 'Harford'], ['HOWA', 'Howard'], ['KENT', 'Kent'], ['MONT', 'Montgomery'], ['PRIN', "Prince George's"], ['QUEE', "Queen Anne's"], ['STMA', "St. Mary's"], ['SOME', 'Somerset'], ['TALB', 'Talbot'], ['WASH', 'Washington'], ['WICO', 'Wicomico'], ['WORC', 'Worcester'], ['NR', 'Lives outside Maryland (nonresident, 2.25%)']] } },
+  ME: { form: 'W-4ME', allowances: 'W-4ME line 4 allowances', status: ['Single or head of household, or married at the single rate', 'Married', 'Head of household (single rate)'] },
+  NJ: { form: 'NJ-W4', allowances: 'NJ-W4 line 4 allowances', code: { label: 'NJ-W4 line 3 rate table', options: [['', 'From the filing status (A single / B joint, head of household)'], ['A', 'Rate A'], ['B', 'Rate B'], ['C', 'Rate C'], ['D', 'Rate D'], ['E', 'Rate E']] } },
+  NY: { form: 'IT-2104', allowances: 'IT-2104 line 1 allowances', status: ['Single or head of household, or married at the higher single rate', 'Married', 'Head of household (single rate)'], hint: 'New York City and Yonkers taxes are not included.' },
+  WI: { form: 'WT-4', allowances: 'WT-4 line 1(d) exemptions', status: ['Single, or married at the higher single rate', 'Married', 'Head of household (single rate)'] },
   WV: { form: 'IT-104', allowances: 'IT-104 exemptions (line 4)', status: ['Two-earner table (default)', 'One-earner table (IT-104 line 5 box checked)', 'Two-earner table'] },
 };
 
