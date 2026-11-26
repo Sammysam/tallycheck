@@ -419,6 +419,7 @@ pub fn registration(state: String, body: Map<String, Value>) -> Result<Registrat
     to_number(&mut v, &["sutaRate", "sutaWageBase", "employees"]);
     trim_or_null(&mut v, &["withholdingAccountNo", "unemploymentAccountNo"]);
     let leave_options = leave_options(v.input.get("leaveOptions"))?;
+    let suta_surcharges = suta_surcharges(v.input.get("sutaSurcharges"))?;
     v.field("withholdingAccountNo", true, &[Rule::IsString, Rule::MaxLength(40)])
         .field("unemploymentAccountNo", true, &[Rule::IsString, Rule::MaxLength(40)])
         .field("sutaRate", true, &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(100.0, "100")])
@@ -439,7 +440,34 @@ pub fn registration(state: String, body: Map<String, Value>) -> Result<Registrat
         employees: m.get("employees").and_then(Value::as_i64),
         leave_options,
         leave_account_id: opt_string(&m, "leaveAccountId"),
+        suta_surcharges,
     })
+}
+
+/// D68: `[{"name": "Employment Training Tax (ETT)", "rate": 0.1}, …]` (rate in percent).
+fn suta_surcharges(v: Option<&Value>) -> Result<Vec<(String, i64)>, AppError> {
+    let bad = |m: &str| AppError::bad_request(m.to_string());
+    let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
+    let items = v.as_array().ok_or_else(|| bad("sutaSurcharges must be a list"))?;
+    if items.len() > 10 {
+        return Err(bad("sutaSurcharges can have at most 10 charges"));
+    }
+    let mut out = Vec::new();
+    for x in items {
+        let name = x["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|n| !n.is_empty() && n.chars().count() <= 100)
+            .ok_or_else(|| bad("Each unemployment surcharge needs a name (up to 100 characters)"))?;
+        let pct = x["rate"]
+            .as_f64()
+            .filter(|p| p.is_finite() && (0.0..=20.0).contains(p))
+            .ok_or_else(|| bad("Each unemployment surcharge rate must be a percentage from 0 to 20"))?;
+        let ppm =
+            percent_to_ppm(&js_string(pct)).ok_or_else(|| bad("Surcharge rates have at most 4 decimal places"))?;
+        out.push((name.to_string(), ppm));
+    }
+    Ok(out)
 }
 
 /// D67: `{"NJ_TDI": {"employerRate": 0.5}, "NY_DBL": {"off": true}, "MN_PL": {"small": true}}`

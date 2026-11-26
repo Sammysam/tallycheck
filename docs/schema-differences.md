@@ -131,6 +131,7 @@ D67 adds leave-program columns: `us_state_registrations.employees` / `leaveOptio
 `employee_us_tax.leaveExempt`, `us_payroll_lines.leavePlan` / `leaveYtd` / `leave` / `leaveEmployee` /
 `leaveEmployer`, `us_payroll_runs.leaveEmployeeTotal` / `leaveEmployerTotal`, and rebuilds
 `us_payroll_remittances` so its type may be `STATE_LEAVE`.
+D68 adds `us_state_registrations.sutaSurcharges` and `us_payroll_lines.sutaSurchargeRate`.
 
 ## Seeds
 

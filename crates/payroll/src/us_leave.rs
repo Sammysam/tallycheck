@@ -34,6 +34,9 @@ pub struct Program {
     /// Whether 401(k) deferrals / section 125 amounts count as program wages.
     pub includes_401k: bool,
     pub includes_125: bool,
+    /// "LEAVE" (owed to the program) or "UI" (an employee unemployment contribution, owed with
+    /// the state's unemployment tax; D68).
+    pub kind: &'static str,
 }
 
 pub const PROGRAMS: &[Program] = &[
@@ -45,6 +48,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "EDD DE 44 (Rev. 52, 4-26) and DE 201 (1-26): 1.3% employee, no wage limit; DE 231TP: 401(k) deferrals subject, section 125 not",
         includes_401k: true,
         includes_125: false,
+        kind: "LEAVE",
     },
     Program {
         id: "CO_FAMLI",
@@ -54,6 +58,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "C.R.S. 8-13.3-507 and 7 CCR 1107-1: 0.88% split 50/50 to the social security wage base; 9 or fewer employees pay no employer share",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "CT_PL",
@@ -63,6 +68,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "CT Paid Leave Authority, Contributions and Guide for Employers: 0.5% employee to the social security wage base; FICA wages",
         includes_401k: true,
         includes_125: false,
+        kind: "LEAVE",
     },
     Program {
         id: "DC_PFL",
@@ -72,6 +78,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "D.C. Code § 32-541.03 and DOES Employer Information (2026): 0.75% employer only, never deducted from pay",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "DE_PL",
@@ -81,6 +88,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "19 Del. C. §§ 3701, 3705: 0.80% (parental 0.32% only for 10–24 employees; none under 10), up to half from the employee; FICA wages to the FICA wage limit",
         includes_401k: true,
         includes_125: false,
+        kind: "LEAVE",
     },
     Program {
         id: "HI_TDI",
@@ -90,6 +98,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "DLIR 2026 Maximum Weekly Wage Base ($1,500.21) and HRS § 392-43: employee 0.5% of weekly wages up to $7.50, never more than half the insurer's premium; the employer pays the rest to its insurer",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "ME_PFML",
@@ -99,6 +108,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "Maine PFML Employer FAQ (July 2026): 1% (half from the employee); under 15 employees 0.5%, all from the employee; to the social security wage base",
         includes_401k: true,
         includes_125: false,
+        kind: "LEAVE",
     },
     Program {
         id: "MN_PL",
@@ -108,6 +118,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "Minn. Stat. § 268B.14 and DEED: 0.88% (employee at most 0.44%; small employer designation 0.66%) to $185,000; 401(k) and section 125 included (§ 268.035 subd. 29)",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "NJ_FLI",
@@ -117,6 +128,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "NJ Department of Labor, 2026 rate information: employee 0.23% of the first $171,100 (max $393.53)",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "NJ_TDI",
@@ -126,6 +138,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "NJ Department of Labor, 2026 rate information: employee 0.19% of the first $171,100 (max $325.09); employer 0.10%–0.75% (assigned rate; 0.5% for new employers) of the first $44,800",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "NY_DBL",
@@ -135,6 +148,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "Workers' Compensation Law § 209: employee 0.5% of wages, at most $0.60 a week (collecting it is optional); the employer pays the rest of its insurer's premium",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "NY_PFL",
@@ -144,6 +158,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "DFS decision of 29 August 2025 and paidfamilyleave.ny.gov/2026: employee 0.432% of gross wages, at most $411.91 for the year",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "WA_CARES",
@@ -153,6 +168,7 @@ pub const PROGRAMS: &[Program] = &[
         source: "ESD Employer Wage Reporting and Premiums Toolkit (June 2026): 0.58% employee, no wage limit; approved exemptions",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
     },
     Program {
         id: "WA_PFML",
@@ -162,6 +178,38 @@ pub const PROGRAMS: &[Program] = &[
         source: "ESD Employer Wage Reporting and Premiums Toolkit (June 2026): 1.13% (employee 71.43%) to $184,500; under 50 employees no employer share; premium and employee share each rounded, employer = the difference",
         includes_401k: true,
         includes_125: true,
+        kind: "LEAVE",
+    },
+    // D68: employee unemployment contributions.
+    Program {
+        id: "AK_UI_EE",
+        state: "AK",
+        name: "Alaska employee UI",
+        from: "2026-01-01",
+        source: "Alaska DOLWD, 2026 Unemployment Insurance Tax Rates: employee 0.50% of the first $54,200 (max $271)",
+        includes_401k: true,
+        includes_125: false,
+        kind: "UI",
+    },
+    Program {
+        id: "NJ_UI_EE",
+        state: "NJ",
+        name: "New Jersey employee UI and workforce",
+        from: "2026-01-01",
+        source: "New Jersey DOL, 2026 rate information: employee UI 0.3825% + workforce development / supplemental workforce 0.0425% of the first $44,800",
+        includes_401k: true,
+        includes_125: true,
+        kind: "UI",
+    },
+    Program {
+        id: "PA_UC_EE",
+        state: "PA",
+        name: "Pennsylvania employee UC",
+        from: "2026-01-01",
+        source: "Pennsylvania L&I, UC Solvency Measures in Effect for Calendar Year 2026: employee 0.07% of all wages, no limit",
+        includes_401k: true,
+        includes_125: false,
+        kind: "UI",
     },
 ];
 
@@ -298,6 +346,9 @@ pub fn plan(p: &Program, employees: Option<i64>, o: &Options) -> Option<Plan> {
         "NY_DBL" => Plan { weekly_employee_max: Some(60), ..base(5_000, 0, None) },
         "NY_PFL" => Plan { employee_max: Some(41_191), ..base(4_320, 0, None) },
         "WA_CARES" => base(5_800, 0, None),
+        "AK_UI_EE" => base(5_000, 0, Some(5_420_000)),
+        "NJ_UI_EE" => base(4_250, 0, Some(4_480_000)),
+        "PA_UC_EE" => base(700, 0, None),
         "WA_PFML" => Plan {
             method: "WA_PFML".into(),
             total_rate: 11_300,
@@ -445,9 +496,14 @@ pub fn catalog() -> Value {
     Value::Array(
         PROGRAMS
             .iter()
-            .map(|p| json!({"id": p.id, "state": p.state, "name": p.name, "from": p.from, "source": p.source}))
+            .map(|p| json!({"id": p.id, "state": p.state, "name": p.name, "from": p.from, "source": p.source, "kind": p.kind}))
             .collect(),
     )
+}
+
+/// Whether a program is an employee unemployment contribution (owed with the state's SUTA).
+pub fn is_ui(id: &str) -> bool {
+    PROGRAMS.iter().any(|p| p.id == id && p.kind == "UI")
 }
 
 pub fn is_program(id: &str) -> bool {
@@ -594,6 +650,12 @@ mod tests {
         // (0.8% → 0.4%: $300 a week → 1.20, the FAQ's example).
         assert_eq!(pay("HI_TDI", "2000", 52, None, none(), y), (750, 0));
         assert_eq!(pay("HI_TDI", "300", 52, None, Options { employer_rate: Some(8_000), ..none() }, y), (120, 0));
+        // D68: employee unemployment: NJ 0.425% (3,000 → 12.75), PA 0.07% of wages less section 125
+        // ((3,000 − 50) → 2.07), AK 0.5% ((3,000 − 50) → 14.75) stopping at $54,200.
+        assert_eq!(pay("NJ_UI_EE", "3000", 26, None, none(), y), (1_275, 0));
+        assert_eq!(pay("PA_UC_EE", "3000", 26, None, none(), y), (207, 0));
+        assert_eq!(pay("AK_UI_EE", "3000", 26, None, none(), y), (1_475, 0));
+        assert_eq!(pay("AK_UI_EE", "3000", 26, None, none(), Ytd { wages: 5_420_000, ..y }), (0, 0));
     }
 
     #[test]

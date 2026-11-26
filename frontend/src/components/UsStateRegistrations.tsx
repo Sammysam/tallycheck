@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
-import { LEAVE_CHOICES, US_STATES, usd, type LeaveOption, type LeaveProgram, type UsStateRegistration, type UsStatesOverview } from '../lib/usPayroll';
+import { LEAVE_CHOICES, US_STATES, usd, type LeaveOption, type LeaveProgram, type UnemploymentDefault, type UsStateRegistration, type UsStatesOverview } from '../lib/usPayroll';
 
 /**
  * D63: the states the company is registered in for payroll (account numbers, the unemployment
@@ -13,6 +13,7 @@ interface LedgerAccount { id: string; code: string; name: string; type: string; 
 type Draft = {
   withholdingAccountNo: string; unemploymentAccountNo: string; sutaRate: string; sutaWageBase: string; stateTaxAccountId: string; sutaAccountId: string;
   employees: string; leaveAccountId: string; leaveOptions: Record<string, LeaveOption>;
+  surcharges: { name: string; rate: string }[];
 };
 
 const draftOf = (r?: UsStateRegistration): Draft => ({
@@ -25,6 +26,15 @@ const draftOf = (r?: UsStateRegistration): Draft => ({
   employees: r?.employees == null ? '' : String(r.employees),
   leaveAccountId: r?.leaveAccountId ?? '',
   leaveOptions: r?.leaveOptions ?? {},
+  surcharges: (r?.sutaSurcharges ?? []).map((c) => ({ name: c.name, rate: String(c.rate) })),
+});
+
+/** D68: a new registration starts from the state's 2026 defaults. */
+const draftFromDefaults = (d?: UnemploymentDefault): Draft => ({
+  ...draftOf(),
+  sutaRate: d?.newEmployerRate == null ? '' : String(d.newEmployerRate),
+  sutaWageBase: d ? String(d.wageBase) : '',
+  surcharges: (d?.surcharges ?? []).map((c) => ({ name: c.name, rate: String(c.rate) })),
 });
 
 export default function UsStateRegistrations({ accounts }: { accounts: LedgerAccount[] }) {
@@ -36,6 +46,7 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
   const [addState, setAddState] = useState('');
   const [pair, setPair] = useState({ workState: '', residentState: '' });
   const [programs, setPrograms] = useState<LeaveProgram[]>([]);
+  const [defaults, setDefaults] = useState<UnemploymentDefault[]>([]);
 
   const load = useCallback(
     () => api.get<UsStatesOverview>('/payroll/us/states').then((r) => { setData(r.data); setError(''); })
@@ -44,11 +55,13 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
   );
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.get<LeaveProgram[]>('/payroll/us/leave-programs').then((r) => setPrograms(r.data)).catch(() => setPrograms([])); }, []);
+  useEffect(() => { api.get<UnemploymentDefault[]>('/payroll/us/unemployment-defaults').then((r) => setDefaults(r.data)).catch(() => setDefaults([])); }, []);
 
   const open = (state: string) => {
     setEditing(state);
     setSaveError('');
-    setDraft(draftOf(data?.registrations.find((r) => r.state === state)));
+    const existing = data?.registrations.find((r) => r.state === state);
+    setDraft(existing ? draftOf(existing) : draftFromDefaults(defaults.find((d) => d.state === state)));
   };
 
   const save = async (e: React.FormEvent) => {
@@ -66,6 +79,7 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
         employees: draft.employees.trim() === '' ? null : Number(draft.employees),
         leaveAccountId: draft.leaveAccountId || null,
         leaveOptions: draft.leaveOptions,
+        sutaSurcharges: draft.surcharges.filter((c) => c.name.trim() !== '').map((c) => ({ name: c.name.trim(), rate: Number(c.rate || 0) })),
       });
       setEditing(null);
       await load();
@@ -117,6 +131,9 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
     setDraft({ ...draft, leaveOptions: { ...draft.leaveOptions, [id]: next } });
   };
   const statePrograms = programs.filter((p) => p.state === editing);
+  const stateDefault = defaults.find((d) => d.state === editing);
+  const setCharge = (i: number, change: Partial<{ name: string; rate: string }>) =>
+    setDraft({ ...draft, surcharges: draft.surcharges.map((c, j) => (j === i ? { ...c, ...change } : c)) });
 
   return (
     <div className="card mb-5" aria-label="States you are registered in">
@@ -138,7 +155,7 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
             <tr key={r.state} className="border-t border-gray-100">
               <td className="py-2 pr-3 font-medium w-12">{r.state}</td>
               <td className="py-2 text-gray-700">
-                SUTA {r.sutaRate}%{r.sutaWageBase != null ? ` on the first ${usd(r.sutaWageBase)}` : ' (no wage limit)'}
+                SUTA {r.sutaRate}%{(r.sutaSurcharges ?? []).map((c) => ` + ${c.name} ${c.rate}%`).join('')}{r.sutaWageBase != null ? ` on the first ${usd(r.sutaWageBase)}` : ' (no wage limit)'}
                 <div className="text-xs text-gray-400">
                   {[r.withholdingAccountNo && `Withholding no. ${r.withholdingAccountNo}`, r.unemploymentAccountNo && `Unemployment no. ${r.unemploymentAccountNo}`,
                     accountName(r.stateTaxAccountId) && `income tax to ${accountName(r.stateTaxAccountId)}`, accountName(r.sutaAccountId) && `unemployment to ${accountName(r.sutaAccountId)}`]
@@ -167,7 +184,15 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
 
       {editing && (
         <form onSubmit={save} className="border-t border-gray-200 pt-4 mt-2 mb-4" aria-label={`${editing} registration`}>
-          <p className="text-sm font-semibold text-gray-800 mb-3">{editing}</p>
+          <p className="text-sm font-semibold text-gray-800 mb-1">{editing}</p>
+          {stateDefault && (
+            <p className="text-xs text-gray-500 mb-3" aria-label="Unemployment defaults">
+              2026 for {editing}: wage base {usd(stateDefault.wageBase)}
+              {stateDefault.newEmployerRate != null ? `, new employers ${stateDefault.newEmployerRate}%` : ''}. {stateDefault.note} Source: {stateDefault.source}.
+              {!stateDefault.verified && <span className="text-amber-700"> Check these figures with the state — its page could not be read directly.</span>}
+              {' '}Replace them with the figures on your own rate notice.
+            </p>
+          )}
           <div className="form-grid mb-3" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
             <label className="block"><span className="text-xs font-medium text-gray-500">State withholding account no.</span>
               <input value={draft.withholdingAccountNo} onChange={set('withholdingAccountNo')} aria-label="Withholding account no." /></label>
@@ -189,6 +214,19 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
                 <option value="">The state unemployment account</option>
                 {liabilities.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
               </select></label>
+          </div>
+          <div className="mb-3" aria-label="Unemployment surcharges">
+            <p className="text-xs font-semibold text-gray-700 mb-1">Other employer charges on the same unemployment wages (owed to {editing})</p>
+            {draft.surcharges.length === 0 && <p className="text-xs text-gray-400 mb-1">None.</p>}
+            {draft.surcharges.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 mb-1">
+                <input value={c.name} onChange={(e) => setCharge(i, { name: e.target.value })} aria-label="Charge name" style={{ flex: 1 }} />
+                <input type="number" min="0" max="20" step="0.0001" value={c.rate} onChange={(e) => setCharge(i, { rate: e.target.value })} aria-label="Charge rate" style={{ width: '7rem' }} />
+                <span className="text-xs text-gray-500">%</span>
+                <button type="button" className="btn-link text-xs" style={{ color: '#dc2626' }} onClick={() => setDraft({ ...draft, surcharges: draft.surcharges.filter((_, j) => j !== i) })}>Remove</button>
+              </div>
+            ))}
+            <button type="button" className="btn-link text-xs" onClick={() => setDraft({ ...draft, surcharges: [...draft.surcharges, { name: '', rate: '' }] })}>+ Add a charge</button>
           </div>
           {statePrograms.length > 0 && (
             <div className="mb-3" aria-label="Disability and paid leave">

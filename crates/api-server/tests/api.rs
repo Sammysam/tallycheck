@@ -6079,7 +6079,8 @@ async fn us_payroll_in_several_states() -> TestResult {
     assert_eq!(r.body["sutaTotal"], json!(128));
     assert_eq!(us_balance(&app, &admin, "2375").await?, json!(61.4), "PA to its own account");
     assert_eq!(us_balance(&app, &admin, "2370").await?, json!(205));
-    assert_eq!(us_balance(&app, &admin, "2340").await?, json!(128));
+    // D68: plus the New Jersey employee's unemployment contribution (0.425% × 2,000 = 8.50).
+    assert_eq!(us_balance(&app, &admin, "2340").await?, json!(136.5));
     let owed = |run: &Value, kind: &str, st: &str| -> Value {
         run["taxes"]
             .as_array()
@@ -6087,7 +6088,7 @@ async fn us_payroll_in_several_states() -> TestResult {
             .map(|t| t["outstanding"].clone())
             .unwrap_or(Value::Null)
     };
-    assert_eq!(owed(&r.body, "SUTA", "NJ"), json!(60));
+    assert_eq!(owed(&r.body, "SUTA", "NJ"), json!(68.5));
     assert_eq!(owed(&r.body, "SUTA", "CO"), json!(68));
     assert_eq!(owed(&r.body, "STATE_INCOME_TAX", "VA"), json!(40));
 
@@ -6362,14 +6363,22 @@ async fn us_payroll_leave_programs() -> TestResult {
     let p = |id: &str, ee: Value, er: Value| (id.to_string(), ee, er);
     assert_eq!(leave("US-WA"), vec![p("WA_CARES", json!(11.6), json!(0)), p("WA_PFML", json!(16.14), json!(6.46))]);
     assert_eq!(leave("US-WX"), vec![p("WA_PFML", json!(16.14), json!(6.46))]);
-    assert_eq!(leave("US-NJ"), vec![p("NJ_FLI", json!(4.6), json!(0)), p("NJ_TDI", json!(3.8), json!(16))]);
+    assert_eq!(
+        leave("US-NJ"),
+        vec![
+            p("NJ_FLI", json!(4.6), json!(0)),
+            p("NJ_TDI", json!(3.8), json!(16)),
+            p("NJ_UI_EE", json!(8.5), json!(0))
+        ]
+    );
     assert_eq!(leave("US-CA"), vec![p("CA_SDI", json!(26), json!(0))]);
     assert_eq!(leave("US-NY"), vec![p("NY_PFL", json!(8.64), json!(0))]);
     // The employee's share comes off net pay.
     let ca = us_line(&r.body, "US-CA");
     assert_eq!(ca["leaveEmployee"], json!(26));
-    // Employee 16.14 + 16.14 + 11.60 + 3.80 + 4.60 + 26 + 8.64 = 86.92; employer 6.46 + 6.46 + 16.
-    assert_eq!(r.body["leaveEmployeeTotal"], json!(86.92));
+    // Employee 16.14 + 16.14 + 11.60 + 3.80 + 4.60 + 26 + 8.64 = 86.92, plus New Jersey employee UI
+    // 8.50 (D68; owed with NJ unemployment, not on 2380) = 95.42; employer 6.46 + 6.46 + 16.
+    assert_eq!(r.body["leaveEmployeeTotal"], json!(95.42));
     assert_eq!(r.body["leaveEmployerTotal"], json!(28.92));
     assert_eq!(us_balance(&app, &admin, "2380").await?, json!(115.84), "added when first needed");
 
@@ -6385,5 +6394,93 @@ async fn us_payroll_leave_programs() -> TestResult {
     let r = remit(base.clone()).await?;
     assert_eq!(r.status, StatusCode::CREATED, "no program and no amount clears every program: {}", r.body);
     assert_eq!(us_balance(&app, &admin, "2380").await?, json!(0));
+    Ok(())
+}
+
+/// D68: unemployment defaults, extra employer charges and employee contributions (biweekly
+/// $52,000, gross 2,000.00):
+///   CA 3.4% + ETT 0.1% = 3.5% → SUTA 70.00
+///   PA 3.822% → 76.44; employee UC 0.07% → 1.40; PA unemployment owed 77.84
+///   NJ 2.8% → 56.00; employee UI 0.425% → 8.50; NJ unemployment owed 64.50
+#[tokio::test]
+async fn us_payroll_unemployment_defaults_and_employee_ui() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let cash = us_company(&app, &admin, json!({})).await?;
+    let d = app.call(Method::GET, "/api/payroll/us/unemployment-defaults", Some(&admin), None).await?;
+    let ca = d.body.as_array().and_then(|a| a.iter().find(|x| x["state"] == "CA")).cloned().ok_or("CA")?;
+    assert_eq!((&ca["wageBase"], &ca["newEmployerRate"]), (&json!(7000), &json!(3.4)), "{ca}");
+    assert_eq!(ca["surcharges"][0]["rate"], json!(0.1), "{ca}");
+    assert_eq!(d.body.as_array().map(Vec::len), Some(51));
+
+    let regs = [
+        (
+            "CA",
+            json!({"sutaRate": 3.4, "sutaWageBase": 7000, "sutaSurcharges": [{"name": "Employment Training Tax (ETT)", "rate": 0.1}]}),
+        ),
+        ("PA", json!({"sutaRate": 3.822, "sutaWageBase": 10000})),
+        ("NJ", json!({"sutaRate": 2.8, "sutaWageBase": 44800})),
+    ];
+    for (st, body) in regs {
+        let r = us_send(&app, Method::PUT, format!("/api/payroll/us/states/{st}"), &admin, Some(body)).await?;
+        assert_eq!(r.status, StatusCode::OK, "{st}: {}", r.body);
+        if st == "CA" {
+            assert_eq!(r.body["sutaSurcharges"], json!([{"name": "Employment Training Tax (ETT)", "rate": 0.1}]));
+        }
+    }
+    let bad = us_send(
+        &app,
+        Method::PUT,
+        "/api/payroll/us/states/CA".into(),
+        &admin,
+        Some(json!({"sutaRate": 3.4, "sutaSurcharges": [{"name": "X", "rate": 30}]})),
+    )
+    .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.body);
+
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    for (code, st) in [("US-CA", "CA"), ("US-PA", "PA"), ("US-NJ", "NJ")] {
+        us_employee(&app, &admin, code, json!({}), merged(&salary, json!({"workState": st}))).await?;
+    }
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_line(&r.body, "US-CA")["suta"], json!(70));
+    assert_eq!(us_line(&r.body, "US-CA")["sutaSurchargeRate"], json!(0.1));
+    assert_eq!(us_line(&r.body, "US-PA")["suta"], json!(76.44));
+    let ee = |code: &str, id: &str| -> Value {
+        us_line(&r.body, code)["leave"]
+            .as_array()
+            .and_then(|a| a.iter().find(|c| c["id"] == id))
+            .map(|c| c["employee"].clone())
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(ee("US-PA", "PA_UC_EE"), json!(1.4));
+    assert_eq!(ee("US-NJ", "NJ_UI_EE"), json!(8.5));
+    let owed = |run: &Value, kind: &str, st: &str| -> Value {
+        run["taxes"]
+            .as_array()
+            .and_then(|t| t.iter().find(|t| t["type"] == kind && t["state"] == st))
+            .map(|t| t["outstanding"].clone())
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(owed(&r.body, "SUTA", "PA"), json!(77.84));
+    assert_eq!(owed(&r.body, "SUTA", "NJ"), json!(64.5));
+    assert_eq!(owed(&r.body, "SUTA", "CA"), json!(70));
+    // Employee UI is not a leave-program payable.
+    assert_eq!(owed(&r.body, "STATE_LEAVE", "NJ_UI_EE"), Value::Null);
+    let r = us_send(
+        &app,
+        Method::POST,
+        format!("{run_url}/remit"),
+        &admin,
+        Some(json!({"type": "SUTA", "paymentAccountId": cash, "date": "2026-11-15", "state": "PA"})),
+    )
+    .await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(owed(&r.body, "SUTA", "PA"), json!(0));
     Ok(())
 }

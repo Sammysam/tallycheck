@@ -206,6 +206,11 @@ pub async fn leave_programs(_a: Authorized<perm::Payroll>) -> AppResult<Json<Val
     Ok(Json(payroll::us_leave::catalog()))
 }
 
+/// D68: each state's 2026 unemployment wage base, new-employer rate and extra charges.
+pub async fn unemployment_defaults(_a: Authorized<perm::Payroll>) -> AppResult<Json<Value>> {
+    Ok(Json(payroll::us_unemployment::catalog()))
+}
+
 pub async fn state_put(
     State(s): State<AppState>,
     _a: Authorized<perm::Payroll>,

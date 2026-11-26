@@ -217,6 +217,14 @@ export interface UsStateRegistration {
   employees: number | null;
   leaveOptions: Record<string, LeaveOption>;
   leaveAccountId: string | null;
+  /** D68: employer charges billed on the unemployment wages besides the rate (rates in percent). */
+  sutaSurcharges: { name: string; rate: number }[];
+}
+
+/** D68: a state's 2026 unemployment defaults. */
+export interface UnemploymentDefault {
+  state: string; wageBase: number; newEmployerRate: number | null; verified: boolean;
+  surcharges: { name: string; rate: number; note: string }[]; note: string; source: string;
 }
 
 /** D67: a company's choice for one disability / paid leave program (rates in percent). */

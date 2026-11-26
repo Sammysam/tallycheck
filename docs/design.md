@@ -978,6 +978,24 @@ recommendations without answering each one individually; revisit any of them on 
   remittances table is rebuilt to allow the new type. Not built in: Oregon, Massachusetts and
   Rhode Island (their 2026 pages could not be read directly), Maryland (contributions start in
   2027); an employer paying the employee's share is not worked out (switch the program off).
+- **D68 Unemployment defaults and employer charges** (2026-11-27, step 5 of the US state payroll plan).
+  `payroll::us_unemployment` holds every state's and DC's 2026 unemployment wage base,
+  new-employer rate (none where the state sets it by industry) and the employer charges billed on
+  the same wages besides the rate (California ETT 0.1%, Delaware operations / training 0.2% +
+  0.11%, DC administrative 0.2%, Hawaii E&T 0.01%, Massachusetts EMAC and Workforce Training Fund,
+  Minnesota workforce fee 0.1%, Montana administrative fund 0.18%, Nevada CEP 0.05%, South Dakota
+  investment / administrative fees), each with its source; `verified` is false for the states
+  whose page could only be read through a search excerpt (Michigan, Rhode Island, South Carolina,
+  Texas, Utah, Virginia). `GET /payroll/us/unemployment-defaults` serves them; registering a
+  state fills them in on the screen and the company replaces them with its own notice — nothing
+  changes a saved registration by itself. Registrations gain `sutaSurcharges` ([{name, rate}],
+  at most 10, each 0–20%), added to the unemployment rate on the same capped wages; pay lines keep
+  the total (`sutaSurchargeRate`). Employee unemployment contributions are programs of kind UI in
+  `payroll::us_leave`: Alaska 0.5% to $54,200, New Jersey 0.425% (UI 0.3825% + workforce
+  0.0425%) to $44,800, Pennsylvania 0.07% of all wages; they come off net pay like the leave
+  programs but are owed with (and paid as) that state's unemployment tax. Not covered: the
+  quarterly New Hampshire rate changes and West Virginia's July 2026 fee (on the company's notice),
+  Massachusetts' COVID recovery assessment (on the notice), industry-specific new-employer rates.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

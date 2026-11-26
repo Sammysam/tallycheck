@@ -273,6 +273,15 @@ pub struct Registration {
     pub employees: Option<i64>,
     pub leave_options: Value,
     pub leave_account_id: Option<String>,
+    /// D68: (name, rate ppm) billed on the unemployment wages besides `suta_rate`.
+    pub suta_surcharges: Vec<(String, i64)>,
+}
+
+impl Registration {
+    /// The surcharges' total rate (ppm).
+    pub fn surcharge_rate(&self) -> i64 {
+        self.suta_surcharges.iter().map(|(_, r)| *r).sum()
+    }
 }
 
 fn registration_from_row(r: &SqliteRow) -> AppResult<Registration> {
@@ -287,6 +296,10 @@ fn registration_from_row(r: &SqliteRow) -> AppResult<Registration> {
         employees: r.try_get("employees")?,
         leave_options: crate::us_setup::json_col(r, "leaveOptions")?,
         leave_account_id: r.try_get("leaveAccountId")?,
+        suta_surcharges: crate::us_setup::json_col(r, "sutaSurcharges")?
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| Some((x["name"].as_str()?.to_string(), x["rate"].as_i64()?))).collect())
+            .unwrap_or_default(),
     })
 }
 
@@ -303,6 +316,7 @@ impl Registration {
             "employees": self.employees,
             "leaveOptions": leave_options_json(&self.leave_options),
             "leaveAccountId": self.leave_account_id,
+            "sutaSurcharges": self.suta_surcharges.iter().map(|(n, r)| json!({"name": n, "rate": crate::us_setup::ppm_to_percent(*r)})).collect::<Vec<_>>(),
         })
     }
 }
@@ -337,6 +351,12 @@ pub async fn registrations(conn: &mut SqliteConnection) -> AppResult<Vec<Registr
 
 /// The unemployment state, rate and wage base for someone working mainly in `work_state`: that
 /// state's registration, or else the company-wide settings (as before D63).
+/// D68: the extra employer charges on unemployment wages in `work_state` (ppm; 0 without a
+/// registration).
+pub async fn surcharge_for(conn: &mut SqliteConnection, work_state: &str) -> AppResult<i64> {
+    Ok(registration(conn, work_state).await?.map_or(0, |r| r.surcharge_rate()))
+}
+
 pub async fn unemployment_for(
     conn: &mut SqliteConnection,
     settings: &crate::us_setup::UsSettings,
@@ -374,13 +394,14 @@ pub async fn put_registration(db: &Db, r: Registration) -> AppResult<Value> {
     let now = now_iso();
     sqlx::query(
         r#"INSERT INTO "us_state_registrations" ("state","withholdingAccountNo","unemploymentAccountNo","sutaRate","sutaWageBase",
-             "stateTaxAccountId","sutaAccountId","employees","leaveOptions","leaveAccountId","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?9,?10,?11,?8,?8)
+             "stateTaxAccountId","sutaAccountId","employees","leaveOptions","leaveAccountId","sutaSurcharges","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?9,?10,?11,?12,?8,?8)
            ON CONFLICT ("state") DO UPDATE SET "withholdingAccountNo" = excluded."withholdingAccountNo",
              "unemploymentAccountNo" = excluded."unemploymentAccountNo", "sutaRate" = excluded."sutaRate",
              "sutaWageBase" = excluded."sutaWageBase", "stateTaxAccountId" = excluded."stateTaxAccountId",
              "sutaAccountId" = excluded."sutaAccountId", "employees" = excluded."employees",
              "leaveOptions" = excluded."leaveOptions", "leaveAccountId" = excluded."leaveAccountId",
+             "sutaSurcharges" = excluded."sutaSurcharges",
              "updatedAt" = excluded."updatedAt""#,
     )
     .bind(&r.state)
@@ -394,6 +415,7 @@ pub async fn put_registration(db: &Db, r: Registration) -> AppResult<Value> {
     .bind(r.employees)
     .bind(r.leave_options.to_string())
     .bind(&r.leave_account_id)
+    .bind(Value::Array(r.suta_surcharges.iter().map(|(n, rate)| json!({"name": n, "rate": rate})).collect()).to_string())
     .execute(&mut *tx)
     .await?;
     let saved = registration(&mut tx, &r.state).await?.ok_or_else(|| AppError::internal("registration missing"))?;

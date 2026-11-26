@@ -169,6 +169,8 @@ try {
     await setValue('select[aria-label="Register a state"]', 'NJ');
     await clickText('Add');
     await waitFor(`!!document.querySelector('form[aria-label="NJ registration"]')`, 'NJ form');
+    // D68: a new registration starts from the state's 2026 figures.
+    await waitFor(`document.querySelector('input[aria-label="SUTA rate"]').value === '2.8' && document.querySelector('input[aria-label="SUTA wage base"]').value === '44800' && document.body.innerText.includes('2026 for NJ: wage base')`, 'NJ defaults filled in');
     await setValue('input[aria-label="SUTA rate"]', '3');
     await setValue('input[aria-label="SUTA wage base"]', '43300');
     await setValue('input[aria-label="Withholding account no."]', 'NJ-1');

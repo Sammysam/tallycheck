@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Every state's 2026 unemployment wage base, new-employer rate and extra employer charges filled
+  in when a state is registered (with the source shown), extra charges such as California ETT on
+  the unemployment wages, and the employee unemployment contributions of Alaska, New Jersey and
+  Pennsylvania (D68).
 - State disability and paid leave contributions built in for 2026: California SDI, Colorado,
   Connecticut, DC, Delaware, Hawaii, Maine, Minnesota, New Jersey, New York, Washington Paid
   Leave and WA Cares, with each state's caps and small-employer rules, their own line on the

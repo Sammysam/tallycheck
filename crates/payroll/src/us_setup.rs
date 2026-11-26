@@ -606,6 +606,8 @@ pub async fn preview(db: &Db, employee_id: &str, req: PreviewRequest) -> AppResu
         .ok_or_else(|| AppError::bad_request("payDate must be YYYY-MM-DD"))?;
     let periods = periods_per_year(&s.pay_frequency);
     let (suta_state, suta_rate, suta_wage_base) = crate::us_states::unemployment_for(&mut c, &s, &t.work_state).await?;
+    // D68: the state's extra charges on the same unemployment wages.
+    let suta_rate = suta_rate + crate::us_states::surcharge_for(&mut c, &t.work_state).await?;
     let gross = match req.gross {
         Some(g) => g,
         None => period_gross(&t, periods, req.hours)?,

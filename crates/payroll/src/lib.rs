@@ -17,6 +17,7 @@ pub mod us_state;
 pub mod us_state_formulas;
 pub mod us_state_packs;
 pub mod us_states;
+pub mod us_unemployment;
 
 #[cfg(test)]
 mod tests;

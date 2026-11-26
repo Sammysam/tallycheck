@@ -458,6 +458,8 @@ struct Line {
     suta_state: Option<String>,
     suta_rate_used: Option<i64>,
     suta_wage_base_used: Option<i64>,
+    /// D68: the state's extra charges on unemployment wages (ppm).
+    suta_surcharge_rate: Option<i64>,
     /// D67: the leave programs' parameters, what other runs this year counted, the
     /// contributions and their employee / employer totals.
     leave_plan: Vec<us_leave::Plan>,
@@ -577,6 +579,7 @@ fn line_from_row(r: &SqliteRow) -> AppResult<Line> {
         suta_state: r.try_get("sutaState")?,
         suta_rate_used: r.try_get("sutaRateUsed")?,
         suta_wage_base_used: r.try_get("sutaWageBaseUsed")?,
+        suta_surcharge_rate: r.try_get("sutaSurchargeRate")?,
         leave_plan: crate::us_setup::json_col(r, "leavePlan")?
             .as_array()
             .map(|a| a.iter().filter_map(us_leave::Plan::from_json).collect())
@@ -645,6 +648,7 @@ fn line_json(l: &Line) -> Value {
             "wages": p.wages.to_json_number(), "tax": p.tax.to_json_number(),
         })).collect::<Vec<_>>(),
         "sutaState": l.suta_state,
+        "sutaSurchargeRate": l.suta_surcharge_rate.map(crate::us_setup::ppm_to_percent),
         "leave": l.leave.iter().map(|c| json!({
             "id": c.id, "state": c.state, "name": c.name,
             "wages": Money::from_cents(c.wages).to_json_number(),
@@ -735,6 +739,7 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
         "leave",
         "leaveEmployee",
         "leaveEmployer",
+        "sutaSurchargeRate",
     ]);
     let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
     let updates: Vec<String> = cols.iter().skip(1).map(|c| format!(r#""{c}" = excluded."{c}""#)).collect();
@@ -792,7 +797,8 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
         .bind(us_leave::ytd_to_json(&l.leave_ytd).to_string())
         .bind(Value::Array(l.leave.iter().map(us_leave::Contribution::to_json).collect()).to_string())
         .bind(l.leave_employee.cents())
-        .bind(l.leave_employer.cents());
+        .bind(l.leave_employer.cents())
+        .bind(l.suta_surcharge_rate);
     q.execute(&mut *conn).await?;
     Ok(())
 }
@@ -853,7 +859,8 @@ fn work_out(l: &mut Line, run: &Run, reciprocity: &BTreeSet<(String, String)>) -
         w4,
         exempt_from_withholding: exempt,
         ytd: l.ytd,
-        suta_rate: l.suta_rate_used.unwrap_or(s.suta_rate),
+        // D68: the state's extra charges are billed on the same unemployment wages.
+        suta_rate: l.suta_rate_used.unwrap_or(s.suta_rate) + l.suta_surcharge_rate.unwrap_or(0),
         suta_wage_base: if l.suta_rate_used.is_some() {
             l.suta_wage_base_used.map(Money::from_cents)
         } else {
@@ -977,6 +984,7 @@ async fn set_states(conn: &mut SqliteConnection, l: &mut Line, t: &UsTax, pay_da
     l.suta_state = Some(state);
     l.suta_rate_used = Some(rate);
     l.suta_wage_base_used = base.map(Money::cents);
+    l.suta_surcharge_rate = Some(us_states::surcharge_for(conn, &t.work_state).await?);
     // D67: the leave programs of the state the work is based in.
     l.leave_plan = us_leave::plans_for(conn, &t.work_state, pay_date, &t.leave_exempt).await?;
     Ok(())
@@ -1021,6 +1029,11 @@ async fn per_state(
             let e = unemployment.entry(st).or_insert(Money::ZERO);
             *e = add(*e, l.figures.suta)?;
         }
+        // D68: employee unemployment contributions are owed with the state's unemployment tax.
+        for c in l.leave.iter().filter(|c| us_leave::is_ui(&c.id)) {
+            let e = unemployment.entry(c.state.clone()).or_insert(Money::ZERO);
+            *e = add(*e, Money::from_cents(c.employee + c.employer))?;
+        }
     }
     Ok((income, unemployment))
 }
@@ -1029,7 +1042,7 @@ async fn per_state(
 async fn per_program(conn: &mut SqliteConnection, run: &Run) -> AppResult<BTreeMap<String, Money>> {
     let mut out = BTreeMap::new();
     for l in lines_of(conn, &run.id).await? {
-        for c in &l.leave {
+        for c in l.leave.iter().filter(|c| !us_leave::is_ui(&c.id)) {
             let e = out.entry(c.id.clone()).or_insert(Money::ZERO);
             *e = add(*e, Money::from_cents(c.employee + c.employer))?;
         }
@@ -1066,7 +1079,7 @@ async fn owed(conn: &mut SqliteConnection, run: &Run) -> AppResult<Vec<Owed>> {
         .collect();
     let (income, unemployment) = per_state(conn, run).await?;
     let leave = per_program(conn, run).await?;
-    let leave_total = add(t("leaveEmployeeTotal"), t("leaveEmployerTotal"))?;
+    let leave_total = sum(&leave.values().copied().collect::<Vec<_>>())?;
     for (kind, by_state, total) in [
         ("SUTA", &unemployment, t("sutaTotal")),
         ("STATE_INCOME_TAX", &income, t("stateIncomeTaxTotal")),
@@ -1243,6 +1256,7 @@ async fn new_line(conn: &mut SqliteConnection, run: &Run, e: &Who, t: &UsTax) ->
         suta_state: None,
         suta_rate_used: None,
         suta_wage_base_used: None,
+        suta_surcharge_rate: None,
         leave_plan: Vec::new(),
         leave_ytd: BTreeMap::new(),
         leave: Vec::new(),

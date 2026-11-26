@@ -161,6 +161,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/us/state-taxes", get(us::state_taxes))
         .route("/payroll/us/states", get(us::states))
         .route("/payroll/us/leave-programs", get(us::leave_programs))
+        .route("/payroll/us/unemployment-defaults", get(us::unemployment_defaults))
         .route("/payroll/us/states/{state}", put(us::state_put).delete(us::state_delete))
         .route("/payroll/us/reciprocity", post(us::reciprocity_add))
         .route("/payroll/us/reciprocity/{work}/{resident}", axum::routing::delete(us::reciprocity_remove))
