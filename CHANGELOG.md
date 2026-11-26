@@ -8,6 +8,7 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Built-in 2026 state income tax for Utah (from 1 June 2026) and Massachusetts (with the 4% surtax) (D71).
 - State forms: per state and quarter, the figures for the withholding return and the unemployment
   wage report (with the 12th-of-the-month counts), leave programs and local taxes; the state's annual
   reconciliation; W-2 box 14 (state disability / paid leave) and boxes 18–20 (local) (D70).

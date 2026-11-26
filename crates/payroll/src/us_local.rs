@@ -985,7 +985,7 @@ mod tests {
         federal: &str,
     ) -> (i64, i64) {
         let p = Plan { locality: l, assignment: a };
-        let pay = PayContext { federal_income_tax: usd(federal), fica: Money::ZERO };
+        let pay = PayContext { federal_income_tax: usd(federal), fica: Money::ZERO, fica_ytd: Money::ZERO };
         let c = contribution(&p, usd(gross), Money::ZERO, Money::ZERO, periods, date, &pay, married, Ytd::default())
             .expect("contribution");
         (c.employee, c.employer)

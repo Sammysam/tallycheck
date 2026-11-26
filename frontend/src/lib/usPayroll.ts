@@ -362,6 +362,9 @@ export const STATE_FORM: Record<string, {
   RI: { form: 'RI W-4', allowances: 'RI W-4 line 1E exemptions' },
   VT: { form: 'W-4VT', allowances: 'W-4VT allowances (line 5)' },
   VA: { form: 'VA-4', allowances: 'VA-4 personal and dependent exemptions', second: 'VA-4 age 65+ / blind exemptions' },
+  // D71.
+  UT: { form: 'federal W-4', allowances: 'Not used in Utah', status: ['Single, head of household or married filing separately', 'Married filing jointly', 'Head of household (single schedule)'] },
+  MA: { form: 'M-4', allowances: 'M-4 exemptions (a claimed spouse counts as 4)', second: 'Blind (you and / or your spouse): number', status: ['Single or married', 'Married', 'Head of household'] },
   // D66, step 3.
   AL: { form: 'A4', allowances: 'A4 line 4 dependents', code: { label: 'A4 status', options: [['', 'From the filing status (S / M / H)'], ['0', '0 — no personal exemption'], ['S', 'S — single'], ['MS', 'MS — married filing separately'], ['M', 'M — married filing jointly'], ['H', 'H — head of family']] } },
   AR: { form: 'AR4EC', allowances: 'AR4EC line 3 total exemptions', hint: 'The low-income tables (AR4EC line 5) are not offered.' },

@@ -1041,6 +1041,21 @@ recommendations without answering each one individually; revisit any of them on 
   (the employee's disability / paid leave contributions by program, e.g. California SDI) and
   `locals` (boxes 18–20 per locality). Screen: US payroll tax forms → State forms. State-specific
   form layouts and electronic filing formats are not built (the figures are what each form asks).
+- **D71 Utah and Massachusetts withholding** (2026-11-27).
+  Built-in from the states' own publications: Utah, Publication 14 (Rev. 4/26), for pay dates
+  from 1 June 2026 (the schedules apply to pay periods beginning on or after that date) — 4.45% of
+  wages less the base allowance, which is reduced by 1.3% of wages over the threshold; each line
+  rounded to the dollar; married filing jointly on the married schedule, head of household and
+  married filing separately on the single one; earlier 2026 pay dates use a company rule.
+  Massachusetts, Circular M (Rev. 12/25), percentage method from 1 January 2026 — wages less this
+  paycheck's social security / Medicare / retirement-system deductions while the year's total
+  stays within $2,000, less the M-4 exemption factor, 5% and 9% above $1,107,750 (the 4% surtax),
+  less the head of household and blindness values, nothing below the wage floor when an exemption
+  is claimed; Circular M does not mention 401(k), so 401(k) deferrals are left out as for federal
+  wages. State formulas now also see the employee's year-to-date social security and Medicare
+  (`PayContext.fica_ytd`, 6.2% / 1.45% of the year-to-date wages). Oregon stays a company rule:
+  its 2026 formula (150-206-436, Rev. 12-31-25) adds $263 a year under $50,000 that its own
+  tables do not.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

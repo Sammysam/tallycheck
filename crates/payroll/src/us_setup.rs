@@ -645,7 +645,7 @@ pub async fn preview(db: &Db, employee_id: &str, req: PreviewRequest) -> AppResu
         pretax_401k: t.pretax_401k,
         pretax_125: t.pretax_section125,
         periods,
-        context: crate::us_states::context(&figures)?,
+        context: crate::us_states::context_with_ytd(&figures, &req.ytd)?,
     };
     let parts = plan.split(&pay, &t.state_employee())?;
     let too_large = || AppError::bad_request("Amount is too large");

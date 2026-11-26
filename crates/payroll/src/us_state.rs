@@ -212,6 +212,8 @@ pub struct PayContext {
     pub federal_income_tax: Money,
     /// Employee social security + Medicare (incl. Additional Medicare).
     pub fica: Money,
+    /// D71: employee social security + Medicare on the employee's earlier paychecks this year.
+    pub fica_ytd: Money,
 }
 
 /// State income tax to withhold this period.

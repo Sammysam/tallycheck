@@ -926,7 +926,7 @@ fn work_out(l: &mut Line, run: &Run, reciprocity: &BTreeSet<(String, String)>) -
         pretax_401k: l.pretax_401k,
         pretax_125: l.pretax_section125,
         periods: periods_per_year(&run.pay_frequency),
-        context: us_states::context(&l.figures)?,
+        context: us_states::context_with_ytd(&l.figures, &l.ytd)?,
     };
     l.state_taxes = plan.split(&pay, &cert_from_snapshot(&l.state_cert))?;
     l.state_tax = sum(&l.state_taxes.iter().map(|p| p.tax).collect::<Vec<_>>())?;

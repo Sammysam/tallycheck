@@ -112,7 +112,20 @@ pub fn context(f: &crate::us::UsFigures) -> AppResult<us_state::PayContext> {
         .checked_add(f.medicare_employee)
         .and_then(|x| x.checked_add(f.additional_medicare))
         .ok_or_else(too_large)?;
-    Ok(us_state::PayContext { federal_income_tax: f.federal_income_tax, fica })
+    Ok(us_state::PayContext { federal_income_tax: f.federal_income_tax, fica, fica_ytd: Money::ZERO })
+}
+
+/// D71: the paycheck context with the employee's year-to-date social security and Medicare
+/// (6.2% and 1.45% of the year-to-date wages, half-up).
+pub fn context_with_ytd(f: &crate::us::UsFigures, ytd: &crate::us::YearToDate) -> AppResult<us_state::PayContext> {
+    let mut c = context(f)?;
+    let part = |wages: Money, ppm: i128| {
+        let n = i128::from(wages.cents().max(0)) * ppm;
+        i64::try_from((2 * n + 1_000_000) / 2_000_000).unwrap_or(i64::MAX)
+    };
+    c.fica_ytd =
+        Money::from_cents(part(ytd.social_security_wages, 62_000).saturating_add(part(ytd.medicare_wages, 14_500)));
+    Ok(c)
 }
 
 /// Each state's share, wages and tax for one paycheck (see the module notes). `rules` must hold

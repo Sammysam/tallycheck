@@ -25,9 +25,9 @@
 //! West Virginia (IT-104 two-earner table = single, one-earner table = married).
 //! D66, step 3: Alabama, Arkansas, California, Connecticut, Maine, Maryland, New Jersey, New York
 //! and Wisconsin use their own formula ([`crate::us_state_formulas`]).
-//! Not built in: Oregon (its formula and its tables disagree by $263 a year), Utah and
-//! Massachusetts (2026 publications not yet read), South Carolina and DC (no 2026 withholding
-//! method published).
+//! D71: Utah (from 1 June 2026) and Massachusetts from their own 2026 publications.
+//! Not built in: Oregon (its formula and its tables disagree by $263 a year), South Carolina and
+//! DC (no 2026 withholding method published).
 
 use crate::us_state::StateRule;
 
@@ -229,6 +229,19 @@ pub fn all() -> Vec<Pack> {
             "2026-01-01",
             formula("WI-2026"),
             "Wisconsin Publication W-166 (1/26), alternate method: deduction phased out by wages, $400 per WT-4 exemption, 3.54% / 4.65% / 5.30% / 7.65% (rates unchanged for 2026, Withholding Tax Update 2026-1)",
+        ),
+        // D71: Utah and Massachusetts from their own 2026 publications.
+        pack(
+            "UT",
+            "2026-06-01",
+            formula("UT-2026-06"),
+            "Utah Publication 14 (Rev. 4/26), schedules for pay periods beginning on or after 1 June 2026: 4.45% less the base allowance ($485 / $970 a year) reduced by 1.3% of wages over $9,348 / $18,696; whole dollars (earlier 2026 pay dates are not built in)",
+        ),
+        pack(
+            "MA",
+            "2026-01-01",
+            formula("MA-2026"),
+            "Massachusetts Circular M (Rev. 12/25), percentage method from 1 January 2026: 5% (9% over $1,107,750), FICA / retirement deduction up to $2,000 a year, M-4 exemptions, head of household and blindness values",
         ),
         // ── D65, step 2: bracket states ──────────────────────────────────────────
         pack(

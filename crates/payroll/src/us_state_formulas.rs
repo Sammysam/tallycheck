@@ -27,6 +27,8 @@ pub fn compute(id: &str, wages: Money, periods: i64, e: &StateEmployee, pay: &Pa
         }
         "NY-2026" => return new_york(i128::from(wages.cents().max(0)), periods, e),
         "NJ-2026" => return new_jersey(i128::from(wages.cents().max(0)), periods, e),
+        "UT-2026-06" => return utah(i128::from(wages.cents().max(0)), periods, e),
+        "MA-2026" => return massachusetts(i128::from(wages.cents().max(0)), periods, e, pay),
         "WI-2026" => wisconsin(annual_wages, e),
         "CT-2026" => connecticut(annual_wages, e),
         _ => return Err(AppError::bad_request(format!("Unknown state withholding formula \"{id}\""))),
@@ -610,6 +612,59 @@ fn new_jersey(wages: i128, periods: i64, e: &StateEmployee) -> AppResult<Money> 
     i64::try_from(tax).map(Money::from_cents).map_err(|_| AppError::bad_request("Amount is too large"))
 }
 
+/// Utah, Publication 14 (Rev. 4/26), schedules for pay periods beginning on or after 1 June
+/// 2026: 4.45% of wages, less the base allowance reduced by 1.3% of wages over the threshold,
+/// each line rounded to the whole dollar (as the publication's examples). Married filing jointly
+/// uses the married schedule; head of household and married filing separately the single one.
+fn utah(wages: i128, periods: i64, e: &StateEmployee) -> AppResult<Money> {
+    let p = i128::from(periods.max(1));
+    let (base, over): (i128, i128) = match (frequency(periods), e.married) {
+        (Some(f), false) => ([9, 19, 20, 40][f] * 100, [180, 360, 390, 779][f] * 100),
+        (Some(f), true) => ([19, 37, 40, 81][f] * 100, [360, 719, 779, 1_558][f] * 100),
+        (None, false) => (div_half_up(48_500, p), div_half_up(934_800, p)),
+        (None, true) => (div_half_up(97_000, p), div_half_up(1_869_600, p)),
+    };
+    // cents × ppm → whole dollars (in cents), half-up.
+    let dollars = |cents_ppm: i128| div_half_up(cents_ppm, 100 * i128::from(PPM)) * 100;
+    let line2 = dollars(wages * 44_500);
+    let line5 = dollars((wages - over).max(0) * 13_000);
+    let line6 = (base - line5).max(0);
+    let tax = (line2 - line6).max(0);
+    i64::try_from(tax).map(Money::from_cents).map_err(|_| AppError::bad_request("Amount is too large"))
+}
+
+/// Massachusetts, Circular M (Rev. 12/25), percentage method for wages paid from 1 January
+/// 2026: wages less this paycheck's social security, Medicare and retirement-system deductions
+/// (no more than $2,000 for the year), less the exemption factor; × pay periods; 5%, and 9% on
+/// the part over $1,107,750 (the 4% surtax); ÷ pay periods; less the head of household and
+/// blindness values. No withholding when one or more exemptions are claimed and wages are under
+/// the floor. M-4 exemptions are `allowances`, blind people `second_allowances`.
+fn massachusetts(wages: i128, periods: i64, e: &StateEmployee, pay: &PayContext) -> AppResult<Money> {
+    let p = i128::from(periods.max(1));
+    let f = frequency(periods);
+    let n = i128::from(e.allowances.max(0));
+    let floor = f.map_or(div_half_up(800_000, p), |f| [15_400, 30_800, 33_300, 66_700][f]);
+    if n >= 1 && wages < floor {
+        return Ok(Money::ZERO);
+    }
+    let fica_left = (200_000 - i128::from(pay.fica_ytd.cents())).max(0);
+    let deduction = i128::from(pay.fica.cents().max(0)).min(fica_left);
+    let exemptions = match (n, f) {
+        (0, _) => 0,
+        (n, Some(f)) => ([19, 38, 42, 83][f] * n + [66, 131, 141, 284][f]) * 100,
+        (n, None) => div_half_up((1_000 * n + 3_400) * 100, p),
+    };
+    let annual = (wages - deduction - exemptions).max(0) * p;
+    let threshold = 110_775_000;
+    let tax = annual.min(threshold) * 50_000 + (annual - threshold).max(0) * 90_000;
+    let mut cents = div_half_up(tax, i128::from(PPM) * p);
+    if e.head_of_household && !e.married {
+        cents -= f.map_or(div_half_up(12_000, p), |f| [231, 462, 500, 1_000][f]);
+    }
+    cents -= i128::from(e.second_allowances.max(0)) * f.map_or(div_half_up(11_000, p), |f| [212, 423, 458, 917][f]);
+    i64::try_from(cents.max(0)).map(Money::from_cents).map_err(|_| AppError::bad_request("Amount is too large"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,7 +674,7 @@ mod tests {
     }
 
     fn tax(id: &str, wages: &str, periods: i64, e: &StateEmployee, federal: &str) -> Money {
-        let pay = PayContext { federal_income_tax: usd_m(federal), fica: Money::ZERO };
+        let pay = PayContext { federal_income_tax: usd_m(federal), fica: Money::ZERO, fica_ytd: Money::ZERO };
         compute(id, usd_m(wages), periods, e, &pay).expect("tax")
     }
 
@@ -762,5 +817,44 @@ mod tests {
         // A chosen rate letter wins over the filing status.
         let e = StateEmployee { code: Some("E".into()), ..a1.clone() };
         assert_ne!(tax("NJ-2026", "3000", 52, &e, "0"), tax("NJ-2026", "3000", 52, &a1, "0"));
+    }
+
+    #[test]
+    fn utah_examples() {
+        // Publication 14 (Rev. 4/26) examples 1-4.
+        let s = StateEmployee::default();
+        let m = StateEmployee { married: true, ..Default::default() };
+        assert_eq!(tax("UT-2026-06", "400", 52, &s, "0"), usd_m("12"));
+        assert_eq!(tax("UT-2026-06", "2600", 26, &s, "0"), usd_m("116"));
+        assert_eq!(tax("UT-2026-06", "1200", 24, &m, "0"), usd_m("18"));
+        assert_eq!(tax("UT-2026-06", "7800", 12, &m, "0"), usd_m("347"));
+    }
+
+    #[test]
+    fn massachusetts_percentage_method() {
+        let pay = |fica: &str, ytd: &str| PayContext {
+            federal_income_tax: Money::ZERO,
+            fica: usd_m(fica),
+            fica_ytd: usd_m(ytd),
+        };
+        let ma = |wages: &str, periods: i64, e: &StateEmployee, p: PayContext| {
+            compute("MA-2026", usd_m(wages), periods, e, &p).expect("tax")
+        };
+        let two = StateEmployee { allowances: 2, ..Default::default() };
+        // Weekly $1,500, 2 exemptions ($19 × 2 + $66 = $104), FICA 114.75 still deductible:
+        // (1,500 − 114.75 − 104) × 52 × 5% ÷ 52 = 64.06; once $2,000 of FICA was deducted: 69.80.
+        assert_eq!(ma("1500", 52, &two, pay("114.75", "0")), usd_m("64.06"));
+        assert_eq!(ma("1500", 52, &two, pay("114.75", "2000")), usd_m("69.80"));
+        // Only what is left of the $2,000: 1,950 deducted earlier leaves 50.
+        assert_eq!(ma("1500", 52, &two, pay("114.75", "1950")), usd_m("67.30"));
+        // Head of household −2.31, one blind person −2.12.
+        let hoh = StateEmployee { allowances: 2, head_of_household: true, second_allowances: 1, ..Default::default() };
+        assert_eq!(ma("1500", 52, &hoh, pay("114.75", "2000")), usd_m("65.37"));
+        // Under the weekly $154 floor with an exemption: nothing.
+        let one = StateEmployee { allowances: 1, ..Default::default() };
+        assert_eq!(ma("150", 52, &one, pay("11.48", "0")), Money::ZERO);
+        // The 4% surtax: monthly $100,000, 1 exemption ($367), FICA used up: (99,633 × 12 =
+        // 1,195,596) → 55,387.50 + 9% × 87,846 = 7,906.14 → 63,293.64 ÷ 12 = 5,274.47.
+        assert_eq!(ma("100000", 12, &one, pay("1450", "5000")), usd_m("5274.47"));
     }
 }
