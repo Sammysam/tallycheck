@@ -60,6 +60,13 @@ pub struct StateRule {
     /// deduction and credit per allowance.
     pub second_allowance_deduction: i64,
     pub second_allowance_credit: i64,
+    /// D65: brackets for head of household (None = the single ones; North Dakota, Montana and
+    /// New Mexico have their own).
+    pub brackets_hoh: Option<Vec<Bracket>>,
+    /// D65: above these annual wages no allowances count (Rhode Island's exemption cliff).
+    pub allowance_wage_limit: Option<i64>,
+    /// D65: round the yearly tax to the whole dollar before dividing it (Virginia).
+    pub round_annual_to_dollar: bool,
 }
 
 impl StateRule {
@@ -79,6 +86,9 @@ impl StateRule {
             standard_deduction_hoh: None,
             second_allowance_deduction: 0,
             second_allowance_credit: 0,
+            brackets_hoh: None,
+            allowance_wage_limit: None,
+            round_annual_to_dollar: false,
         }
     }
 
@@ -100,6 +110,9 @@ impl StateRule {
             "standardDeductionHeadOfHousehold": self.standard_deduction_hoh,
             "secondAllowanceDeduction": self.second_allowance_deduction,
             "secondAllowanceCredit": self.second_allowance_credit,
+            "bracketsHeadOfHousehold": self.brackets_hoh.as_deref().map(b),
+            "allowanceWageLimit": self.allowance_wage_limit,
+            "roundAnnualToDollar": self.round_annual_to_dollar,
         })
     }
 
@@ -123,6 +136,13 @@ impl StateRule {
             standard_deduction_hoh: v["standardDeductionHeadOfHousehold"].as_i64(),
             second_allowance_deduction: v["secondAllowanceDeduction"].as_i64().unwrap_or(0),
             second_allowance_credit: v["secondAllowanceCredit"].as_i64().unwrap_or(0),
+            brackets_hoh: if v["bracketsHeadOfHousehold"].is_null() {
+                None
+            } else {
+                brackets(&v["bracketsHeadOfHousehold"])
+            },
+            allowance_wage_limit: v["allowanceWageLimit"].as_i64(),
+            round_annual_to_dollar: v["roundAnnualToDollar"].as_bool().unwrap_or(false),
         })
     }
 }
@@ -160,6 +180,8 @@ pub struct StateEmployee {
     pub annual_credit: i64,
     /// ppm, for EMPLOYEE_RATE states (Arizona A-4); None = the state's default.
     pub elected_rate: Option<i64>,
+    /// D65: cents a year deducted besides the standard deduction (Mississippi Form 89-350 line 6).
+    pub annual_deduction: i64,
 }
 
 fn too_large() -> AppError {
@@ -188,16 +210,20 @@ pub fn withholding(wages: Money, periods: i64, rule: &StateRule, e: &StateEmploy
         let tax = i64::try_from((2 * n + d) / (2 * d)).map_err(|_| too_large())?;
         return Money::from_cents(tax).checked_add(e.extra).ok_or_else(too_large);
     }
-    let allowances = i128::from(e.allowances.max(0));
-    let second = i128::from(e.second_allowances.max(0));
+    let annual_wages = i128::from(wages.cents().max(0)) * i128::from(periods);
+    // Rhode Island: above the limit no allowance counts.
+    let none_count = rule.allowance_wage_limit.is_some_and(|limit| annual_wages > i128::from(limit));
+    let allowances = if none_count { 0 } else { i128::from(e.allowances.max(0)) };
+    let second = if none_count { 0 } else { i128::from(e.second_allowances.max(0)) };
     let std = match e.deduction_override {
         Some(own) => own,
         None if e.married => rule.standard_deduction_married,
         None if e.head_of_household => rule.standard_deduction_hoh.unwrap_or(rule.standard_deduction_single),
         None => rule.standard_deduction_single,
     };
-    let taxable = (i128::from(wages.cents().max(0)) * i128::from(periods)
+    let taxable = (annual_wages
         - i128::from(std.max(0))
+        - i128::from(e.annual_deduction.max(0))
         - allowances * i128::from(rule.allowance_deduction.max(0))
         - second * i128::from(rule.second_allowance_deduction.max(0)))
     .max(0);
@@ -205,8 +231,9 @@ pub fn withholding(wages: Money, periods: i64, rule: &StateRule, e: &StateEmploy
     let mut tax: i128 = match rule.method.as_str() {
         "FLAT" => taxable * i128::from(rule.flat_rate),
         _ => {
-            let brackets = match (&rule.brackets_married, e.married) {
-                (Some(m), true) => m,
+            let brackets = match (&rule.brackets_married, &rule.brackets_hoh) {
+                (Some(m), _) if e.married => m,
+                (_, Some(h)) if e.head_of_household && !e.married => h,
                 _ => &rule.brackets,
             };
             let mut t: i128 = 0;
@@ -229,6 +256,11 @@ pub fn withholding(wages: Money, periods: i64, rule: &StateRule, e: &StateEmploy
         + second * i128::from(rule.second_allowance_credit.max(0))
         + i128::from(e.annual_credit.max(0));
     tax = (tax - credits * i128::from(PPM)).max(0);
+    if rule.round_annual_to_dollar {
+        // Yearly tax (cents × ppm) half-up to the whole dollar.
+        let dollar = 100 * i128::from(PPM);
+        tax = (2 * tax + dollar) / (2 * dollar) * dollar;
+    }
     // Half-up to the cent, or to the whole dollar (100 cents) when the state rounds so.
     let unit: i128 = if rule.round_to_dollar { 100 } else { 1 };
     let d = i128::from(PPM) * i128::from(periods) * unit;
@@ -261,6 +293,10 @@ fn rule_from_row(r: &SqliteRow) -> AppResult<StateRule> {
         standard_deduction_hoh: r.try_get("standardDeductionHeadOfHousehold")?,
         second_allowance_deduction: r.try_get("secondAllowanceDeduction")?,
         second_allowance_credit: r.try_get("secondAllowanceCredit")?,
+        // D65 options are used by built-in rules only.
+        brackets_hoh: None,
+        allowance_wage_limit: None,
+        round_annual_to_dollar: false,
     })
 }
 

@@ -6196,3 +6196,51 @@ async fn us_payroll_built_in_state_rules() -> TestResult {
     assert_eq!((&ga["kind"], &ga["builtInAvailable"]), (&json!("COMPANY"), &json!(true)));
     Ok(())
 }
+
+/// D65: built-in bracket states through a pay run (biweekly $52,000, gross 2,000.00, pay date
+/// 2026-11-06):
+///   MS single, Form 89-350 $6,000: (52,000 − 2,300 − 6,000 − 10,000) × 4% ÷ 26 = 51.85 → $52
+///   WV one-earner table (married), 2 exemptions: 1,444.10 ÷ 26 = 55.54 → $56
+///   MT head of household: (52,000 − 24,150) × 4.7% ÷ 26 = 50.34 → $50
+///   VA 1 exemption: 2,175.90 a year → $2,176 → 83.69
+#[tokio::test]
+async fn us_payroll_built_in_bracket_states() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    us_company(&app, &admin, json!({})).await?;
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    let tax = |extra: Value| merged(&salary, extra);
+    let ms =
+        us_employee(&app, &admin, "US-MS", json!({}), tax(json!({"workState": "MS", "stateAnnualDeduction": 6000})))
+            .await?;
+    us_employee(
+        &app,
+        &admin,
+        "US-WV",
+        json!({}),
+        tax(json!({"workState": "WV", "stateFilingStatus": "MARRIED", "stateAllowances": 2})),
+    )
+    .await?;
+    us_employee(
+        &app,
+        &admin,
+        "US-MT",
+        json!({}),
+        tax(json!({"workState": "MT", "stateFilingStatus": "HEAD_OF_HOUSEHOLD"})),
+    )
+    .await?;
+    us_employee(&app, &admin, "US-VA", json!({}), tax(json!({"workState": "VA", "stateAllowances": 1}))).await?;
+    let saved = app.call(Method::GET, &format!("/api/payroll/employees/{ms}/us-tax"), Some(&admin), None).await?;
+    assert_eq!(saved.body["stateAnnualDeduction"], json!(6000));
+
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    for (code, want) in [("US-MS", json!(52)), ("US-WV", json!(56)), ("US-MT", json!(50)), ("US-VA", json!(83.69))] {
+        assert_eq!(us_line(&r.body, code)["stateIncomeTax"], want, "{code}");
+    }
+    Ok(())
+}

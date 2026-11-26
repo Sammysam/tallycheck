@@ -125,6 +125,8 @@ allowance type, and to `employee_us_tax` head of household, second allowances, a
 override, an annual credit and an elected rate for the state certificate. The built-in 2026 state
 rules live in code (`payroll::us_state_packs`), not in the database.
 
+D65 adds `employee_us_tax.stateAnnualDeduction` (exemption dollars on the state certificate).
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

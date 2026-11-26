@@ -121,6 +121,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
             "stateDeductionOverride",
             "stateAnnualCredit",
             "stateElectedRate",
+            "stateAnnualDeduction",
         ],
     );
     for k in ["workState", "residentState"] {
@@ -151,6 +152,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         .field("stateSecondAllowances", true, &[Rule::IsInt, Rule::MinZero, Rule::MaxNum(99.0, "99")])
         .field("stateDeductionOverride", true, AMOUNT)
         .field("stateAnnualCredit", true, AMOUNT)
+        .field("stateAnnualDeduction", true, AMOUNT)
         .field("stateElectedRate", true, &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(100.0, "100")]);
     for k in TAX_AMOUNTS {
         v.field(k, true, AMOUNT);
@@ -184,6 +186,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         state_deduction_override: money(&m, "stateDeductionOverride")?,
         state_annual_credit: amount("stateAnnualCredit")?,
         state_elected_rate: percent(&m, "stateElectedRate")?,
+        state_annual_deduction: amount("stateAnnualDeduction")?,
         state_allowances: m.get("stateAllowances").and_then(Value::as_i64).unwrap_or(0),
         state_extra_withholding: amount("stateExtraWithholding")?,
         state_exempt: flag("stateExempt"),
@@ -483,6 +486,9 @@ pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>
         standard_deduction_hoh: money(&m, "standardDeductionHeadOfHousehold")?.map(Money::cents),
         second_allowance_deduction: amount("secondAllowanceDeduction")?,
         second_allowance_credit: amount("secondAllowanceCredit")?,
+        brackets_hoh: None,
+        allowance_wage_limit: None,
+        round_annual_to_dollar: false,
         method,
     };
     if rule.method == "FLAT" && m.get("flatRate").is_none_or(Value::is_null) {

@@ -285,6 +285,8 @@ pub struct UsTax {
     pub state_deduction_override: Option<Money>,
     pub state_annual_credit: Money,
     pub state_elected_rate: Option<i64>,
+    /// D65: Mississippi's exemption dollars.
+    pub state_annual_deduction: Money,
     /// D63: the home state (None = lives in the work state) and the other states worked in,
     /// with shares in hundredths of a percent (the work state has the rest).
     pub resident_state: Option<String>,
@@ -304,6 +306,7 @@ impl UsTax {
             deduction_override: self.state_deduction_override.map(Money::cents),
             annual_credit: self.state_annual_credit.cents(),
             elected_rate: self.state_elected_rate,
+            annual_deduction: self.state_annual_deduction.cents(),
         }
     }
 
@@ -353,6 +356,7 @@ impl UsTax {
             state_deduction_override: None,
             state_annual_credit: Money::ZERO,
             state_elected_rate: None,
+            state_annual_deduction: Money::ZERO,
             resident_state: None,
             other_work_states: Vec::new(),
         }
@@ -386,6 +390,7 @@ fn from_row(r: &SqliteRow) -> AppResult<UsTax> {
         state_deduction_override: r.try_get::<Option<i64>, _>("stateDeductionOverride")?.map(Money::from_cents),
         state_annual_credit: m("stateAnnualCredit")?,
         state_elected_rate: r.try_get("stateElectedRate")?,
+        state_annual_deduction: m("stateAnnualDeduction")?,
         resident_state: r.try_get::<Option<String>, _>("residentState")?.filter(|s| !s.is_empty()),
         other_work_states: crate::us_states::parse_others(&r.try_get::<String, _>("otherWorkStates")?),
     })
@@ -430,6 +435,7 @@ fn tax_json(employee_id: &str, t: &UsTax, updated_at: Option<String>) -> Value {
         "stateDeductionOverride": t.state_deduction_override.map(Money::to_json_number),
         "stateAnnualCredit": t.state_annual_credit.to_json_number(),
         "stateElectedRate": t.state_elected_rate.map(ppm_to_percent),
+        "stateAnnualDeduction": t.state_annual_deduction.to_json_number(),
         "residentState": t.resident_state,
         "otherWorkStates": t.other_work_states.iter()
             .map(|(s, share)| json!({"state": s, "percent": Money::from_cents(*share).to_json_number()}))
@@ -464,8 +470,8 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
              "filingStatus","multipleJobs","dependentsCredit","otherIncome","deductions","extraWithholding","allowances",
              "exemptFromWithholding","pretax401k","pretaxSection125","stateFilingStatus","stateAllowances",
              "stateExtraWithholding","stateExempt","residentState","otherWorkStates","stateHeadOfHousehold",
-             "stateSecondAllowances","stateDeductionOverride","stateAnnualCredit","stateElectedRate","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?22,?23,?24,?25,?26,?27,?28,?21,?21)
+             "stateSecondAllowances","stateDeductionOverride","stateAnnualCredit","stateElectedRate","stateAnnualDeduction","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?22,?23,?24,?25,?26,?27,?28,?29,?21,?21)
            ON CONFLICT ("employeeId") DO UPDATE SET
              "workState" = excluded."workState", "payType" = excluded."payType",
              "annualSalary" = excluded."annualSalary", "hourlyRate" = excluded."hourlyRate",
@@ -481,6 +487,7 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
              "stateSecondAllowances" = excluded."stateSecondAllowances",
              "stateDeductionOverride" = excluded."stateDeductionOverride",
              "stateAnnualCredit" = excluded."stateAnnualCredit", "stateElectedRate" = excluded."stateElectedRate",
+             "stateAnnualDeduction" = excluded."stateAnnualDeduction",
              "updatedAt" = excluded."updatedAt""#,
     )
     .bind(employee_id)
@@ -511,6 +518,7 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
     .bind(t.state_deduction_override.map(Money::cents))
     .bind(t.state_annual_credit.cents())
     .bind(t.state_elected_rate)
+    .bind(t.state_annual_deduction.cents())
     .execute(&mut *tx)
     .await?;
     let (saved, at) = load_tax(&mut tx, employee_id).await?.ok_or_else(|| AppError::internal("US tax row missing"))?;

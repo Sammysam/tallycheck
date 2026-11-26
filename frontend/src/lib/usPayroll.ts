@@ -59,6 +59,8 @@ export interface UsTax {
   stateDeductionOverride: number | null;
   stateAnnualCredit: number;
   stateElectedRate: number | null;
+  /** D65: exemption dollars (Mississippi Form 89-350 line 6). */
+  stateAnnualDeduction: number;
   stateAllowances: number;
   stateExtraWithholding: number;
   stateExempt: boolean;
@@ -259,7 +261,11 @@ export const US_STATES = [
  * D64: what each state's own withholding form calls the fields of the state certificate, for the
  * states whose built-in rules use them. States not listed use the plain labels.
  */
-export const STATE_FORM: Record<string, { form: string; allowances?: string; second?: string; override?: string; credit?: string; rate?: boolean }> = {
+export const STATE_FORM: Record<string, {
+  form: string; allowances?: string; second?: string; override?: string; credit?: string; rate?: boolean;
+  /** D65: exemption dollars field label; labels for the SINGLE / MARRIED / HEAD_OF_HOUSEHOLD choices; a hint. */
+  deduction?: string; status?: [string, string, string]; hint?: string;
+}> = {
   AZ: { form: 'Form A-4', rate: true },
   CO: { form: 'Form DR 0004', override: 'DR 0004 line 2: annual withholding allowance $ (blank = standard)' },
   GA: { form: 'Form G-4', allowances: 'G-4 total allowances (lines 4 + 5)' },
@@ -268,6 +274,22 @@ export const STATE_FORM: Record<string, { form: string; allowances?: string; sec
   IN: { form: 'WH-4', allowances: 'WH-4 line 5 personal exemptions', second: 'WH-4 dependents (lines 6 + 7; an adopted child counts 2)' },
   MI: { form: 'MI-W4', allowances: 'MI-W4 line 6 exemptions' },
   NC: { form: 'NC-4', allowances: 'NC-4 allowances' },
+  // D65, step 2.
+  DE: { form: 'DE-W4', allowances: 'DE-W4 line 4 allowances' },
+  HI: { form: 'HW-4', allowances: 'HW-4 allowances' },
+  KS: { form: 'K-4', allowances: 'K-4 personal allowances (lines B + C)', second: 'K-4 dependents and head of household (lines D + E)', status: ['Single rate', 'Joint rate', 'Single rate (head of household)'] },
+  MN: { form: 'W-4MN', allowances: 'W-4MN allowances' },
+  MS: { form: 'Form 89-350', deduction: 'Form 89-350 line 6: total exemption $', status: ['Single (also married, spouse employed)', 'Married, spouse not employed', 'Head of family'], allowances: 'Not used (enter the exemption dollars)' },
+  MO: { form: 'MO W-4', status: ['Single, married with a working spouse, or married filing separately', 'Married, spouse does not work', 'Head of household'] },
+  MT: { form: 'MW-4', status: ['Single, married filing separately, or both spouses working (line 2)', 'Married filing jointly', 'Head of household'] },
+  NE: { form: 'W-4N', allowances: 'W-4N allowances' },
+  ND: { form: 'federal W-4', allowances: 'Allowances (only on a W-4 from 2019 or earlier)' },
+  OH: { form: 'IT 4', allowances: 'IT 4 exemptions' },
+  OK: { form: 'OK-W-4', allowances: 'OK-W-4 allowances (line 5)' },
+  RI: { form: 'RI W-4', allowances: 'RI W-4 line 1E exemptions' },
+  VT: { form: 'W-4VT', allowances: 'W-4VT allowances (line 5)' },
+  VA: { form: 'VA-4', allowances: 'VA-4 personal and dependent exemptions', second: 'VA-4 age 65+ / blind exemptions' },
+  WV: { form: 'IT-104', allowances: 'IT-104 exemptions (line 4)', status: ['Two-earner table (default)', 'One-earner table (IT-104 line 5 box checked)', 'Two-earner table'] },
 };
 
 export const ARIZONA_RATES = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5];

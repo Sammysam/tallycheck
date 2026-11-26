@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Built-in 2026 state income tax rules for Delaware, Hawaii, Kansas, Minnesota, Mississippi,
+  Missouri, Montana, Nebraska, New Mexico, North Dakota, Ohio, Oklahoma, Rhode Island, Vermont,
+  Virginia and West Virginia, from each state's own 2026 withholding guide, with each state's form
+  names on the employee's state certificate (D65).
 - Built-in 2026 state income tax rules for Arizona, Colorado, Georgia, Idaho, Illinois, Indiana,
   Iowa, Kentucky, Louisiana, Michigan, North Carolina and Pennsylvania, from each state's own 2026
   withholding guide (shown on screen), including Georgia's and Idaho's mid-year changes. No setup

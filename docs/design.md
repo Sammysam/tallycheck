@@ -895,6 +895,31 @@ recommendations without answering each one individually; revisit any of them on 
   Known limits: Pennsylvania taxes some section 125 amounts (other than health, sickness,
   disability or death plans) that the app takes off state wages; Louisiana's "no deduction" L-4
   choice and negative adjustments are not offered.
+- **D65 Built-in 2026 state rules, bracket states** (2026-11-27, step 2 of the US state payroll plan).
+  Built-in 2026 bracket rules from each state's own publication (`source` on each rule):
+  Delaware ($3,250 / $6,500; $110 credit per allowance; 2025 table, unchanged), Hawaii (Booklet A:
+  $4,350 lump sum; $1,144 per allowance; married brackets doubled), Kansas (KW-100: $3,605 /
+  $8,240; K-4 personal allowances $9,160, dependents / head of household $2,320), Minnesota
+  ($5,300 per allowance), Mississippi (0% to $10,000, 4% above; $2,300 / $4,600 / $3,400; Form
+  89-350 exemption dollars; whole dollars), Missouri ($16,100 / $32,200 / $24,150; whole
+  dollars), Montana (own head-of-household brackets; whole dollars), Nebraska ($2,440 per
+  allowance), New Mexico (head of household: $12,075 with the married brackets), North Dakota
+  (own head-of-household table; $5,050 per allowance on a pre-2020 W-4; whole dollars), Ohio
+  (from 1 August 2026 only; $650 per exemption), Oklahoma ($1,000 per allowance; whole dollars),
+  Rhode Island ($1,000 per exemption, none above $290,800 of annual wages), Vermont ($3,925 /
+  $11,775; $5,400 per allowance), Virginia ($8,750; $930 / $800 exemptions; yearly tax rounded to
+  the dollar before dividing) and West Virginia (IT-104 two-earner table = single, one-earner =
+  married; $2,000 per exemption; whole dollars; the SB 392 rate cut applied from 1 April 2026,
+  the state gave no start date). The rule engine gains head-of-household brackets, an
+  allowance wage limit and yearly dollar rounding (built-in rules only); the state certificate
+  gains `stateAnnualDeduction` (exemption dollars). Each state's worked examples are unit tests
+  (Montana's married example and Vermont's, Kansas' and New Mexico's per-period table examples
+  differ from the exact annual formula by a cent or a dollar, as the guides note). Not built in:
+  Alabama (federal tax deduction, phased standard deduction), Arkansas (stepped table), Maine,
+  Wisconsin (phased deductions), Connecticut (codes, phase-outs, credit), New Jersey (rate tables
+  A–E), Oregon (federal tax subtraction) — step 3 with Utah, Massachusetts, California, New York
+  and Maryland; South Carolina (a March 2026 law changed the rates; no new withholding formula
+  yet) and the District of Columbia (no 2026 withholding tables) wait for the states to publish.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

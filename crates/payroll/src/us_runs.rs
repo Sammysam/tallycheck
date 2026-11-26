@@ -842,6 +842,7 @@ fn cert_snapshot(t: &UsTax) -> Value {
         "deductionOverride": t.state_deduction_override.map(Money::cents),
         "annualCredit": t.state_annual_credit.cents(),
         "electedRate": t.state_elected_rate,
+        "annualDeduction": t.state_annual_deduction.cents(),
     })
 }
 
@@ -856,6 +857,7 @@ fn cert_from_snapshot(v: &Value) -> StateEmployee {
         deduction_override: v["deductionOverride"].as_i64(),
         annual_credit: v["annualCredit"].as_i64().unwrap_or(0),
         elected_rate: v["electedRate"].as_i64(),
+        annual_deduction: v["annualDeduction"].as_i64().unwrap_or(0),
     }
 }
 
@@ -1785,6 +1787,7 @@ mod tests {
             state_deduction_override: None,
             state_annual_credit: Money::ZERO,
             state_elected_rate: None,
+            state_annual_deduction: Money::ZERO,
             resident_state: None,
             other_work_states: Vec::new(),
         };

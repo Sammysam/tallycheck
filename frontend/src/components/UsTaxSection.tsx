@@ -37,6 +37,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
       stateDeductionOverride: t.stateDeductionOverride == null ? '' : String(t.stateDeductionOverride),
       stateAnnualCredit: t.stateAnnualCredit ? String(t.stateAnnualCredit) : '',
       stateElectedRate: t.stateElectedRate == null ? '' : String(t.stateElectedRate),
+      stateAnnualDeduction: t.stateAnnualDeduction ? String(t.stateAnnualDeduction) : '',
     };
     for (const k of AMOUNTS) f[k] = t[k] ? String(t[k]) : '';
     setForm(f);
@@ -72,6 +73,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
         stateDeductionOverride: (form.stateDeductionOverride ?? '').trim() === '' ? null : Number(form.stateDeductionOverride),
         stateAnnualCredit: num(form.stateAnnualCredit ?? ''),
         stateElectedRate: (form.stateElectedRate ?? '') === '' ? null : Number(form.stateElectedRate),
+        stateAnnualDeduction: num(form.stateAnnualDeduction ?? ''),
         ...flags,
       };
       for (const k of AMOUNTS) body[k] = num(form[k] ?? '');
@@ -224,9 +226,9 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
           <label className="block">
             <span className="text-xs font-medium text-gray-500">State filing status</span>
             <select value={form.stateFilingStatus} onChange={set('stateFilingStatus')} aria-label="State filing status">
-              <option value="SINGLE">Single</option>
-              <option value="MARRIED">Married</option>
-              <option value="HEAD_OF_HOUSEHOLD">Head of household</option>
+              <option value="SINGLE">{stateForm?.status?.[0] ?? 'Single'}</option>
+              <option value="MARRIED">{stateForm?.status?.[1] ?? 'Married'}</option>
+              <option value="HEAD_OF_HOUSEHOLD">{stateForm?.status?.[2] ?? 'Head of household'}</option>
             </select>
           </label>
           {stateForm?.rate ? (
@@ -251,6 +253,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
           )}
           {stateForm?.override && <Money label={stateForm.override} k="stateDeductionOverride" form={form} set={set} />}
           {stateForm?.credit && <Money label={stateForm.credit} k="stateAnnualCredit" form={form} set={set} />}
+          {stateForm?.deduction && <Money label={stateForm.deduction} k="stateAnnualDeduction" form={form} set={set} />}
           <Money label="Extra state withholding $ per paycheck" k="stateExtraWithholding" form={form} set={set} />
         </div>
         <label className="flex items-center gap-2 text-sm mb-4">

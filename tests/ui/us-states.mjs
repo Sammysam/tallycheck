@@ -229,6 +229,10 @@ try {
     await evaluate(`(() => { const s = [...document.querySelectorAll('select')].find((x) => x.required && [...x.options].some((o) => o.value === 'IL'));
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'IL'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await waitFor(`document.body.innerText.includes('IL-W-4 line 2 allowances')`, 'Illinois form labels');
+    // D65: West Virginia picks its table by the IT-104 one-earner box, not filing status.
+    await evaluate(`(() => { const s = [...document.querySelectorAll('select')].find((x) => x.required && [...x.options].some((o) => o.value === 'WV'));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'WV'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`[...document.querySelectorAll('select[aria-label="State filing status"] option')].some((o) => o.textContent.includes('One-earner table'))`, 'West Virginia table choice');
     await shot('04-built-in');
   });
 } catch (e) {

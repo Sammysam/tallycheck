@@ -16,8 +16,16 @@
 //! - Colorado DR 0004 line 2: an amount replacing the standard deduction (`deduction override`).
 //! - Arizona A-4: the elected percentage (`elected rate`); 2.0% when none was given.
 //!
-//! Not included (their withholding is not one rate): Ohio and Mississippi (brackets, step 2),
-//! Utah and Massachusetts (credits / surtax, step 3).
+//! D65, step 2, the bracket states: Delaware, Hawaii, Kansas (K-4 lines B + C personal allowances
+//! $9,160, lines D + E dependents / head of household $2,320), Minnesota, Mississippi (Form 89-350
+//! line 6 exemption dollars as `annual deduction`; married with an employed spouse uses the single
+//! amount), Missouri (married with a working spouse uses the single amount), Montana, Nebraska, New
+//! Mexico, North Dakota (allowances only on a W-4 from 2019 or earlier), Ohio (from 1 August 2026),
+//! Oklahoma, Rhode Island, Vermont, Virginia (VA-4 personal exemptions $930, 65+ / blind $800) and
+//! West Virginia (IT-104 two-earner table = single, one-earner table = married).
+//! Not built in: Alabama, Arkansas, Connecticut, Maine, Massachusetts, New Jersey, Oregon, Utah,
+//! Wisconsin (their own formulas, step 3); South Carolina and DC (no 2026 withholding method
+//! published for the 2026 law); California, Maryland, New York (step 3).
 
 use crate::us_state::StateRule;
 
@@ -45,6 +53,24 @@ const fn flat(rate: i64, single: i64, married: i64) -> StateRule {
         standard_deduction_hoh: None,
         second_allowance_deduction: 0,
         second_allowance_credit: 0,
+        brackets_hoh: None,
+        allowance_wage_limit: None,
+        round_annual_to_dollar: false,
+    }
+}
+
+/// Brackets from `(upper bound in dollars, rate in ppm)`, the last bound 0 meaning no limit.
+fn br(rows: &[(i64, i64)]) -> Vec<crate::us_state::Bracket> {
+    rows.iter().map(|(upper, rate)| (if *upper == 0 { None } else { Some(upper * 100) }, *rate)).collect()
+}
+
+/// A bracket rule: single brackets, married brackets (None = the same) and standard deductions.
+fn bracketed(single: &[(i64, i64)], married: Option<&[(i64, i64)]>, std_single: i64, std_married: i64) -> StateRule {
+    StateRule {
+        method: "BRACKETS".into(),
+        brackets: br(single),
+        brackets_married: married.map(br),
+        ..flat(0, std_single, std_married)
     }
 }
 
@@ -140,6 +166,219 @@ pub fn all() -> Vec<Pack> {
             "2026-01-01",
             StateRule { excludes_401k: false, ..flat(30_700, 0, 0) },
             "Pennsylvania REV-415 (SU) 01-23, Employer Withholding Information Guide, and pa.gov Employer Withholding: 3.07% of compensation; 401(k) deferrals are taxable (section 125 health plans are not)",
+        ),
+        // ── D65, step 2: bracket states ──────────────────────────────────────────
+        pack(
+            "DE",
+            "2026-01-01",
+            StateRule {
+                allowance_credit: 11_000,
+                ..bracketed(&[(2_000, 0), (5_000, 22_000), (10_000, 39_000), (20_000, 48_000), (25_000, 52_000), (60_000, 55_500), (0, 66_000)], None, 325_000, 650_000)
+            },
+            "Delaware Division of Revenue, Employer's Guide §17, tax computation table effective 1 January 2025 (unchanged for 2026): $3,250 / $6,500 standard deduction; $110 credit per allowance",
+        ),
+        pack(
+            "HI",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 114_400,
+                ..bracketed(
+                    &[(9_600, 14_000), (14_400, 32_000), (19_200, 55_000), (24_000, 64_000), (36_000, 68_000), (48_000, 72_000), (125_000, 76_000), (0, 79_000)],
+                    Some(&[(19_200, 14_000), (28_800, 32_000), (38_400, 55_000), (48_000, 64_000), (72_000, 68_000), (96_000, 72_000), (250_000, 76_000), (0, 79_000)]),
+                    435_000,
+                    435_000,
+                )
+            },
+            "Hawaii Booklet A, Employer's Tax Guide (Rev. 2025), for withholding from 1 January 2026: $4,350 lump-sum allowance; $1,144 per HW-4 allowance",
+        ),
+        pack(
+            "KS",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 916_000,
+                second_allowance_deduction: 232_000,
+                ..bracketed(&[(23_000, 52_000), (0, 55_800)], Some(&[(46_000, 52_000), (0, 55_800)]), 360_500, 824_000)
+            },
+            "Kansas KW-100 Withholding Tax Guide (Rev. 10-24; no 2026 rate change, Notice 25-06): $3,605 / $8,240; K-4 personal allowances $9,160, dependents and head of household $2,320",
+        ),
+        pack(
+            "MN",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 530_000,
+                ..bracketed(
+                    &[(4_700, 0), (38_010, 53_500), (114_130, 68_000), (207_850, 78_500), (0, 98_500)],
+                    Some(&[(14_700, 0), (63_400, 53_500), (208_180, 68_000), (352_630, 78_500), (0, 98_500)]),
+                    0,
+                    0,
+                )
+            },
+            "Minnesota Withholding Tax Instruction Booklet and Tax Tables 2026, computer formula: $5,300 per W-4MN allowance",
+        ),
+        pack(
+            "MS",
+            "2026-01-01",
+            StateRule {
+                standard_deduction_hoh: Some(340_000),
+                round_to_dollar: true,
+                ..bracketed(&[(10_000, 0), (0, 40_000)], None, 230_000, 460_000)
+            },
+            "Mississippi Pub 89-700 (tables effective 1 January 2026) and Computer Payroll Accounting 2026: 0% to $10,000, 4% above; $2,300 / $4,600 (spouse not employed) / $3,400 head of family; Form 89-350 exemption dollars; whole dollars",
+        ),
+        pack(
+            "MO",
+            "2026-01-01",
+            StateRule {
+                standard_deduction_hoh: Some(2_415_000),
+                round_to_dollar: true,
+                ..bracketed(
+                    &[(1_348, 0), (2_696, 20_000), (4_044, 25_000), (5_392, 30_000), (6_740, 35_000), (8_088, 40_000), (9_436, 45_000), (0, 47_000)],
+                    None,
+                    1_610_000,
+                    3_220_000,
+                )
+            },
+            "Missouri 2026 Withholding Tax Formula (Form 4282 Rev. 03-2026): $16,100 / $32,200 (spouse does not work) / $24,150 head of household; whole dollars",
+        ),
+        pack(
+            "MT",
+            "2026-01-01",
+            StateRule {
+                standard_deduction_hoh: Some(2_415_000),
+                brackets_hoh: Some(br(&[(71_250, 47_000), (0, 56_500)])),
+                round_to_dollar: true,
+                ..bracketed(&[(47_500, 47_000), (0, 56_500)], Some(&[(95_000, 47_000), (0, 56_500)]), 1_610_000, 3_220_000)
+            },
+            "Montana Employer and Information Agent Guide with Tax Tables (V4 November 2025), 2026 formula: $16,100 / $32,200 / $24,150; 4.7% and 5.65%; whole dollars",
+        ),
+        pack(
+            "NE",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 244_000,
+                ..bracketed(
+                    &[(3_430, 0), (6_710, 22_600), (21_810, 32_200), (31_610, 42_100), (40_130, 43_500), (75_370, 44_800), (0, 46_000)],
+                    Some(&[(8_190, 0), (13_010, 22_600), (32_400, 32_200), (50_400, 42_100), (62_530, 43_500), (82_920, 44_800), (0, 46_000)]),
+                    0,
+                    0,
+                )
+            },
+            "Nebraska Circular EN 2026 (Rev. 11-2025): $2,440 per W-4N allowance (the 1.5% minimum for employers of more than 24 is not applied)",
+        ),
+        pack(
+            "NM",
+            "2026-01-01",
+            StateRule {
+                standard_deduction_hoh: Some(1_207_500),
+                brackets_hoh: Some(br(&[(8_000, 15_000), (25_000, 32_000), (50_000, 43_000), (100_000, 47_000), (315_000, 49_000), (0, 59_000)])),
+                ..bracketed(
+                    &[(5_500, 15_000), (16_500, 32_000), (33_500, 43_000), (66_500, 47_000), (210_000, 49_000), (0, 59_000)],
+                    Some(&[(8_000, 15_000), (25_000, 32_000), (50_000, 43_000), (100_000, 47_000), (315_000, 49_000), (0, 59_000)]),
+                    805_000,
+                    1_610_000,
+                )
+            },
+            "New Mexico FYI-104 (Rev. 11/2025), effective 1 January 2026: $8,050 / $16,100 / $12,075 head of household (married brackets)",
+        ),
+        pack(
+            "ND",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 505_000,
+                brackets_hoh: Some(br(&[(78_475, 0), (289_675, 19_500), (0, 25_000)])),
+                round_to_dollar: true,
+                ..bracketed(&[(57_625, 0), (258_450, 19_500), (0, 25_000)], Some(&[(57_500, 0), (168_525, 19_500), (0, 25_000)]), 0, 0)
+            },
+            "North Dakota Income Tax Withholding Rates and Instructions for wages paid in 2026 (form 28216, 12/2025): $5,050 per allowance on a W-4 from 2019 or earlier; whole dollars",
+        ),
+        pack(
+            "OH",
+            "2026-08-01",
+            StateRule {
+                allowance_deduction: 65_000,
+                ..bracketed(&[(26_050, 16_000), (100_000, 29_900), (0, 34_000)], None, 0, 0)
+            },
+            "Ohio Employer Withholding Optional Computer Formula, effective 1 August 2026 (Rev. 07/26): $650 per IT 4 exemption (earlier 2026 pay dates are not built in)",
+        ),
+        pack(
+            "OK",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 100_000,
+                round_to_dollar: true,
+                ..bracketed(
+                    &[(10_100, 0), (11_250, 25_000), (13_550, 35_000), (0, 45_000)],
+                    Some(&[(20_200, 0), (22_500, 25_000), (27_100, 35_000), (0, 45_000)]),
+                    0,
+                    0,
+                )
+            },
+            "Oklahoma OW-2, 2026 Oklahoma Income Tax Withholding Tables (Rev. 11-2025): $1,000 per allowance; whole dollars",
+        ),
+        pack(
+            "RI",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 100_000,
+                allowance_wage_limit: Some(29_080_000),
+                ..bracketed(&[(82_050, 37_500), (186_450, 47_500), (0, 59_900)], None, 0, 0)
+            },
+            "Rhode Island 2026 Employer's Income Tax Withholding Tables (updated 11/04/2025): $1,000 per exemption, none above $290,800 of annual wages",
+        ),
+        pack(
+            "VT",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 540_000,
+                ..bracketed(
+                    &[(50_750, 33_500), (122_850, 66_000), (256_300, 76_000), (0, 87_500)],
+                    Some(&[(84_700, 33_500), (204_750, 66_000), (312_050, 76_000), (0, 87_500)]),
+                    392_500,
+                    1_177_500,
+                )
+            },
+            "Vermont GB-1210-2026, 2026 Income Tax Withholding Instructions, Tables and Charts: $3,925 / $11,775; $5,400 per W-4VT allowance",
+        ),
+        pack(
+            "VA",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 93_000,
+                second_allowance_deduction: 80_000,
+                round_annual_to_dollar: true,
+                ..bracketed(&[(3_000, 20_000), (5_000, 30_000), (17_000, 50_000), (0, 57_500)], None, 875_000, 875_000)
+            },
+            "Virginia Employer Withholding Instructions (Rev. 10/26), formula for wages paid after 1 July 2025: $8,750; VA-4 exemptions $930, 65+ / blind $800",
+        ),
+        pack(
+            "WV",
+            "2026-01-01",
+            StateRule {
+                allowance_deduction: 200_000,
+                round_to_dollar: true,
+                ..bracketed(
+                    &[(7_500, 22_200), (18_750, 29_600), (30_000, 33_300), (45_000, 44_400), (0, 48_200)],
+                    Some(&[(10_000, 22_200), (25_000, 29_600), (40_000, 33_300), (60_000, 44_400), (0, 48_200)]),
+                    0,
+                    0,
+                )
+            },
+            "West Virginia IT-100.2A (October 2024 tables, in use until the 2026 rate cut): $2,000 per exemption; two-earner / one-earner tables; whole dollars",
+        ),
+        pack(
+            "WV",
+            "2026-04-01",
+            StateRule {
+                allowance_deduction: 200_000,
+                round_to_dollar: true,
+                ..bracketed(
+                    &[(7_500, 21_100), (18_750, 28_100), (30_000, 31_600), (45_000, 42_200), (0, 45_800)],
+                    Some(&[(10_000, 21_100), (25_000, 28_100), (40_000, 31_600), (60_000, 42_200), (0, 45_800)]),
+                    0,
+                    0,
+                )
+            },
+            "West Virginia IT-100.2A (March 2026), SB 392 rates: $2,000 per exemption; two-earner / one-earner tables; whole dollars (applied from 1 April 2026; the state gave no start date)",
         ),
     ]
 }
@@ -259,6 +498,64 @@ mod tests {
         assert_eq!(tax("PA", "2000", 26, single()), usd("61.40"));
         assert_eq!(tax("AZ", "2000", 26, StateEmployee { elected_rate: Some(25_000), ..single() }), usd("50"));
         assert_eq!(tax("AZ", "2000", 26, single()), usd("40"));
+    }
+
+    #[test]
+    fn step_2_bracket_state_examples() {
+        let s = single;
+        let m = |allowances: i64| StateEmployee { married: true, allowances, ..single() };
+        let a = |allowances: i64| StateEmployee { allowances, ..single() };
+        // Vermont GB-1210 p.7: weekly $1,800, married, 2 allowances → 45.76 annualized (the
+        // per-period table, with rounded figures, prints 45.77).
+        assert_eq!(tax("VT", "1800", 52, m(2)), usd("45.76"));
+        // Virginia p.22: semimonthly $2,649, 5 exemptions → $2,628 a year → 109.50.
+        assert_eq!(tax("VA", "2649", 24, a(5)), usd("109.50"));
+        // Oklahoma OW-2 p.7: semimonthly $1,825, married, 2 allowances → $37.
+        assert_eq!(tax("OK", "1825", 24, m(2)), usd("37"));
+        // Rhode Island: weekly $2,195, 1 exemption → 87.57; above $290,800 a year no exemption.
+        assert_eq!(tax("RI", "2195", 52, a(1)), usd("87.57"));
+        let rich = tax("RI", "6000", 52, a(3));
+        assert_eq!(rich, tax("RI", "6000", 52, s()), "exemptions drop to zero above the limit");
+        // North Dakota: weekly $1,800 single → $13 (2020+ W-4); 2 allowances on an older W-4 → $10.
+        assert_eq!(tax("ND", "1800", 52, s()), usd("13"));
+        assert_eq!(tax("ND", "1800", 52, a(2)), usd("10"));
+        // Minnesota: weekly $1,000 single, 2 allowances → 38.70 (the table shows $39 rounded).
+        assert_eq!(tax("MN", "1000", 52, a(2)), usd("38.70"));
+        // Missouri: $35,000 a year paid monthly, married with a working spouse (single amount) → $59.
+        assert_eq!(tax("MO", "2916.67", 12, s()), usd("59"));
+        // Montana: semimonthly $1,375 single → $33; head of household $4,950 biweekly → $201; both
+        // spouses working (single table) $2,950 biweekly → $114. Married, biweekly $5,950: the
+        // guide's per-period table (rounded thresholds) prints $232; the annual formula gives
+        // 6,018.75 ÷ 26 = 231.49 → $231 (the guide notes such "insignificant variances").
+        assert_eq!(tax("MT", "1375", 24, s()), usd("33"));
+        assert_eq!(tax("MT", "5950", 26, m(0)), usd("231"));
+        assert_eq!(tax("MT", "4950", 26, StateEmployee { head_of_household: true, ..single() }), usd("201"));
+        assert_eq!(tax("MT", "2950", 26, s()), usd("114"));
+        // Nebraska: weekly $1,005 single, 1 allowance → 34.19.
+        assert_eq!(tax("NE", "1005", 52, a(1)), usd("34.19"));
+        // New Mexico p.2: married, weekly $1,000 → 21.78 annualized (+ $20 extra = 41.78).
+        assert_eq!(tax("NM", "1000", 52, StateEmployee { extra: usd("20"), ..m(0) }), usd("41.78"));
+        // Delaware: $25,000 a year single, 1 allowance → $722 a year (biweekly 27.77); married with 3
+        // allowances → $339 (weekly 6.52).
+        assert_eq!(tax("DE", "961.54", 26, a(1)), usd("27.77"));
+        assert_eq!(tax("DE", "480.77", 52, m(3)), usd("6.52"));
+        // Hawaii Booklet A: weekly $500 single, 3 allowances → 9.58.
+        assert_eq!(tax("HI", "500", 52, a(3)), usd("9.58"));
+        // Kansas KW-100 p.6: married, semimonthly $2,000, 3 allowances (2 personal, 1 dependent) →
+        // 41.43 annualized (41.44 by the per-period table).
+        assert_eq!(tax("KS", "2000", 24, StateEmployee { second_allowances: 1, ..m(2) }), usd("41.43"));
+        // Mississippi (computed): single, biweekly $2,000, $6,000 exemption → 51.85 → $52.
+        let ms = StateEmployee { annual_deduction: 600_000, ..single() };
+        assert_eq!(tax("MS", "2000", 26, ms.clone()), usd("52"));
+        assert_eq!(tax("MS", "1890", 26, ms), usd("47"), "the official table shows 47 at $1,890");
+        // Ohio (computed, from August 2026): biweekly $2,000, 2 exemptions → 44.38.
+        assert_eq!(tax("OH", "2000", 26, a(2)), usd("44.38"));
+        assert!(built_in("OH", "2026-07-31").is_none());
+        // West Virginia (computed): biweekly $2,000, 2 exemptions, two-earner → 61.55 → $62; the
+        // rate cut applies from April 2026.
+        assert_eq!(tax("WV", "2000", 26, a(2)), usd("62"));
+        let before = withholding(usd("2000"), 26, &rule("WV", "2026-03-31"), &a(2)).expect("tax");
+        assert_eq!(before, usd("65"));
     }
 
     #[test]
