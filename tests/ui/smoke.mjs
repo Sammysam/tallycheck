@@ -1115,7 +1115,7 @@ try {
     await waitFor(`document.body.innerText.includes('Telephone & Internet Payable')`, 'renamed');
     await shot('36-accounts-edit');
 
-    // The senior's example as a journal entry, then opened in full.
+    // A telephone bill accrued by journal entry, then opened in full.
     await go('/ledger');
     await clickText('+ New Journal Entry');
     await setv('input[aria-label="Entry date"]', '2026-10-05');

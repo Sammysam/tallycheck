@@ -2259,7 +2259,7 @@ async fn payable_accounts_account_edits_and_a_usd_bank_account() -> TestResult {
             .and_then(|rows| rows.iter().find(|r| r["account"]["code"] == code).map(|r| r["balance"].clone()))
     };
 
-    // The senior's example: a telephone bill accrued by journal entry, owed on its own payable.
+    // Example: a telephone bill accrued by journal entry, owed on its own payable.
     let je = app
         .call(
             Method::POST,
