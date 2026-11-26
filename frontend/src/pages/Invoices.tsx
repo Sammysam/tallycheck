@@ -325,7 +325,7 @@ export default function Invoices() {
       {stockProblem && (
         <Dialog title="Not enough stock to post this invoice" width={520} onClose={() => !fixing && setStockProblem(null)}
           buttons={<>
-            <button className="btn btn-primary" disabled={fixing} onClick={stopCounting}>{fixing ? 'Posting…' : `Stop counting ${stockProblem.item} and post`}</button>
+            <button className="btn btn-primary" disabled={fixing} onClick={stopCounting}>{fixing ? 'Posting…' : 'Stop counting it and post'}</button>
             <button className="btn btn-secondary" disabled={fixing} onClick={() => navigate('/items')}>Open Products &amp; Services</button>
             <button className="btn btn-secondary" disabled={fixing} onClick={() => setStockProblem(null)}>Close</button>
           </>}>

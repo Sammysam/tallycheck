@@ -6,7 +6,7 @@
 //! more than N days old (and right after start if one is overdue). Old scheduled backups beyond `keep` are deleted,
 //! newest kept; files made by hand are never deleted.
 
-use crate::create::{create_backup, BackupInfo, EXTENSION, FILE_PREFIX};
+use crate::create::{create_backup, BackupInfo, EXTENSION, FILE_PREFIX, LEGACY_FILE_PREFIX};
 use crate::keys;
 use crate::BackupResult;
 use database::Db;
@@ -121,6 +121,11 @@ pub fn next_due(settings: &Settings, status: &Status) -> Option<String> {
     }
 }
 
+/// The timestamp part of a backup file name made by the app, under its current or old prefix.
+fn stamp_of(name: &str) -> Option<&str> {
+    name.strip_prefix(FILE_PREFIX).or_else(|| name.strip_prefix(LEGACY_FILE_PREFIX))
+}
+
 /// Deletes the oldest scheduled backups beyond `keep`.
 pub fn prune(dir: &Path, keep: u32) -> std::io::Result<Vec<PathBuf>> {
     let mut found: Vec<PathBuf> = fs::read_dir(dir)?
@@ -128,11 +133,14 @@ pub fn prune(dir: &Path, keep: u32) -> std::io::Result<Vec<PathBuf>> {
         .map(|e| e.path())
         .filter(|p| {
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            name.starts_with(FILE_PREFIX) && name.ends_with(&format!(".{EXTENSION}"))
+            stamp_of(name).is_some() && name.ends_with(&format!(".{EXTENSION}"))
         })
         .collect();
-    // Names carry a sortable UTC timestamp.
-    found.sort();
+    // Names carry a sortable UTC timestamp after the prefix (old and new names alike).
+    found.sort_by(|a, b| {
+        let key = |p: &PathBuf| p.file_name().and_then(|n| n.to_str()).and_then(stamp_of).unwrap_or("").to_string();
+        key(a).cmp(&key(b))
+    });
     let excess = found.len().saturating_sub(keep.max(1) as usize);
     let removed: Vec<PathBuf> = found.into_iter().take(excess).collect();
     for p in &removed {

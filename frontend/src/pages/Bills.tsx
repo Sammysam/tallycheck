@@ -7,7 +7,9 @@ import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { money, moneyIn } from '../lib/money';
 import CurrencyPicker from '../components/CurrencyPicker';
-import { fmtDate, region } from '../lib/region';
+import { fmtDate, region, todayIso } from '../lib/region';
+import Dialog from '../components/desktop/Dialog';
+import { freeExpenseCode, isPayable, isSpending, suggested } from '../lib/accountChoices';
 import { toast } from '../lib/toast';
 import { useNavigate } from 'react-router-dom';
 import { lineCodes, summarize, useTaxCodes } from '../lib/taxes';
@@ -34,7 +36,7 @@ export default function Bills() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
+  const [form, setForm] = useState({ vendorId: '', date: todayIso(), dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
   const taxCodes = useTaxCodes();
   // D26: what the bill will total, worked out as the server will.
   const summary = summarize(
@@ -61,7 +63,30 @@ export default function Bills() {
 
   const LINE_GROUPS: [string, string][] = [['EXPENSE', 'Expenses'], ['ASSET', 'Assets'], ['LIABILITY', 'Liabilities']];
   const cols = taxCodes.length ? '1.5fr 3fr 80px 100px 2fr 1.4fr' : '1.5fr 3fr 80px 100px 2fr';
-  const payables = accounts.filter((a) => a.type === 'LIABILITY');
+  // D76: the usual accounts first; "Show all accounts" lists every one.
+  const [showAllAccounts, setShowAllAccounts] = useState(false);
+  const [newAccountFor, setNewAccountFor] = useState<number | null>(null);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [newAccountError, setNewAccountError] = useState('');
+  const payables = showAllAccounts
+    ? accounts.filter((a) => a.type === 'LIABILITY')
+    : suggested(accounts, isPayable, form.payableAccountId);
+  const createExpenseAccount = async () => {
+    if (newAccountFor === null || !newAccountName.trim()) return;
+    setNewAccountError('');
+    try {
+      const code = freeExpenseCode(new Set(accounts.map((a) => a.code)));
+      const { data } = await api.post('/accounts', { code, name: newAccountName.trim(), type: 'EXPENSE', subtype: 'operating_expense' });
+      const r = await api.get('/accounts');
+      setAccounts((r.data as { currency?: string | null }[]).filter((a) => !a.currency));
+      setLine(newAccountFor, 'accountId', data.id);
+      toast(`Account ${code} ${data.name} added`);
+      setNewAccountFor(null);
+      setNewAccountName('');
+    } catch (err) {
+      setNewAccountError(errMsg(err, 'Could not add the account'));
+    }
+  };
 
   /** D38: picking a product fills the line; a stock item always goes to its inventory account. */
   const chooseItem = (i: number, itemId: string) => {
@@ -99,7 +124,7 @@ export default function Bills() {
         lines: lines.map(({ _key, taxCodeId, itemId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined, itemId: itemId || undefined })),
       });
       setShowForm(false);
-      setForm({ vendorId: '', date: '', dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
+      setForm({ vendorId: '', date: todayIso(), dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to save bill');
@@ -156,17 +181,20 @@ export default function Bills() {
                     <option value="">—</option>
                     {items.map((it) => <option key={it.id} value={it.id}>{it.name}</option>)}
                   </select>
-                  <input required placeholder="Item description" value={line.description} onChange={(e) => setLine(i, 'description', e.target.value)} />
-                  <input required type="number" min="0.001" step="any" value={line.quantity} onChange={(e) => setLine(i, 'quantity', Number(e.target.value))} />
-                  <input required type="number" min="0" step="0.01" value={line.unitPrice || ''} onChange={(e) => setLine(i, 'unitPrice', Number(e.target.value))} />
+                  <input required placeholder="Item description" value={line.description} onChange={(e) => setLine(i, 'description', e.target.value)} aria-label={`Description for line ${i + 1}`} />
+                  <input required type="number" min="0.001" step="any" value={line.quantity} onChange={(e) => setLine(i, 'quantity', Number(e.target.value))} aria-label={`Quantity for line ${i + 1}`} />
+                  <input required type="number" min="0" step="0.01" value={line.unitPrice || ''} onChange={(e) => setLine(i, 'unitPrice', Number(e.target.value))} aria-label={`Unit price for line ${i + 1}`} />
                   <select required value={line.accountId} disabled={isStock(line.itemId)} title={isStock(line.itemId) ? 'A stock item is bought into its inventory account' : undefined}
-                    onChange={(e) => setLine(i, 'accountId', e.target.value)} aria-label={`Account for line ${i + 1}`}>
-                    <option value="">Account</option>
-                    {LINE_GROUPS.map(([type, label]) => (
-                      <optgroup key={type} label={label}>
-                        {accounts.filter((a) => a.type === type).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-                      </optgroup>
-                    ))}
+                    onChange={(e) => (e.target.value === '__new' ? setNewAccountFor(i) : setLine(i, 'accountId', e.target.value))} aria-label={`Account for line ${i + 1}`}>
+                    <option value="">What was it for?</option>
+                    {showAllAccounts || isStock(line.itemId)
+                      ? LINE_GROUPS.map(([type, label]) => (
+                        <optgroup key={type} label={label}>
+                          {accounts.filter((a) => a.type === type).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                        </optgroup>
+                      ))
+                      : suggested(accounts, isSpending, line.accountId).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                    <option value="__new">+ New expense account…</option>
                   </select>
                   {taxCodes.length > 0 && (
                     <select value={line.taxCodeId} onChange={(e) => setLine(i, 'taxCodeId', e.target.value)} aria-label={`Tax for line ${i + 1}`}>
@@ -176,7 +204,13 @@ export default function Bills() {
                   )}
                 </div>
               ))}
-              <button type="button" className="btn-link" onClick={() => setForm({ ...form, lines: [...form.lines, emptyLine()] })}>+ Add line</button>
+              <div className="flex items-center gap-4">
+                <button type="button" className="btn-link" onClick={() => setForm({ ...form, lines: [...form.lines, emptyLine()] })}>+ Add line</button>
+                <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                  <input type="checkbox" checked={showAllAccounts} onChange={(e) => setShowAllAccounts(e.target.checked)} />
+                  Show all accounts (assets, liabilities, payroll)
+                </label>
+              </div>
               <label className="text-xs font-medium text-gray-600 block mt-3" style={{ maxWidth: 520 }}>
                 Owed on (payable account)
                 <select className="mt-1" value={form.payableAccountId} onChange={(e) => setForm({ ...form, payableAccountId: e.target.value })} aria-label="Payable account">
@@ -185,6 +219,19 @@ export default function Bills() {
                 </select>
                 <span className="text-gray-500 font-normal">Choose a separate payable, such as Telephone Payable, to see it on its own line in the Balance Sheet.</span>
               </label>
+              {newAccountFor !== null && (
+                <Dialog title="New expense account" width={440} onClose={() => setNewAccountFor(null)}
+                  buttons={<>
+                    <button type="button" className="btn btn-primary" disabled={!newAccountName.trim()} onClick={createExpenseAccount}>Add account</button>
+                    <button type="button" className="btn btn-secondary" onClick={() => setNewAccountFor(null)}>Cancel</button>
+                  </>}>
+                  <label className="text-xs font-medium text-gray-600 block">What do you spend on?
+                    <input className="mt-1 w-full" autoFocus value={newAccountName} onChange={(e) => setNewAccountName(e.target.value)} placeholder="e.g. Utilities, Rent, Office supplies, Ingredients" aria-label="New account name" />
+                  </label>
+                  <p className="text-xs text-gray-500 mt-2">It is added to your chart of accounts as an expense, and your reports show it on its own line.</p>
+                  {newAccountError && <p className="text-sm text-red-600 mt-2" role="alert">{newAccountError}</p>}
+                </Dialog>
+              )}
             </div>
             <div className="flex items-center justify-between gap-4 text-sm">
               {taxCodes.length > 0 ? (

@@ -1111,6 +1111,20 @@ recommendations without answering each one individually; revisit any of them on 
   its check in its own words (owns / owes / worth, customers owe you, you owe suppliers), country
   examples, dates in the company style and a "Go to my dashboard" button. The wizard's review page
   wraps long values and keeps its Change buttons visible.
+- **D76 Third first-time-user fixes** (2026-11-26).
+  Fixes from the third first-time-user test. Backups are named `TallyCheck-backup-<stamp>.qbak`
+  (copies named `cenango-accounting-…` by earlier versions are still recognised and pruned, oldest
+  first by their timestamp). The setup wizard shows where the first backup was saved on the page
+  itself (pop-up messages are not shown on that screen; a payroll-country problem is shown there
+  too) and says that automatic copies go into a "scheduled" folder. Account pickers offer the
+  usual accounts first (`lib/accountChoices.ts`): bill lines expenses other than payroll, with
+  "Show all accounts" and "+ New expense account…" (added as an expense at the first free code
+  from 6200); a bill's payable account liabilities other than payroll; a product's purchase
+  account expenses and assets other than money and receivables; tax codes no payroll, money or
+  receivable accounts. The account already chosen is always kept. A new bill starts on today's
+  date and its line boxes are labelled; the customer and vendor forms have a heading and visible
+  labels; the review page wraps at word boundaries; the stock window's button reads "Stop counting
+  it and post".
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

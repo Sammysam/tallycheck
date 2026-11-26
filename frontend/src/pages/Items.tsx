@@ -13,6 +13,7 @@ import { fmtDate, todayIso } from '../lib/region';
 import { lineCodes, useTaxCodes } from '../lib/taxes';
 import { toast } from '../lib/toast';
 import { qty, TYPE_LABEL, type ItemType } from '../lib/items';
+import { isPayroll, isPurchasedAsset, isSpending } from '../lib/accountChoices';
 
 /**
  * D38: products & services. Stock items are counted and valued at average cost: bills bring
@@ -265,9 +266,9 @@ function ItemDialog({ item, accounts, onClose, onSaved }: { item: Item | null; a
           ? <label className="text-xs font-medium text-gray-600">Reorder when at or below
               <input className="mt-1 w-full" type="number" min="0" step="any" value={f.reorderPoint} onChange={(e) => set({ reorderPoint: e.target.value })} placeholder="optional" aria-label="Reorder point" />
             </label>
-          : select('Purchase account (bills)', 'expenseAccountId', [...byType('EXPENSE'), ...byType('ASSET')], 'Choose on each bill')}
-        {stock && select('Inventory account', 'inventoryAccountId', byType('ASSET'), 'Choose…', moved)}
-        {stock && select('Cost of goods sold account', 'cogsAccountId', byType('EXPENSE'), 'Choose…')}
+          : select('Purchase account (bills)', 'expenseAccountId', [...byType('EXPENSE').filter((a) => isSpending(a) || a.id === f.expenseAccountId), ...byType('ASSET').filter((a) => isPurchasedAsset(a) || a.id === f.expenseAccountId)], 'Choose on each bill')}
+        {stock && select('Inventory account', 'inventoryAccountId', byType('ASSET').filter((a) => isPurchasedAsset(a) || a.id === f.inventoryAccountId), 'Choose…', moved)}
+        {stock && select('Cost of goods sold account', 'cogsAccountId', byType('EXPENSE').filter((a) => !isPayroll(a) || a.id === f.cogsAccountId), 'Choose…')}
       </div>
       {stock && !item && <p className="text-xs text-gray-500 mt-3">Stock starts at 0. Post a bill for it, or use <b>Adjust stock</b> to enter what you already have.</p>}
     </Dialog>

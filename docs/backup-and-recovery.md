@@ -2,7 +2,7 @@
 
 ## What a backup is
 
-One file, `cenango-accounting-YYYYMMDD-HHMMSS.qbak`, holding:
+One file, `TallyCheck-backup-YYYYMMDD-HHMMSS.qbak` (copies made by earlier versions: `cenango-accounting-…`), holding:
 
 | Inside | Notes |
 |---|---|

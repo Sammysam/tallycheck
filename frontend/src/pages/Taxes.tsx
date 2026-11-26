@@ -168,7 +168,12 @@ export default function Taxes() {
   };
 
   const lineCodes = codes.filter((c) => c.isActive && c.kind !== 'WITHHOLDING');
-  const [salesChoices, purchaseChoices] = choices(form.kind);
+  // D76: payroll accounts, money and receivables are never offered for tax (the chosen one is kept).
+  const fits = (a: Account, chosen: string) => a.id === chosen
+    || ((form.kind === 'WITHHOLDING' ? isWithholdingAccount(a) || !PAYROLL.test(a.name) : !PAYROLL.test(a.name))
+      && !(a.type === 'ASSET' && Number(a.code) < 1200));
+  const [salesChoices, purchaseChoices] = choices(form.kind).map((list, n) =>
+    list.filter((a) => fits(a, n === 0 ? form.salesAccountId : form.purchaseAccountId))) as [Account[], Account[]];
   const hasAccounts = form.kind === 'WITHHOLDING'
     ? accounts.some((a) => a.isActive && isWithholdingAccount(a))
     : accounts.some((a) => a.isActive && a.type === 'LIABILITY' && isSalesTaxAccount(a));

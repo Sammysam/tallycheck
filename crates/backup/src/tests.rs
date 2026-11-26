@@ -194,6 +194,9 @@ async fn scheduled_backups_need_a_password_and_keep_the_newest() -> BackupResult
     assert!(matches!(schedule::run_if_due(&i.db, i.data()).await, Some(Ok(_))));
     assert!(schedule::run_if_due(&i.db, i.data()).await.is_none(), "not due again within a day");
     let dir = dest.path().join(schedule::SCHEDULED_DIR);
+    let made: Vec<_> = fs::read_dir(&dir)?.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    assert!(made.iter().all(|n| n.starts_with("TallyCheck-backup-")), "{made:?}");
+    // Copies made before D76 carry the old name and are still pruned, oldest first.
     for stamp in ["20200101-000000", "20200102-000000"] {
         fs::write(dir.join(format!("cenango-accounting-{stamp}.qbak")), b"old")?;
     }

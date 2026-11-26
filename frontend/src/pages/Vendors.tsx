@@ -54,11 +54,21 @@ export default function Vendors() {
 
       {showForm && (
         <div className="card mb-5">
+          {/* D76: a heading and visible labels, so a filled form still says what each box is. */}
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">{editingId ? `Edit ${form.name || 'vendor'}` : 'New vendor'}</h3>
           <form onSubmit={submit} className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            <input required placeholder="Vendor Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            <input type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            <input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            <input placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+            <label className="text-xs font-medium text-gray-600">Name
+              <input className="mt-1 w-full" required placeholder="Vendor Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </label>
+            <label className="text-xs font-medium text-gray-600">Email (optional)
+              <input className="mt-1 w-full" type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </label>
+            <label className="text-xs font-medium text-gray-600">Phone (optional)
+              <input className="mt-1 w-full" placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </label>
+            <label className="text-xs font-medium text-gray-600">Address (optional)
+              <input className="mt-1 w-full" placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+            </label>
             <div className="flex gap-2" style={{ gridColumn: '1 / -1' }}>
               <button type="submit" className="btn btn-primary">Save</button>
               <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm({ name: '', email: '', phone: '', address: '' }); }} className="btn btn-secondary">Cancel</button>

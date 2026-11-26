@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'r
 import { useNavigate } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
 import { COUNTRIES, offeredCountries } from '../lib/countries';
-import { toast } from '../lib/toast';
 import { syncPayrollCountry } from '../lib/usPayroll';
 import { regionFromSettings, setRegion, SETUP_LATER } from '../lib/region';
 import { NO_OPENING_BALANCES } from '../components/GettingStarted';
@@ -41,7 +40,7 @@ const STEPS: Step[] = [
   { id: 'payment', title: 'How do customers pay you?', help: 'Printed on invoices and statements — for example your bank and account number.', keys: ['company.paymentInstructions'] },
   { id: 'footer', title: 'A note at the bottom of your invoices', help: 'For example “Thank you for your business”.', keys: ['company.footerNote'] },
   // D73: keep the books safe, and bring in what an existing business already has.
-  { id: 'backup', title: 'Keep your books safe', help: 'TallyCheck copies your books to a folder every day, protected by a password. The folder below works; a USB drive or a folder that syncs to the cloud is safer, because it survives this PC breaking. The first copy is made as soon as you press Next.', keys: [] },
+  { id: 'backup', title: 'Keep your books safe', help: 'TallyCheck copies your books to a folder every day, protected by a password. The folder below works; a USB drive or a folder that syncs to the cloud is safer, because it survives this PC breaking. The first copy is made as soon as you press Next; automatic copies go into a “scheduled” folder inside the one you choose.', keys: [] },
   { id: 'opening', title: 'Do you already have a business running?', help: 'If you do, bring in what you have today — your bank balance, what customers owe you and what you owe — so your reports start from the right figures.', keys: [] },
   { id: 'review', title: 'All done — check your details', help: 'Click a row to change it. You can change everything later under Administration → Settings.', keys: [] },
 ];
@@ -87,6 +86,7 @@ export default function CompanySetup() {
   const [backupPassword, setBackupPassword] = useState('');
   const [backupConfirm, setBackupConfirm] = useState('');
   const [daily, setDaily] = useState(true);
+  const [backupNote, setBackupNote] = useState('');
   // D73: 'new' business, 'existing' (go on to Quick start), or not answered.
   const [opening, setOpening] = useState<'' | 'new' | 'existing'>(read(NO_OPENING_BALANCES) === '1' ? 'new' : '');
 
@@ -183,7 +183,8 @@ export default function CompanySetup() {
       setError(`Backups are on, but the first copy could not be made: ${r.data.firstBackupError}`);
       return false;
     }
-    if (r.data?.firstBackup?.file) toast(`Your first backup is saved: ${r.data.firstBackup.file}`);
+    // D76: said on the page itself (pop-up messages are not shown on this screen).
+    if (r.data?.firstBackup?.file) setBackupNote(r.data.firstBackup.file);
     setBackupPassword('');
     setBackupConfirm('');
     return true;
@@ -254,7 +255,10 @@ export default function CompanySetup() {
       setRegion(regionFromSettings(r.data));
       if (step.id === 'country') {
         const problem = await syncPayrollCountry(body['region.country']);
-        if (problem) toast(problem);
+        go(index + 1);
+        // Pop-up messages are not shown on this screen, so the problem is said on the next page.
+        if (problem) setError(problem);
+        return;
       }
       go(index + 1);
     } catch (err) {
@@ -371,7 +375,7 @@ export default function CompanySetup() {
       return c ? `${c.name} · ${val('region.currency')} · year starts in ${MONTHS[Number(val('region.fiscalYearStart') || 1) - 1]}` : '';
     }
     if (s.id === 'logo') return val('company.logo') ? 'Added' : '';
-    if (s.id === 'backup') return !backup.available ? '' : backup.enabled ? `On, every day, to ${backup.folder}` : 'Off';
+    if (s.id === 'backup') return !backup.available ? '' : backup.enabled ? (backupNote ? `On, every day. First backup saved: ${backupNote}` : `On, every day, to ${backup.folder}`) : 'Off';
     if (s.id === 'opening') return opening === 'new' ? 'New business — nothing to bring in' : opening === 'existing' ? 'Existing business — enter them next' : '';
     return val(s.keys[0]).replace(/\s*\n\s*/g, ', ');
   };
@@ -407,7 +411,7 @@ export default function CompanySetup() {
                     {STEPS.slice(0, last).map((s, i) => (
                       <tr key={s.id} className="border-b border-[#eee] cursor-pointer hover:bg-[#f7f7f7]" onClick={() => go(i)} title="Change">
                         <td className="py-2 pr-3 text-gray-600 whitespace-nowrap align-top">{SHORT[s.id]}</td>
-                        <td className="py-2 text-gray-900 break-all" style={{ overflowWrap: 'anywhere' }}>{summary(s) || <span className="text-gray-400">Not entered</span>}</td>
+                        <td className="py-2 text-gray-900" style={{ overflowWrap: 'break-word', wordBreak: 'normal' }}>{summary(s) || <span className="text-gray-400">Not entered</span>}</td>
                         <td className="py-2 pl-2 text-xs text-orange-600 align-top whitespace-nowrap"><button type="button" className="underline" onClick={(e) => { e.stopPropagation(); go(i); }}>Change</button></td>
                       </tr>
                     ))}
@@ -416,6 +420,11 @@ export default function CompanySetup() {
               ) : fieldFor(step)}
             </div>
 
+            {backupNote && (step.id === 'backup' || step.id === 'opening') && (
+              <p className="text-sm text-green-700 mt-3 px-3 py-2 rounded border border-green-200 bg-green-50" role="status" style={{ overflowWrap: 'anywhere' }}>
+                ✓ Your first backup is saved: <strong>{backupNote}</strong>
+              </p>
+            )}
             {error && <p className="text-sm text-red-600 mt-3" role="alert">{error}</p>}
 
             <div className="flex items-center gap-2 mt-6">

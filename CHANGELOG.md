@@ -7,7 +7,13 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-26
+
 ### Added
+- Third round of first-time-user fixes: the setup wizard says where the first backup was saved,
+  backups are named TallyCheck-backup-…, account lists offer the usual accounts first (with "Show
+  all accounts" and "+ New expense account…"), bills start on today's date, and customer and
+  vendor forms keep their labels (D76).
 - Second round of first-time-user fixes: tax codes never default to a payroll account, the first
   backup is made the moment backups are switched on, new products are not stock-counted unless
   chosen (with a one-click fix when stock is short), opening balances are not overdue on day one,
@@ -129,6 +135,7 @@ taxes for any country, foreign currencies, Sri Lankan and US payroll, products a
 bank reconciliation, imports, Shopify / WooCommerce / PayPal / Stripe connectors, the Claude
 (MCP) connector, encrypted backups, LAN mode, in-app updates and the Microsoft Store package.
 
-[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/Sammysam/tallycheck/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Sammysam/tallycheck/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Sammysam/tallycheck/releases/tag/v1.0.0

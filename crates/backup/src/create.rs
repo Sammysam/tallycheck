@@ -16,7 +16,10 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 pub const EXTENSION: &str = "qbak";
-pub const FILE_PREFIX: &str = "cenango-accounting-";
+/// D76: backups are named after the product. Files made before keep their old name
+/// ([`LEGACY_FILE_PREFIX`]); both are recognised when old scheduled copies are removed.
+pub const FILE_PREFIX: &str = "TallyCheck-backup-";
+pub const LEGACY_FILE_PREFIX: &str = "cenango-accounting-";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
