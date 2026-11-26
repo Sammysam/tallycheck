@@ -474,10 +474,11 @@ INSERT INTO "roles" ("id", "name", "permissions", "isSystem") VALUES
 -- Invoice numbers start at INV-9000 (1717400011000).
 INSERT INTO "counters" ("key", "value") VALUES ('INV', 8999);
 
--- Company settings (1717400012000, 1717400020000, 1717400021000).
+-- Company settings (1717400012000, 1717400020000, 1717400021000). The reference seeded its own
+-- company's signatory and payroll details here; they are left blank (each company enters its own).
 INSERT INTO "settings" ("key", "value") VALUES
-  ('signatoryName', 'Samir Husain'),
-  ('signatoryTitle', 'Director'),
+  ('signatoryName', ''),
+  ('signatoryTitle', ''),
   ('payroll.epfEmployeeRate', '0.08'),
   ('payroll.epfEmployerRate', '0.12'),
   ('payroll.etfRate', '0.03'),
@@ -485,13 +486,13 @@ INSERT INTO "settings" ("key", "value") VALUES
   ('payroll.employerWelfare', '150'),
   ('payroll.daysInMonth', '30'),
   ('payroll.payeSlabs', '[[250000,0],[500000,0.06],[750000,0.12],[null,0.18]]'),
-  ('payroll.companyName', 'CENANGO (PVT) LTD'),
-  ('payroll.epfRegNo', 'A 40035'),
-  ('payroll.etfRegNo', 'A 40035'),
-  ('payroll.careOf', 'C/O Mr. Ziyam Kamil'),
-  ('payroll.epfAddress', '38, Fife Road, Colombo 05'),
-  ('payroll.etfAddress', '52, Green Path, Colombo 03'),
-  ('payroll.telephone', '011-2508805'),
+  ('payroll.companyName', ''),
+  ('payroll.epfRegNo', ''),
+  ('payroll.etfRegNo', ''),
+  ('payroll.careOf', ''),
+  ('payroll.epfAddress', ''),
+  ('payroll.etfAddress', ''),
+  ('payroll.telephone', ''),
   ('payroll.hrSignatory', 'HR');
 
 -- Payroll chart-of-accounts additions (1717400020000), one statement each so ids differ.

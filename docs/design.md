@@ -1087,6 +1087,14 @@ recommendations without answering each one individually; revisit any of them on 
   first customer, first posted invoice, automatic backups on, a second active user; each open
   step has a Start button; it can be hidden and disappears when all are done. Steps the user
   cannot check (a missing right, not on the main PC) are left out.
+- **D74 Baseline without company details** (2026-11-26).
+  The baseline migration (`20261014000001`) no longer seeds the reference company's own signatory
+  and payroll details (names, EPF / ETF number, addresses, phone); those settings start blank, as
+  every fresh install already ended up after `20261020000004`. The contract test uses a made-up
+  phone number. This is the one edit to an applied migration: `Db::open` replaces the recorded
+  checksum of the baseline only when it is exactly the old file's SHA-384, so installations that
+  applied the old file keep opening (saved settings are untouched); any other mismatch is still
+  refused. Older commits in the history still contain the old file.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

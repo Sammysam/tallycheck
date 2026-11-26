@@ -22,6 +22,41 @@ pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations/
 
 const READ_POOL_SIZE: u32 = 4;
 
+/// D74: the baseline migration was edited once, to remove the original company's details from
+/// its seed rows (the data it creates is unchanged for every installation: those rows were
+/// already blanked by `20261020000004`, and settings saved since are untouched). SQLx refuses a
+/// migration whose checksum changed, so an installation that applied the file before the edit
+/// has its recorded checksum updated — only when it is exactly the old file's SHA-384.
+const BASELINE_VERSION: i64 = 20261014000001;
+const BASELINE_CHECKSUM_BEFORE_D74: &str =
+    "e62e752387575a2eaaedc1b3d29202dbbc847682edc4871c9fdc78b4c1b87080b996e911ec5abda38f2b39c1fef515c4";
+
+async fn accept_cleaned_baseline(pool: &SqlitePool) -> AppResult<()> {
+    let has_table: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'")
+            .fetch_optional(pool)
+            .await?;
+    if has_table.is_none() {
+        return Ok(());
+    }
+    let stored: Option<Vec<u8>> = sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?1")
+        .bind(BASELINE_VERSION)
+        .fetch_optional(pool)
+        .await?;
+    let Some(stored) = stored else { return Ok(()) };
+    let hex: String = stored.iter().map(|b| format!("{b:02x}")).collect();
+    let Some(current) = MIGRATOR.iter().find(|m| m.version == BASELINE_VERSION) else { return Ok(()) };
+    if hex == BASELINE_CHECKSUM_BEFORE_D74 && stored.as_slice() != current.checksum.as_ref() {
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
+            .bind(current.checksum.as_ref())
+            .bind(BASELINE_VERSION)
+            .execute(pool)
+            .await?;
+        tracing::info!("baseline migration checksum updated for the cleaned file (D74)");
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub struct Db {
     writer: SqlitePool,
@@ -50,6 +85,7 @@ impl Db {
             .min_connections(1)
             .connect_with(base_options(path).create_if_missing(true))
             .await?;
+        accept_cleaned_baseline(&writer).await?;
         MIGRATOR.run(&writer).await?;
 
         let reader = SqlitePoolOptions::new()

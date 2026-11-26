@@ -528,7 +528,7 @@ async function scenario(base) {
     await step('payroll.rates.update', 'PATCH', '/api/payroll/rates', Q({ stampDuty: '25', daysInMonth: 30,
       payeSlabs: [[250000, 0], [500000, 0.06], [750000, 0.12], [null, 0.18]] }));
     await step('payroll.company.get', 'GET', '/api/payroll/company', { token: s.admin });
-    await step('payroll.company.update', 'PATCH', '/api/payroll/company', Q({ telephone: ' 011-2508805 ', careOf: '', junk: 1 }));
+    await step('payroll.company.update', 'PATCH', '/api/payroll/company', Q({ telephone: ' 011-5550100 ', careOf: '', junk: 1 }));
     await step('payroll.runs.create.invalid', 'POST', '/api/payroll/runs', Q({ period: '2026-4' }));
 
     // A mid-month joiner, a leaver, a contractor without salary and a future joiner.

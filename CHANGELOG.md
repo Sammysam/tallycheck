@@ -75,6 +75,7 @@ All notable changes to TallyCheck. The format follows
   from the first line only).
 
 ### Changed
+- The first database migration no longer contains the original company's contact details (D74).
 - Only Sri Lanka and the United States can be chosen as the company's country for now (their
   payroll rules are built; more countries will follow). Companies that already use another
   country keep it. Payroll follows the country: Sri Lanka uses EPF / ETF / PAYE, the United

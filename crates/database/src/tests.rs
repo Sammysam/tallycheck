@@ -519,3 +519,41 @@ async fn an_older_database_is_copied_before_it_is_upgraded() -> AppResult<()> {
     assert!(Db::snapshot_before_upgrade(&path, &copies).await?.is_none(), "up to date: nothing copied");
     Ok(())
 }
+
+/// D74: an installation that applied the baseline before its seed rows were cleaned opens; a
+/// checksum that is neither the old nor the current one is still refused.
+#[tokio::test]
+async fn cleaned_baseline_is_accepted_only_from_the_old_file() -> AppResult<()> {
+    let dir = tempfile::tempdir().map_err(AppError::internal)?;
+    let path = dir.path().join("t.db");
+    let set_checksum = |bytes: Vec<u8>| {
+        let path = path.clone();
+        async move {
+            let db = Db::open(&path).await?;
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
+                .bind(bytes)
+                .bind(BASELINE_VERSION)
+                .execute(db.write())
+                .await?;
+            db.close().await;
+            AppResult::Ok(())
+        }
+    };
+    let old: Vec<u8> = (0..BASELINE_CHECKSUM_BEFORE_D74.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&BASELINE_CHECKSUM_BEFORE_D74[i..i + 2], 16).map_err(AppError::internal))
+        .collect::<AppResult<_>>()?;
+    set_checksum(old).await?;
+    let db = Db::open(&path).await?;
+    let now: Vec<u8> = sqlx::query_scalar("SELECT checksum FROM _sqlx_migrations WHERE version = ?1")
+        .bind(BASELINE_VERSION)
+        .fetch_one(db.read())
+        .await?;
+    let current = MIGRATOR.iter().find(|m| m.version == BASELINE_VERSION).map(|m| m.checksum.to_vec());
+    assert_eq!(Some(now), current, "the old checksum was replaced by the cleaned file's");
+    db.close().await;
+
+    set_checksum(vec![0u8; 48]).await?;
+    assert!(Db::open(&path).await.is_err(), "an unknown baseline checksum must still be refused");
+    Ok(())
+}
