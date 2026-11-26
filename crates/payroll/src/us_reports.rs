@@ -17,7 +17,8 @@
 //!   quarter, with the credit reduction in the fourth quarter.
 //! - W-2: box 1 income-tax wages, 2 federal income tax, 3 social security wages, 4 social
 //!   security tax, 5 Medicare wages, 6 Medicare tax (with Additional Medicare), 12 code D 401(k).
-//!   Boxes 15–17: the work state, its wages and the state income tax withheld.
+//!   Boxes 15–17: each state's wages and the state income tax withheld for it (D63: one row per
+//!   state in `states`; the box fields show the work state, or else the state with the most wages).
 
 use crate::us::PPM;
 use crate::us_setup::load_settings;
@@ -72,6 +73,8 @@ struct Paid {
     futa: i64,
     state_wages: i64,
     state_tax: i64,
+    /// D63: each state's (state, wages, tax) on this line.
+    states: Vec<(String, i64, i64)>,
 }
 
 impl Paid {
@@ -99,7 +102,7 @@ async fn paid_lines(conn: &mut SqliteConnection, from: &str, to: &str) -> AppRes
                   l."pretaxSection125", l."incomeTaxWages", l."federalIncomeTax", l."socialSecurityWages",
                   l."socialSecurityEmployee", l."socialSecurityEmployer", l."medicareWages", l."ytdMedicareWages",
                   l."medicareEmployee", l."additionalMedicare", l."medicareEmployer", l."futaWages", l."futa",
-                  l."stateIncomeTaxWages", l."stateIncomeTax"
+                  l."stateIncomeTaxWages", l."stateIncomeTax", l."stateTaxes"
            FROM "us_payroll_lines" l JOIN "us_payroll_runs" r ON r."id" = l."runId"
            WHERE r."status" IN ('POSTED','PAID') AND r."payDate" BETWEEN ?1 AND ?2
            ORDER BY r."payDate", r."runNumber", lower(l."employeeCode"), l."rowid""#,
@@ -136,6 +139,25 @@ async fn paid_lines(conn: &mut SqliteConnection, from: &str, to: &str) -> AppRes
                 futa: c("futa")?,
                 state_wages: c("stateIncomeTaxWages")?,
                 state_tax: c("stateIncomeTax")?,
+                states: {
+                    let v: Value = serde_json::from_str(&r.try_get::<String, _>("stateTaxes")?).unwrap_or(Value::Null);
+                    let parts: Vec<(String, i64, i64)> = v
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|p| {
+                                    Some((p["state"].as_str()?.to_string(), p["wages"].as_i64()?, p["tax"].as_i64()?))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    // Lines made before D63: the work state with the line's figures.
+                    if parts.is_empty() {
+                        vec![(r.try_get("workState")?, c("stateIncomeTaxWages")?, c("stateIncomeTax")?)]
+                    } else {
+                        parts
+                    }
+                },
             })
         })
         .collect()
@@ -328,6 +350,30 @@ pub async fn w2(db: &Db, year: i32) -> AppResult<Value> {
     for (_, ps) in by {
         let last = ps[ps.len() - 1];
         let s = |f: &dyn Fn(&Paid) -> i64| ps.iter().map(|p| f(p)).sum::<i64>();
+        // Boxes 15–17 per state; the box fields show the state with the most wages.
+        let mut by_state: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+        for p in &ps {
+            for (st, wages, tax) in &p.states {
+                let e = by_state.entry(st.clone()).or_insert((0, 0));
+                e.0 += wages;
+                e.1 += tax;
+            }
+        }
+        // The work state when it has a row, else the state with the most wages.
+        let main = by_state
+            .get(&last.state)
+            .map(|(wages, tax)| (last.state.clone(), *wages, *tax))
+            .or_else(|| {
+                by_state
+                    .iter()
+                    .max_by_key(|(_, (wages, _))| *wages)
+                    .map(|(st, (wages, tax))| (st.clone(), *wages, *tax))
+            })
+            .unwrap_or((last.state.clone(), 0, 0));
+        let states: Vec<Value> = by_state
+            .iter()
+            .map(|(st, (wages, tax))| json!({"box15": st, "box16": m(*wages), "box17": m(*tax)}))
+            .collect();
         out.push(json!({
             "employeeId": last.employee_id,
             "employeeCode": last.code,
@@ -341,9 +387,12 @@ pub async fn w2(db: &Db, year: i32) -> AppResult<Value> {
             "box5": m(s(&|p| p.medicare_wages)),
             "box6": m(s(&|p| p.medicare_ee + p.additional)),
             "box12D": m(s(&|p| p.pretax_401k)),
-            "box15": last.state,
-            "box16": m(s(&|p| p.state_wages)),
-            "box17": m(s(&|p| p.state_tax)),
+            "box15": main.0,
+            "box16": m(main.1),
+            "box17": m(main.2),
+            "states": states,
+            "stateWagesTotal": m(s(&|p| p.state_wages)),
+            "stateTaxTotal": m(s(&|p| p.state_tax)),
         }));
     }
     out.sort_by(|a, b| {
@@ -355,7 +404,7 @@ pub async fn w2(db: &Db, year: i32) -> AppResult<Value> {
     let totals = json!({
         "box1": total("box1"), "box2": total("box2"), "box3": total("box3"), "box4": total("box4"),
         "box5": total("box5"), "box6": total("box6"), "box12D": total("box12D"),
-        "box16": total("box16"), "box17": total("box17"),
+        "box16": total("stateWagesTotal"), "box17": total("stateTaxTotal"),
     });
     Ok(json!({ "year": year, "employer": employer(&mut c).await?, "employees": out, "totals": totals }))
 }

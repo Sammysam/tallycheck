@@ -41,6 +41,9 @@ pub struct StateRule {
     pub allowance_deduction: i64,
     pub allowance_credit: i64,
     pub excludes_401k: bool,
+    /// D63: as the home state, withhold its tax less the work state's when that is more
+    /// (`residentCredit` DIFFERENCE); false = leave residents working elsewhere to that state.
+    pub resident_credit: bool,
 }
 
 impl StateRule {
@@ -55,6 +58,7 @@ impl StateRule {
             allowance_deduction: 0,
             allowance_credit: 0,
             excludes_401k: true,
+            resident_credit: false,
         }
     }
 
@@ -71,6 +75,7 @@ impl StateRule {
             "allowanceDeduction": self.allowance_deduction,
             "allowanceCredit": self.allowance_credit,
             "excludes401k": self.excludes_401k,
+            "residentCredit": self.resident_credit,
         })
     }
 
@@ -89,6 +94,7 @@ impl StateRule {
             allowance_deduction: v["allowanceDeduction"].as_i64().unwrap_or(0),
             allowance_credit: v["allowanceCredit"].as_i64().unwrap_or(0),
             excludes_401k: v["excludes401k"].as_bool().unwrap_or(true),
+            resident_credit: v["residentCredit"].as_bool().unwrap_or(false),
         })
     }
 }
@@ -193,6 +199,7 @@ fn rule_from_row(r: &SqliteRow) -> AppResult<StateRule> {
         allowance_deduction: r.try_get("allowanceDeduction")?,
         allowance_credit: r.try_get("allowanceCredit")?,
         excludes_401k: r.try_get("excludes401k")?,
+        resident_credit: r.try_get::<String, _>("residentCredit")? == "DIFFERENCE",
     })
 }
 
@@ -231,6 +238,7 @@ fn rule_json(state: &str, r: &StateRule, built_in: bool, notes: Option<String>, 
         "allowanceDeduction": Money::from_cents(r.allowance_deduction).to_json_number(),
         "allowanceCredit": Money::from_cents(r.allowance_credit).to_json_number(),
         "excludes401k": r.excludes_401k,
+        "residentCredit": if r.resident_credit { "DIFFERENCE" } else { "NONE" },
         "notes": notes,
         "updatedAt": updated_at,
     })
@@ -280,14 +288,15 @@ pub async fn put_rule(db: &Db, state: &str, r: StateRule, notes: Option<String>)
     let mut tx = db.begin().await?;
     sqlx::query(
         r#"INSERT INTO "us_state_tax_rules" ("state","method","flatRate","brackets","bracketsMarried","standardDeductionSingle",
-             "standardDeductionMarried","allowanceDeduction","allowanceCredit","excludes401k","notes","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             "standardDeductionMarried","allowanceDeduction","allowanceCredit","excludes401k","notes","residentCredit","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
            ON CONFLICT ("state") DO UPDATE SET "method" = excluded."method", "flatRate" = excluded."flatRate",
              "brackets" = excluded."brackets", "bracketsMarried" = excluded."bracketsMarried",
              "standardDeductionSingle" = excluded."standardDeductionSingle",
              "standardDeductionMarried" = excluded."standardDeductionMarried",
              "allowanceDeduction" = excluded."allowanceDeduction", "allowanceCredit" = excluded."allowanceCredit",
-             "excludes401k" = excluded."excludes401k", "notes" = excluded."notes", "updatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ','now')"#,
+             "excludes401k" = excluded."excludes401k", "notes" = excluded."notes",
+             "residentCredit" = excluded."residentCredit", "updatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ','now')"#,
     )
     .bind(state)
     .bind(&r.method)
@@ -300,6 +309,7 @@ pub async fn put_rule(db: &Db, state: &str, r: StateRule, notes: Option<String>)
     .bind(r.allowance_credit)
     .bind(r.excludes_401k)
     .bind(&notes)
+    .bind(if r.resident_credit { "DIFFERENCE" } else { "NONE" })
     .execute(&mut *tx)
     .await?;
     let row =

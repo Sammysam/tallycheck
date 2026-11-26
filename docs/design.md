@@ -835,6 +835,37 @@ recommendations without answering each one individually; revisit any of them on 
   switch, "Back up every __ days", the folder with Choose folder… (also for Back up now), and a
   warning while automatic backups are off ("Automatic backups are off — your books are not
   being backed up automatically"); the Admin Centre backup card warns too.
+- **D63 US payroll in several states** (2026-11-26, step 0 of the US state payroll plan).
+  Tables `us_state_registrations` (per state: withholding and unemployment account numbers, the
+  SUTA rate the state assigned and its wage base, optional payable accounts for that state's
+  income tax and unemployment) and `us_state_reciprocity` (work state + home state pairs whose
+  residents pay only the home state; entered by the company, no pairs ship yet); state rules gain
+  `residentCredit` NONE | DIFFERENCE (as the home state, also withhold its tax less the work
+  state's when that is more); employees gain `residentState` (NULL = lives in the work state) and
+  `otherWorkStates` (`[[state, share]]`, shares in hundredths of a percent; the work state has
+  the rest). `payroll::us_states::split` works out each state's part of a paycheck: a share is
+  taxed by the work state — its rule on the whole paycheck × the share — unless the employee
+  lives there or the pair has reciprocity (then the home state taxes it); a DIFFERENCE home state
+  adds its tax less the work state's on shares taxed elsewhere; the certificate's extra
+  withholding is added once, to the main work state; one state at 100% gives the single-state
+  result exactly. Unemployment goes to the main work state: its registration's rate and wage
+  base, year-to-date unemployment wages counted per state; a work state without a registration
+  keeps the company-wide settings (as before). Pay lines keep `residentState`, `workSplit`,
+  `stateRules` (every rule used), `stateTaxes` (state, WORK / RESIDENT, share, wages, tax) and
+  `sutaState` / `sutaRateUsed` / `sutaWageBaseUsed`; lines made earlier are read as one work
+  state. Posting credits state income tax and unemployment per state, to the registration's
+  account when it names one (kept as `stateIncomeTax:CA` / `suta:CA` in the run's accounts);
+  posting needs the rules of every state a line uses (its home state too). A state income tax
+  or unemployment payment is for one state (`us_payroll_remittances.state`); without a state
+  and amount it clears every state, one part each; an amount with several states owed needs the
+  state. W-2: `states` lists boxes 15–17 per state (box fields show the work state). Routes
+  (`payroll`): `GET /payroll/us/states`, `PUT|DELETE /payroll/us/states/{state}`, `POST
+  /payroll/us/reciprocity`, `DELETE /payroll/us/reciprocity/{work}/{resident}`; the employee
+  record, the preview (`stateTaxes`, `unemploymentState`), the run lines and the remit body
+  (`state`) carry the new fields. Screens: US payroll settings → "States you are registered in"
+  (registrations and reciprocity), state rules (home-state difference), employee US tax section
+  (lives in, also works in), pay run (taxes and payments per state). Not yet: built-in state
+  rates and reciprocity pairs (steps 1–3), local taxes, disability / paid leave, state forms.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

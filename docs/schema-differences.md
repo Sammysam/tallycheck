@@ -115,6 +115,11 @@ D61 adds `recurring_invoices` (a schedule with a JSON copy of an invoice, freque
 and next date, status) and `recurring_invoice_items` (one row per schedule and date, the
 invoice made for it).
 
+D63 adds `us_state_registrations` (the company's details per US state: account numbers, SUTA rate
+and wage base, optional payable accounts) and `us_state_reciprocity` (work state / home state
+pairs), and columns for an employee's home state and other work states, each pay line's state
+split and unemployment state, the home-state rule option and the state of a tax payment.
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

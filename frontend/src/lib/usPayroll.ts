@@ -57,6 +57,9 @@ export interface UsTax {
   stateAllowances: number;
   stateExtraWithholding: number;
   stateExempt: boolean;
+  /** D63: home state (null = lives in the work state) and the other states worked in. */
+  residentState: string | null;
+  otherWorkStates: { state: string; percent: number }[];
   updatedAt: string | null;
 }
 
@@ -73,6 +76,7 @@ export interface StateTaxRule {
   allowanceDeduction?: number;
   allowanceCredit?: number;
   excludes401k?: boolean;
+  residentCredit?: 'NONE' | 'DIFFERENCE';
   notes?: string | null;
   updatedAt?: string | null;
 }
@@ -106,6 +110,8 @@ export interface UsPreview {
   pretaxSection125: number;
   taxes: UsTaxFigures;
   stateTax: { state: string; configured: boolean; wages: number; tax: number };
+  stateTaxes?: UsStateTax[];
+  unemploymentState?: string;
   notes: string[];
 }
 
@@ -162,13 +168,38 @@ export interface UsLine extends UsTaxFigures {
   stateTaxConfigured: boolean;
   stateIncomeTaxWages: number;
   stateIncomeTax: number;
+  /** D63. */
+  residentState: string | null;
+  workSplit: { state: string; percent: number }[];
+  stateTaxes: UsStateTax[];
+  sutaState: string | null;
   notes: string | null;
+}
+
+/** One state's part of a paycheck: WORK (work done there) or RESIDENT (taxed as the home state). */
+export interface UsStateTax { state: string; kind: 'WORK' | 'RESIDENT'; percent: number; wages: number; tax: number }
+
+/** D63: the company's details in one state. */
+export interface UsStateRegistration {
+  state: string;
+  withholdingAccountNo: string | null;
+  unemploymentAccountNo: string | null;
+  sutaRate: number;
+  sutaWageBase: number | null;
+  stateTaxAccountId: string | null;
+  sutaAccountId: string | null;
+}
+
+export interface UsStatesOverview {
+  registrations: UsStateRegistration[];
+  reciprocity: { workState: string; residentState: string }[];
+  statesInUse: string[];
 }
 
 export interface UsRunDetail extends UsRun {
   lines: UsLine[];
-  remittances: { id: string; type: UsRemitType; amount: number; date: string; reference: string | null; journalEntryId: string; createdByName: string | null }[];
-  taxes: { type: Exclude<UsRemitType, 'FORM_941'>; total: number; remitted: number; outstanding: number }[];
+  remittances: { id: string; type: UsRemitType; state?: string | null; amount: number; date: string; reference: string | null; journalEntryId: string; createdByName: string | null }[];
+  taxes: { type: Exclude<UsRemitType, 'FORM_941'>; state?: string | null; total: number; remitted: number; outstanding: number }[];
   skipped?: { employeeId: string; employeeCode: string; name: string; reason: string }[];
 }
 

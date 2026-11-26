@@ -30,7 +30,7 @@ export default function UsPayrollRun() {
 
   const [addEmployeeId, setAddEmployeeId] = useState('');
   const [payForm, setPayForm] = useState({ paymentAccountId: '', date: '' });
-  const [remitForm, setRemitForm] = useState({ type: 'FORM_941' as UsRemitType, paymentAccountId: '', date: today(), amount: '', reference: '' });
+  const [remitForm, setRemitForm] = useState({ type: 'FORM_941' as UsRemitType, paymentAccountId: '', date: today(), amount: '', reference: '', state: '' });
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -113,6 +113,8 @@ export default function UsPayrollRun() {
   }
 
   const isDraft = run.status === 'DRAFT';
+  const perState = remitForm.type === 'SUTA' || remitForm.type === 'STATE_INCOME_TAX';
+  const remitStates = run ? run.taxes.filter((t) => t.type === remitForm.type && t.state && t.outstanding > 0).map((t) => t.state as string) : [];
   const live = run.status === 'POSTED' || run.status === 'PAID';
   const inRun = new Set(run.lines.map((l) => l.employeeId));
   const addable = employees.filter((e) => !inRun.has(e.id));
@@ -210,12 +212,13 @@ export default function UsPayrollRun() {
 
           <div className="card">
             <h3 className="text-sm font-semibold text-gray-700 mb-2">Tax deposits</h3>
+            {/* D63: state income tax and unemployment are paid to one state at a time. */}
             <table className="text-sm w-full mb-3">
               <thead><tr className="text-xs text-gray-500"><th className="text-left py-1">Tax</th><th className="text-right py-1">Owed</th><th className="text-right py-1">Paid</th><th className="text-right py-1">Outstanding</th></tr></thead>
               <tbody>
                 {run.taxes.filter((t) => t.total > 0).map((t) => (
-                  <tr key={t.type} className="border-t border-gray-100">
-                    <td className="py-1">{US_REMIT_LABEL[t.type]}</td>
+                  <tr key={`${t.type}-${t.state ?? ''}`} className="border-t border-gray-100">
+                    <td className="py-1">{US_REMIT_LABEL[t.type]}{t.state ? ` — ${t.state}` : ''}</td>
                     <td className="py-1 text-right">{amt(t.total)}</td>
                     <td className="py-1 text-right">{amt(t.remitted)}</td>
                     <td className={`py-1 text-right ${t.outstanding > 0 ? 'font-medium text-amber-700' : 'text-gray-400'}`}>{amt(t.outstanding)}</td>
@@ -232,14 +235,24 @@ export default function UsPayrollRun() {
                   date: remitForm.date,
                   amount: remitForm.type === 'FORM_941' || remitForm.amount.trim() === '' ? undefined : Number(remitForm.amount),
                   reference: remitForm.reference.trim() || null,
-                }).then(() => setRemitForm({ ...remitForm, amount: '', reference: '' })), 'Could not record the payment');
+                  ...(perState && remitForm.state ? { state: remitForm.state } : {}),
+                }).then(() => setRemitForm({ ...remitForm, amount: '', reference: '', state: '' })), 'Could not record the payment');
               }}>
               <label className="block" style={{ gridColumn: '1 / -1' }}>
                 <span className="text-xs font-medium text-gray-500">Pay</span>
-                <select value={remitForm.type} onChange={(e) => setRemitForm({ ...remitForm, type: e.target.value as UsRemitType })}>
+                <select value={remitForm.type} onChange={(e) => setRemitForm({ ...remitForm, type: e.target.value as UsRemitType, state: '' })}>
                   {(Object.keys(US_REMIT_LABEL) as UsRemitType[]).map((t) => <option key={t} value={t}>{US_REMIT_LABEL[t]}</option>)}
                 </select>
               </label>
+              {perState && remitStates.length > 0 && (
+                <label className="block" style={{ gridColumn: '1 / -1' }}>
+                  <span className="text-xs font-medium text-gray-500">State</span>
+                  <select value={remitForm.state} onChange={(e) => setRemitForm({ ...remitForm, state: e.target.value })} aria-label="State for this payment">
+                    <option value="">{remitStates.length > 1 ? `Every state (${remitStates.join(', ')})` : remitStates[0]}</option>
+                    {remitStates.length > 1 && remitStates.map((st) => <option key={st} value={st}>{st}</option>)}
+                  </select>
+                </label>
+              )}
               <label className="block">
                 <span className="text-xs font-medium text-gray-500">From account</span>
                 <select required value={remitForm.paymentAccountId} onChange={(e) => setRemitForm({ ...remitForm, paymentAccountId: e.target.value })}>
@@ -253,7 +266,7 @@ export default function UsPayrollRun() {
               </label>
               <label className="block">
                 <span className="text-xs font-medium text-gray-500">Amount (blank = all outstanding)</span>
-                <input type="number" min="0" step="0.01" disabled={remitForm.type === 'FORM_941'} value={remitForm.amount} onChange={(e) => setRemitForm({ ...remitForm, amount: e.target.value })} />
+                <input type="number" min="0" step="0.01" disabled={remitForm.type === 'FORM_941' || (perState && remitStates.length > 1 && !remitForm.state)} value={remitForm.amount} onChange={(e) => setRemitForm({ ...remitForm, amount: e.target.value })} />
               </label>
               <label className="block" style={{ gridColumn: '1 / 3' }}>
                 <span className="text-xs font-medium text-gray-500">Reference (e.g. EFTPS confirmation)</span>
@@ -334,7 +347,7 @@ export default function UsPayrollRun() {
                 <td className="px-3 py-2 whitespace-nowrap">
                   <div className="font-medium text-gray-900">{l.employeeName}</div>
                   <div className="text-gray-400 font-mono">
-                    {l.employeeCode} · {l.workState} · {l.payType === 'HOURLY'
+                    {l.employeeCode} · {l.workState}{l.residentState ? ` (lives in ${l.residentState})` : ''} · {l.payType === 'HOURLY'
                       ? `${amt(l.hours)} h${l.overtimeHours ? ` + ${amt(l.overtimeHours)} OT` : ''} × ${usd(l.hourlyRate)}`
                       : 'salary'}
                   </div>
@@ -345,7 +358,12 @@ export default function UsPayrollRun() {
                 <Td>{amt(l.gross)}</Td>
                 <Td muted={!l.pretax401k && !l.pretaxSection125}>{amt(l.pretax401k + l.pretaxSection125)}</Td>
                 <Td>{amt(l.federalIncomeTax)}</Td>
-                <Td>{l.stateTaxConfigured ? amt(l.stateIncomeTax) : <span className="text-amber-700" title={`No ${l.workState} rule yet`}>{l.workState}?</span>}</Td>
+                <Td>
+                  {l.stateTaxConfigured ? amt(l.stateIncomeTax) : <span className="text-amber-700" title={`No ${l.workState} rule yet`}>{l.workState}?</span>}
+                  {l.stateTaxes && (l.stateTaxes.length > 1 || (l.stateTaxes[0] && l.stateTaxes[0].state !== l.workState)) && (
+                    <div className="text-gray-400 whitespace-nowrap">{l.stateTaxes.map((st) => `${st.state} ${amt(st.tax)}`).join(' · ')}</div>
+                  )}
+                </Td>
                 <Td>{amt(ss(l))}</Td>
                 <Td>{amt(med(l))}</Td>
                 <Td strong>{amt(l.netPay)}</Td>
@@ -385,7 +403,7 @@ export default function UsPayrollRun() {
         </table>
       </div>
       <p className="text-xs text-gray-500 mt-2">
-        Extra pay is overtime (time and a half), bonus and other earnings. Employer tax is the company's social security and Medicare shares, FUTA and state unemployment. State tax follows each state's rule in US payroll settings ("XX?" = no rule yet; posting waits for it). Local income tax is not included.
+        Extra pay is overtime (time and a half), bonus and other earnings. Employer tax is the company's social security and Medicare shares, FUTA and state unemployment. State tax follows each state's rule in US payroll settings ("XX?" = no rule yet; posting waits for it). Local income tax is not included. Someone working in several states shows each state's tax under the total.
       </p>
 
       {run.remittances.length > 0 && (
@@ -395,7 +413,7 @@ export default function UsPayrollRun() {
             <ul className="space-y-1">
               {run.remittances.map((r) => (
                 <li key={r.id} className="flex justify-between">
-                  <span>{fmtDate(r.date)} · {US_REMIT_LABEL[r.type]}{r.reference ? ` · ${r.reference}` : ''}{r.createdByName ? ` · by ${r.createdByName}` : ''}</span>
+                  <span>{fmtDate(r.date)} · {US_REMIT_LABEL[r.type]}{r.state ? ` — ${r.state}` : ''}{r.reference ? ` · ${r.reference}` : ''}{r.createdByName ? ` · by ${r.createdByName}` : ''}</span>
                   <span className="font-medium">{usd(r.amount)}</span>
                 </li>
               ))}

@@ -8,6 +8,11 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- US payroll in several states: register the company in each state (account numbers and the
+  unemployment rate each state assigned), give employees a home state and other work states with
+  their share, and list reciprocity agreements. Each state taxes its share, the home state takes
+  over under reciprocity or adds the difference when its rules say so, unemployment goes to the
+  main work state, and state taxes are booked, paid and shown on the W-2 per state (D63).
 - Automatic backups every few days: choose "Back up every __ days" (1 to 30), pick the folder
   with Windows' own folder window (Choose folder…), and turn automatic backups on or off with
   one switch; TallyCheck warns while they are off (D62).

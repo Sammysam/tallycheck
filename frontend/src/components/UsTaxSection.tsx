@@ -18,11 +18,14 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
   const [hours, setHours] = useState('80');
   const [preview, setPreview] = useState<UsPreview | null>(null);
   const [previewError, setPreviewError] = useState('');
+  // D63: other states worked in, with their share of the time / pay.
+  const [others, setOthers] = useState<{ state: string; percent: string }[]>([]);
 
   const fill = (t: UsTax) => {
     setTax(t);
     const f: Record<string, string> = {
       workState: t.workState ?? '',
+      residentState: t.residentState ?? '',
       payType: t.payType,
       w4Version: t.w4Version,
       filingStatus: t.filingStatus,
@@ -34,6 +37,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
     for (const k of AMOUNTS) f[k] = t[k] ? String(t[k]) : '';
     setForm(f);
     setFlags({ multipleJobs: t.multipleJobs, exemptFromWithholding: t.exemptFromWithholding, stateExempt: t.stateExempt });
+    setOthers((t.otherWorkStates ?? []).map((o) => ({ state: o.state, percent: String(o.percent) })));
   };
 
   const load = useCallback(
@@ -51,6 +55,8 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
     try {
       const body: Record<string, unknown> = {
         workState: form.workState,
+        residentState: form.residentState || null,
+        otherWorkStates: others.filter((o) => o.state).map((o) => ({ state: o.state, percent: Number(o.percent || 0) })),
         payType: form.payType,
         w4Version: form.w4Version,
         filingStatus: form.filingStatus,
@@ -121,6 +127,13 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
             </select>
           </label>
           <label className="block">
+            <span className="text-xs font-medium text-gray-500">Lives in state</span>
+            <select value={form.residentState} onChange={set('residentState')} aria-label="Lives in state">
+              <option value="">Same as the work state</option>
+              {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="block">
             <span className="text-xs font-medium text-gray-500">Paid by</span>
             <select value={form.payType} onChange={set('payType')}>
               <option value="SALARY">Salary</option>
@@ -129,6 +142,27 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
           </label>
           {hourly ? <Money label="Hourly rate $" k="hourlyRate" form={form} set={set} required />
             : <Money label="Annual salary $" k="annualSalary" form={form} set={set} required />}
+        </div>
+
+        <div className="mb-4 -mt-2">
+          <p className="text-xs text-gray-500 mb-1">
+            Also works in other states? Add each with its share of the work; {form.workState || 'the work state'} gets the rest
+            ({Math.max(0, 100 - others.reduce((a, o) => a + (Number(o.percent) || 0), 0))}%). Each state taxes its share.
+          </p>
+          {others.map((o, i) => (
+            <div key={i} className="flex items-center gap-2 mb-1">
+              <select value={o.state} aria-label={`Other work state ${i + 1}`}
+                onChange={(e) => { setSaved(false); setOthers(others.map((x, j) => (j === i ? { ...x, state: e.target.value } : x))); }}>
+                <option value="">State</option>
+                {US_STATES.filter((st) => st !== form.workState).map((st) => <option key={st} value={st}>{st}</option>)}
+              </select>
+              <input type="number" min="0.01" max="99.99" step="0.01" style={{ width: 90 }} value={o.percent} aria-label={`Share for other work state ${i + 1}`}
+                onChange={(e) => { setSaved(false); setOthers(others.map((x, j) => (j === i ? { ...x, percent: e.target.value } : x))); }} />
+              <span className="text-sm text-gray-500">%</span>
+              <button type="button" className="btn-link text-xs" style={{ color: '#dc2626' }} onClick={() => { setSaved(false); setOthers(others.filter((_, j) => j !== i)); }}>Remove</button>
+            </div>
+          ))}
+          <button type="button" className="btn-link text-xs" onClick={() => setOthers([...others, { state: '', percent: '' }])}>+ Add another work state</button>
         </div>
 
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Form W-4</p>
@@ -228,14 +262,18 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
                 <Row k="Social security 6.2%" v={`− ${usd(preview.taxes.socialSecurityEmployee)}`} />
                 <Row k="Medicare 1.45%" v={`− ${usd(preview.taxes.medicareEmployee)}`} />
                 {preview.taxes.additionalMedicare > 0 && <Row k="Additional Medicare 0.9%" v={`− ${usd(preview.taxes.additionalMedicare)}`} />}
-                <Row k={`State income tax (${preview.stateTax.state})`} v={preview.stateTax.configured ? `− ${usd(preview.stateTax.tax)}` : 'not set up'} />
+                {preview.stateTaxes && preview.stateTaxes.length > 0
+                  ? preview.stateTaxes.map((st) => (
+                    <Row key={st.state} k={`State income tax ${st.state}${st.kind === 'RESIDENT' ? ' (home state)' : st.percent < 100 ? ` (${st.percent}% of the work)` : ''}`} v={`− ${usd(st.tax)}`} />
+                  ))
+                  : <Row k={`State income tax (${preview.stateTax.state})`} v={preview.stateTax.configured ? `− ${usd(preview.stateTax.tax)}` : 'not set up'} />}
                 <Row k="Net pay" v={usd(preview.taxes.netPay)} strong />
               </dl>
               <dl className="space-y-1">
                 <Row k="Employer social security" v={usd(preview.taxes.socialSecurityEmployer)} />
                 <Row k="Employer Medicare" v={usd(preview.taxes.medicareEmployer)} />
                 <Row k="FUTA" v={usd(preview.taxes.futa)} />
-                <Row k="State unemployment" v={usd(preview.taxes.suta)} />
+                <Row k={`State unemployment${preview.unemploymentState ? ` (${preview.unemploymentState})` : ''}`} v={usd(preview.taxes.suta)} />
                 <Row k="Total cost to the company" v={usd(preview.taxes.costToEmployer)} strong />
                 {preview.notes.map((note) => <p key={note} className="text-xs text-gray-500 pt-1">{note}</p>)}
               </dl>

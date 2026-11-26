@@ -4,6 +4,7 @@ import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import Table from '../components/Table';
 import StateTaxRules from '../components/StateTaxRules';
+import UsStateRegistrations from '../components/UsStateRegistrations';
 import StatusBadge from '../components/StatusBadge';
 import { fmtDate } from '../lib/region';
 import { PAY_FREQUENCY_LABEL, US_STATES, usd, type PayFrequency, type UsRun, type UsSettings } from '../lib/usPayroll';
@@ -167,7 +168,7 @@ export default function UsPayroll() {
                 </select>
               </label>
               <label className="block">
-                <span className="text-xs font-medium text-gray-500">State (for unemployment tax)</span>
+                <span className="text-xs font-medium text-gray-500">Main state (unemployment for states not registered below)</span>
                 <select value={form.state} onChange={set('state')}>
                   <option value="">Choose a state</option>
                   {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -223,6 +224,7 @@ export default function UsPayroll() {
         </div>
       )}
 
+      {showSettings && isUs && <UsStateRegistrations accounts={ledgerAccounts} />}
       {showSettings && isUs && <StateTaxRules />}
 
       {isUs && (

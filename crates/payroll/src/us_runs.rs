@@ -15,10 +15,17 @@
 //!
 //! Year-to-date wages for the wage-base limits are the employee's lines on other POSTED / PAID
 //! runs paid in the same calendar year; they are worked out again when the run is posted.
+//!
+//! D63, several states: each line keeps every state's share, wages and tax (`stateTaxes`, see
+//! [`crate::us_states`]) and its unemployment state, rate and wage base (the main work state's
+//! registration, or the company-wide settings). Posting credits state income tax and
+//! unemployment per state, to the state's own payable account when its registration names one;
+//! a payment of either is for one state.
 
 use crate::us::{self, FilingStatus, UsFigures, UsInputs, YearToDate, W4};
 use crate::us_setup::{load_settings, load_tax, periods_per_year, UsSettings, UsTax};
-use crate::us_state::{self, load_rule, StateEmployee, StateRule};
+use crate::us_state::{load_rule, StateEmployee};
+use crate::us_states::{self, StateTax};
 use app_core::ids::new_id;
 use app_core::money::Money;
 use app_core::time::today_local;
@@ -30,6 +37,7 @@ use ledger::entries::{self, NewEntry, NewLine};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// What a remittance pays. `FORM_941` is a deposit of the first three together.
 pub const REMIT_TYPES: &[&str] = &[
@@ -421,6 +429,15 @@ struct Line {
     state_cert: Value,
     state_wages: Money,
     state_tax: Money,
+    /// D63: home state (None = the work state), the other work states, every rule used
+    /// (state → snapshot), each state's part, and the unemployment state / rate / wage base.
+    resident_state: Option<String>,
+    work_split: Vec<(String, i64)>,
+    state_rules: Value,
+    state_taxes: Vec<StateTax>,
+    suta_state: Option<String>,
+    suta_rate_used: Option<i64>,
+    suta_wage_base_used: Option<i64>,
     ytd: YearToDate,
     figures: UsFigures,
     notes: Option<String>,
@@ -499,6 +516,40 @@ fn line_from_row(r: &SqliteRow) -> AppResult<Line> {
         state_cert: crate::us_setup::json_col(r, "stateCertificate")?,
         state_wages: m("stateIncomeTaxWages")?,
         state_tax: m("stateIncomeTax")?,
+        resident_state: r.try_get("residentState")?,
+        work_split: us_states::parse_others(&r.try_get::<String, _>("workSplit")?),
+        state_rules: {
+            let mut rules = crate::us_setup::json_col(r, "stateRules")?;
+            // Lines made before D63 kept only the work state's rule.
+            if rules.as_object().is_none_or(|o| o.is_empty()) {
+                if let Some(rule) = crate::us_setup::json_opt(r, "stateRule")? {
+                    let work: String = r.try_get("workState")?;
+                    rules = json!({ work: rule });
+                }
+            }
+            rules
+        },
+        state_taxes: {
+            let v = crate::us_setup::json_col(r, "stateTaxes")?;
+            let parts: Vec<StateTax> =
+                v.as_array().map(|a| a.iter().filter_map(StateTax::from_json).collect()).unwrap_or_default();
+            if parts.is_empty()
+                && (r.try_get::<i64, _>("stateIncomeTax")? != 0 || r.try_get::<i64, _>("stateIncomeTaxWages")? != 0)
+            {
+                vec![StateTax {
+                    state: r.try_get("workState")?,
+                    kind: "WORK".into(),
+                    share: us_states::WHOLE,
+                    wages: m("stateIncomeTaxWages")?,
+                    tax: m("stateIncomeTax")?,
+                }]
+            } else {
+                parts
+            }
+        },
+        suta_state: r.try_get("sutaState")?,
+        suta_rate_used: r.try_get("sutaRateUsed")?,
+        suta_wage_base_used: r.try_get("sutaWageBaseUsed")?,
         ytd: YearToDate {
             social_security_wages: m("ytdSocialSecurityWages")?,
             medicare_wages: m("ytdMedicareWages")?,
@@ -548,7 +599,14 @@ fn line_json(l: &Line) -> Value {
         "gross": l.gross.to_json_number(),
         "pretax401k": l.pretax_401k.to_json_number(),
         "pretaxSection125": l.pretax_section125.to_json_number(),
-        "stateTaxConfigured": l.state_rule.is_some(),
+        "stateTaxConfigured": states_missing(l).is_empty(),
+        "residentState": l.resident_state,
+        "workSplit": l.work_split.iter().map(|(s, share)| json!({"state": s, "percent": Money::from_cents(*share).to_json_number()})).collect::<Vec<_>>(),
+        "stateTaxes": l.state_taxes.iter().map(|p| json!({
+            "state": p.state, "kind": p.kind, "percent": Money::from_cents(p.share).to_json_number(),
+            "wages": p.wages.to_json_number(), "tax": p.tax.to_json_number(),
+        })).collect::<Vec<_>>(),
+        "sutaState": l.suta_state,
         "stateIncomeTaxWages": l.state_wages.to_json_number(),
         "stateIncomeTax": l.state_tax.to_json_number(),
         "w4": l.w4,
@@ -618,9 +676,16 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
         "stateIncomeTax",
     ];
     cols.extend_from_slice(FIGURES);
-    let placeholders: Vec<String> = (1..=cols.len())
-        .map(|i| if (9..=11).contains(&i) { format!("${i}::jsonb") } else { format!("${i}") })
-        .collect();
+    cols.extend_from_slice(&[
+        "residentState",
+        "workSplit",
+        "stateRules",
+        "stateTaxes",
+        "sutaState",
+        "sutaRateUsed",
+        "sutaWageBaseUsed",
+    ]);
+    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
     let updates: Vec<String> = cols.iter().skip(1).map(|c| format!(r#""{c}" = excluded."{c}""#)).collect();
     let sql = format!(
         r#"INSERT INTO "us_payroll_lines" ({}) VALUES ({}) ON CONFLICT ("id") DO UPDATE SET {}"#,
@@ -664,20 +729,34 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
     {
         q = q.bind(m.cents());
     }
+    q = q
+        .bind(&l.resident_state)
+        .bind(us_states::others_json(&l.work_split))
+        .bind(l.state_rules.to_string())
+        .bind(Value::Array(l.state_taxes.iter().map(StateTax::to_json).collect()).to_string())
+        .bind(&l.suta_state)
+        .bind(l.suta_rate_used)
+        .bind(l.suta_wage_base_used);
     q.execute(&mut *conn).await?;
     Ok(())
 }
 
-/// Wages on the employee's other posted / paid runs paid in `year`.
+/// Wages on the employee's other posted / paid runs paid in `year`. Unemployment wages count
+/// only from runs whose unemployment went to the same state (`suta_state`; None = all, as
+/// before D63): each state has its own wage base.
 async fn year_to_date(
     conn: &mut SqliteConnection,
     employee_id: &str,
     year: i32,
     except_run: &str,
+    suta_state: Option<&str>,
 ) -> AppResult<YearToDate> {
     let row: (i64, i64, i64, i64) = sqlx::query_as(
         r#"SELECT COALESCE(SUM(l."socialSecurityWages"),0), COALESCE(SUM(l."medicareWages"),0),
-                  COALESCE(SUM(l."futaWages"),0), COALESCE(SUM(l."sutaWages"),0)
+                  COALESCE(SUM(l."futaWages"),0),
+                  COALESCE(SUM(CASE WHEN ?4 IS NULL
+                      OR COALESCE(l."sutaState", json_extract(r."settingsSnapshot", '$.state')) = ?4
+                      THEN l."sutaWages" ELSE 0 END),0)
            FROM "us_payroll_lines" l JOIN "us_payroll_runs" r ON r."id" = l."runId"
            WHERE l."employeeId" = ?1 AND r."status" IN ('POSTED','PAID') AND r."id" <> ?2
              AND CAST(substr(r."payDate", 1, 4) AS INTEGER) = ?3"#,
@@ -685,6 +764,7 @@ async fn year_to_date(
     .bind(employee_id)
     .bind(except_run)
     .bind(year)
+    .bind(suta_state)
     .fetch_one(&mut *conn)
     .await?;
     Ok(YearToDate {
@@ -697,7 +777,7 @@ async fn year_to_date(
 
 /// Works out a line's pay and taxes from its inputs (regular pay of a salaried line is kept as
 /// stored, so a partial period can be entered by hand).
-fn work_out(l: &mut Line, run: &Run) -> AppResult<()> {
+fn work_out(l: &mut Line, run: &Run, reciprocity: &BTreeSet<(String, String)>) -> AppResult<()> {
     if l.pay_type == "HOURLY" {
         l.regular_pay = Money::line_amount(l.hours, l.hourly_rate).ok_or_else(too_large)?;
         // Time and a half: hours (hundredths) × rate (cents) × 1.5, to the cent.
@@ -717,23 +797,34 @@ fn work_out(l: &mut Line, run: &Run) -> AppResult<()> {
         w4,
         exempt_from_withholding: exempt,
         ytd: l.ytd,
-        suta_rate: s.suta_rate,
-        suta_wage_base: s.suta_wage_base,
+        suta_rate: l.suta_rate_used.unwrap_or(s.suta_rate),
+        suta_wage_base: if l.suta_rate_used.is_some() {
+            l.suta_wage_base_used.map(Money::from_cents)
+        } else {
+            s.suta_wage_base
+        },
         futa_credit_reduction: s.futa_credit_reduction,
     })
     .map_err(|e| match e {
         AppError::BadRequest(_) => AppError::bad_request(format!("{}: {}", l.employee_name, e.user_message())),
         other => other,
     })?;
-    let rule = l.state_rule.as_ref().and_then(StateRule::from_snapshot);
-    (l.state_wages, l.state_tax) = match rule {
-        Some(r) => {
-            let wages = us_state::state_wages(l.gross, l.pretax_401k, l.pretax_section125, &r);
-            let cert = cert_from_snapshot(&l.state_cert);
-            (wages, us_state::withholding(wages, periods_per_year(&run.pay_frequency), &r, &cert)?)
-        }
-        None => (Money::ZERO, Money::ZERO),
+    let plan = us_states::plan_from_snapshot(
+        us_states::allocations(&l.work_state, &l.work_split)?,
+        l.resident_state.clone().unwrap_or_else(|| l.work_state.clone()),
+        &l.state_rules,
+        reciprocity.clone(),
+    );
+    let pay = us_states::Paycheck {
+        gross: l.gross,
+        pretax_401k: l.pretax_401k,
+        pretax_125: l.pretax_section125,
+        periods: periods_per_year(&run.pay_frequency),
     };
+    l.state_taxes = plan.split(&pay, &cert_from_snapshot(&l.state_cert))?;
+    l.state_tax = sum(&l.state_taxes.iter().map(|p| p.tax).collect::<Vec<_>>())?;
+    // The wages taxed for the shares worked (a home state's difference adds no wages).
+    l.state_wages = sum(&l.state_taxes.iter().filter(|p| p.share > 0).map(|p| p.wages).collect::<Vec<_>>())?;
     l.figures.employee_taxes = add(l.figures.employee_taxes, l.state_tax)?;
     l.figures.net_pay = l.figures.net_pay.checked_sub(l.state_tax).ok_or_else(too_large)?;
     Ok(())
@@ -758,11 +849,45 @@ fn cert_from_snapshot(v: &Value) -> StateEmployee {
     }
 }
 
-/// Fills in the state rule of a line that has none yet, if the company has entered one since.
+/// The states a line needs rules for that it has none for yet.
+fn states_missing(l: &Line) -> Vec<String> {
+    let allocations = us_states::allocations(&l.work_state, &l.work_split)
+        .unwrap_or_else(|_| vec![(l.work_state.clone(), us_states::WHOLE)]);
+    let resident = l.resident_state.clone().unwrap_or_else(|| l.work_state.clone());
+    us_states::states_needed(&allocations, &resident)
+        .into_iter()
+        .filter(|s| l.state_rules.get(s).is_none_or(Value::is_null))
+        .collect()
+}
+
+/// Fills in the rules a line has none for yet, if the company has entered them since.
 async fn fill_rule(conn: &mut SqliteConnection, l: &mut Line) -> AppResult<()> {
-    if l.state_rule.is_none() {
-        l.state_rule = load_rule(conn, &l.work_state).await?.map(|r| r.to_snapshot());
+    for st in states_missing(l) {
+        if let Some(rule) = load_rule(conn, &st).await? {
+            if let Some(map) = l.state_rules.as_object_mut() {
+                map.insert(st.clone(), rule.to_snapshot());
+            } else {
+                l.state_rules = json!({ st.clone(): rule.to_snapshot() });
+            }
+        }
     }
+    l.state_rule = l.state_rules.get(&l.work_state).cloned().filter(|v| !v.is_null());
+    Ok(())
+}
+
+/// Copies the employee's states and the unemployment state onto a line (new or refreshed).
+async fn set_states(conn: &mut SqliteConnection, l: &mut Line, t: &UsTax) -> AppResult<()> {
+    let settings = load_settings(conn).await?;
+    let plan = us_states::plan(conn, &t.work_state, &t.other_work_states, t.resident_state.as_deref()).await?;
+    l.work_state = t.work_state.clone();
+    l.resident_state = t.resident_state.clone().filter(|r| *r != t.work_state);
+    l.work_split = t.other_work_states.clone();
+    l.state_rules = plan.rules_snapshot();
+    l.state_rule = l.state_rules.get(&l.work_state).cloned();
+    let (state, rate, base) = us_states::unemployment_for(conn, &settings, &t.work_state).await?;
+    l.suta_state = Some(state);
+    l.suta_rate_used = Some(rate);
+    l.suta_wage_base_used = base.map(Money::cents);
     Ok(())
 }
 
@@ -786,15 +911,75 @@ async fn recalc_totals(conn: &mut SqliteConnection, run_id: &str) -> AppResult<(
 
 // ─── Remittances ────────────────────────────────────────────────────────────
 
-/// (type, owed on this run, already remitted) for each payable a remittance can clear.
-async fn owed(conn: &mut SqliteConnection, run: &Run) -> AppResult<Vec<(&'static str, Money, Money)>> {
-    let paid: Vec<(String, i64)> = sqlx::query_as(
-        r#"SELECT "type", SUM("amount") FROM "us_payroll_remittances" WHERE "runId" = ?1 GROUP BY "type""#,
+/// What each state is owed on a run: (state income tax by state, unemployment by state).
+async fn per_state(
+    conn: &mut SqliteConnection,
+    run: &Run,
+) -> AppResult<(BTreeMap<String, Money>, BTreeMap<String, Money>)> {
+    let fallback = run.snapshot["state"].as_str().unwrap_or("").to_string();
+    let (mut income, mut unemployment) = (BTreeMap::new(), BTreeMap::new());
+    for l in lines_of(conn, &run.id).await? {
+        for p in &l.state_taxes {
+            if p.tax > Money::ZERO {
+                let e = income.entry(p.state.clone()).or_insert(Money::ZERO);
+                *e = add(*e, p.tax)?;
+            }
+        }
+        if l.figures.suta > Money::ZERO {
+            let st = l.suta_state.clone().unwrap_or_else(|| fallback.clone());
+            let e = unemployment.entry(st).or_insert(Money::ZERO);
+            *e = add(*e, l.figures.suta)?;
+        }
+    }
+    Ok((income, unemployment))
+}
+
+/// One payable a remittance can clear: type, state (state income tax and unemployment only),
+/// owed on this run and already remitted.
+struct Owed {
+    kind: &'static str,
+    state: Option<String>,
+    total: Money,
+    remitted: Money,
+}
+
+async fn owed(conn: &mut SqliteConnection, run: &Run) -> AppResult<Vec<Owed>> {
+    let paid: Vec<(String, Option<String>, i64)> = sqlx::query_as(
+        r#"SELECT "type", "state", SUM("amount") FROM "us_payroll_remittances" WHERE "runId" = ?1 GROUP BY "type", "state""#,
     )
     .bind(&run.id)
     .fetch_all(&mut *conn)
     .await?;
-    let done = |k: &str| Money::from_cents(paid.iter().find(|(t, _)| t == k).map(|(_, a)| *a).unwrap_or(0));
+    let done = |k: &str| Money::from_cents(paid.iter().filter(|(t, _, _)| t == k).map(|(_, _, a)| *a).sum());
+    let t = |k: &str| run.total(k);
+    let mut out: Vec<Owed> = flat_owed(run, &done)?
+        .into_iter()
+        .map(|(kind, total, remitted)| Owed { kind, state: None, total, remitted })
+        .collect();
+    let (income, unemployment) = per_state(conn, run).await?;
+    for (kind, by_state, total) in
+        [("SUTA", &unemployment, t("sutaTotal")), ("STATE_INCOME_TAX", &income, t("stateIncomeTaxTotal"))]
+    {
+        // Payments recorded before D63 carry no state: they count for the first state.
+        let legacy =
+            Money::from_cents(paid.iter().filter(|(k, st, _)| k == kind && st.is_none()).map(|(_, _, a)| *a).sum());
+        if by_state.is_empty() {
+            out.push(Owed { kind, state: None, total, remitted: done(kind) });
+            continue;
+        }
+        for (i, (st, amount)) in by_state.iter().enumerate() {
+            let mine = Money::from_cents(
+                paid.iter().filter(|(k, s, _)| k == kind && s.as_deref() == Some(st)).map(|(_, _, a)| *a).sum(),
+            );
+            let remitted = if i == 0 { add(mine, legacy)? } else { mine };
+            out.push(Owed { kind, state: Some(st.clone()), total: *amount, remitted });
+        }
+    }
+    Ok(out)
+}
+
+/// The payables that are not per state: (type, owed, remitted).
+fn flat_owed(run: &Run, done: &dyn Fn(&str) -> Money) -> AppResult<Vec<(&'static str, Money, Money)>> {
     let t = |k: &str| run.total(k);
     Ok(vec![
         ("FEDERAL_INCOME_TAX", t("federalIncomeTaxTotal"), done("FEDERAL_INCOME_TAX")),
@@ -809,10 +994,8 @@ async fn owed(conn: &mut SqliteConnection, run: &Run) -> AppResult<Vec<(&'static
             done("MEDICARE"),
         ),
         ("FUTA", t("futaTotal"), done("FUTA")),
-        ("SUTA", t("sutaTotal"), done("SUTA")),
         ("RETIREMENT_401K", t("pretax401kTotal"), done("RETIREMENT_401K")),
         ("SECTION_125", t("pretaxSection125Total"), done("SECTION_125")),
-        ("STATE_INCOME_TAX", t("stateIncomeTaxTotal"), done("STATE_INCOME_TAX")),
     ])
 }
 
@@ -841,6 +1024,7 @@ async fn detail(conn: &mut SqliteConnection, id: &str) -> AppResult<Value> {
         remittances.push(json!({
             "id": r.try_get::<String, _>("id")?,
             "type": r.try_get::<String, _>("type")?,
+            "state": r.try_get::<Option<String>, _>("state")?,
             "amount": Money::from_cents(r.try_get::<i64, _>("amount")?).to_json_number(),
             "date": r.try_get::<String, _>("date")?,
             "paymentAccountId": r.try_get::<String, _>("paymentAccountId")?,
@@ -851,12 +1035,13 @@ async fn detail(conn: &mut SqliteConnection, id: &str) -> AppResult<Value> {
         }));
     }
     let mut outstanding = Vec::new();
-    for (kind, total, remitted) in owed(conn, &run).await? {
-        let left = total.checked_sub(remitted).ok_or_else(too_large)?;
+    for o in owed(conn, &run).await? {
+        let left = o.total.checked_sub(o.remitted).ok_or_else(too_large)?;
         outstanding.push(json!({
-            "type": kind,
-            "total": total.to_json_number(),
-            "remitted": remitted.to_json_number(),
+            "type": o.kind,
+            "state": o.state,
+            "total": o.total.to_json_number(),
+            "remitted": o.remitted.to_json_number(),
             "outstanding": left.to_json_number(),
         }));
     }
@@ -931,15 +1116,25 @@ async fn new_line(conn: &mut SqliteConnection, run: &Run, e: &Who, t: &UsTax) ->
         pretax_401k: t.pretax_401k,
         pretax_section125: t.pretax_section125,
         w4: w4_snapshot(t),
-        state_rule: load_rule(conn, &t.work_state).await?.map(|r| r.to_snapshot()),
+        state_rule: None,
         state_cert: cert_snapshot(t),
         state_wages: Money::ZERO,
         state_tax: Money::ZERO,
-        ytd: year_to_date(conn, &e.id, run.year()?, &run.id).await?,
+        resident_state: None,
+        work_split: Vec::new(),
+        state_rules: json!({}),
+        state_taxes: Vec::new(),
+        suta_state: None,
+        suta_rate_used: None,
+        suta_wage_base_used: None,
+        ytd: YearToDate::default(),
         figures: UsFigures::default(),
         notes: None,
     };
-    work_out(&mut l, run)?;
+    set_states(conn, &mut l, t).await?;
+    l.ytd = year_to_date(conn, &e.id, run.year()?, &run.id, l.suta_state.as_deref()).await?;
+    let reciprocity = us_states::reciprocity(conn).await?.into_iter().collect();
+    work_out(&mut l, run, &reciprocity)?;
     Ok(l)
 }
 
@@ -1091,7 +1286,7 @@ pub async fn update_line(db: &Db, run_id: &str, line_id: &str, p: LinePatch) -> 
             l.hours = if t.pay_type == "HOURLY" { standard_hours(periods) } else { Money::ZERO };
             l.overtime_hours = Money::ZERO;
         }
-        l.work_state = t.work_state.clone();
+        set_states(&mut tx, &mut l, &t).await?;
         l.pay_type = t.pay_type.clone();
         l.annual_salary = t.annual_salary;
         l.hourly_rate = t.hourly_rate;
@@ -1101,7 +1296,6 @@ pub async fn update_line(db: &Db, run_id: &str, line_id: &str, p: LinePatch) -> 
         l.pretax_401k = t.pretax_401k;
         l.pretax_section125 = t.pretax_section125;
         l.w4 = w4_snapshot(&t);
-        l.state_rule = load_rule(&mut tx, &t.work_state).await?.map(|r| r.to_snapshot());
         l.state_cert = cert_snapshot(&t);
     }
     fill_rule(&mut tx, &mut l).await?;
@@ -1134,9 +1328,10 @@ pub async fn update_line(db: &Db, run_id: &str, line_id: &str, p: LinePatch) -> 
         l.notes = n;
     }
     if let Some(emp) = l.employee_id.clone() {
-        l.ytd = year_to_date(&mut tx, &emp, run.year()?, run_id).await?;
+        l.ytd = year_to_date(&mut tx, &emp, run.year()?, run_id, l.suta_state.as_deref()).await?;
     }
-    work_out(&mut l, &run)?;
+    let reciprocity = us_states::reciprocity(&mut tx).await?.into_iter().collect();
+    work_out(&mut l, &run, &reciprocity)?;
     write_line(&mut tx, &l).await?;
     recalc_totals(&mut tx, run_id).await?;
     let out = detail(&mut tx, run_id).await?;
@@ -1184,9 +1379,7 @@ pub async fn post(db: &Db, run_id: &str) -> AppResult<Value> {
     let mut missing = std::collections::BTreeSet::new();
     for l in &mut lines {
         fill_rule(&mut tx, l).await?;
-        if l.state_rule.is_none() {
-            missing.insert(l.work_state.clone());
-        }
+        missing.extend(states_missing(l));
     }
     if !missing.is_empty() {
         return Err(AppError::bad_request(format!(
@@ -1195,17 +1388,39 @@ pub async fn post(db: &Db, run_id: &str) -> AppResult<Value> {
         )));
     }
     // Other runs may have been posted since this one was drafted: year-to-date again.
+    let reciprocity: BTreeSet<(String, String)> = us_states::reciprocity(&mut tx).await?.into_iter().collect();
     for l in &mut lines {
         if let Some(emp) = l.employee_id.clone() {
-            l.ytd = year_to_date(&mut tx, &emp, run.year()?, run_id).await?;
+            l.ytd = year_to_date(&mut tx, &emp, run.year()?, run_id, l.suta_state.as_deref()).await?;
         }
-        work_out(l, &run)?;
+        work_out(l, &run, &reciprocity)?;
         write_line(&mut tx, l).await?;
     }
     recalc_totals(&mut tx, run_id).await?;
     let run = get_run(&mut tx, run_id).await?;
     let chosen = ensure_accounts(&mut tx).await?;
-    let snap = Value::Object(chosen.into_iter().map(|(k, id)| (k.to_string(), Value::String(id))).collect());
+    let mut snap = Value::Object(chosen.into_iter().map(|(k, id)| (k.to_string(), Value::String(id))).collect());
+    // D63: each state's income tax and unemployment, to its own account when its registration
+    // names one; the accounts used are kept as "stateIncomeTax:CA" / "suta:CA".
+    let (income_by_state, unemployment_by_state) = per_state(&mut tx, &run).await?;
+    let mut per_state_lines: Vec<(String, String, Money, String)> = Vec::new();
+    for (role, by_state, what) in [
+        ("suta", &unemployment_by_state, "State unemployment"),
+        ("stateIncomeTax", &income_by_state, "State income tax withheld"),
+    ] {
+        for (st, amount) in by_state {
+            let reg = us_states::registration(&mut tx, st).await?;
+            let chosen = reg.and_then(|r| if role == "suta" { r.suta_account_id } else { r.state_tax_account_id });
+            let account = match chosen {
+                Some(id) => id,
+                None => account_of(&snap, role)?,
+            };
+            if let Some(map) = snap.as_object_mut() {
+                map.insert(format!("{role}:{st}"), Value::String(account.clone()));
+            }
+            per_state_lines.push((account, st.clone(), *amount, format!("{what} — {st}")));
+        }
+    }
     let t = |k: &str| run.total(k);
     let zero = Money::ZERO;
 
@@ -1237,10 +1452,22 @@ pub async fn post(db: &Db, run_id: &str) -> AppResult<Value> {
         "Medicare 1.45% + 1.45% and Additional Medicare",
     ));
     e.extend(line(&account_of(&snap, "futa")?, zero, t("futaTotal"), "FUTA"));
-    e.extend(line(&account_of(&snap, "suta")?, zero, t("sutaTotal"), "State unemployment"));
+    if unemployment_by_state.is_empty() {
+        e.extend(line(&account_of(&snap, "suta")?, zero, t("sutaTotal"), "State unemployment"));
+    }
     e.extend(line(&account_of(&snap, "retirement401k")?, zero, t("pretax401kTotal"), "401(k) contributions"));
     e.extend(line(&account_of(&snap, "section125")?, zero, t("pretaxSection125Total"), "Section 125 deductions"));
-    e.extend(line(&account_of(&snap, "stateIncomeTax")?, zero, t("stateIncomeTaxTotal"), "State income tax withheld"));
+    if income_by_state.is_empty() {
+        e.extend(line(
+            &account_of(&snap, "stateIncomeTax")?,
+            zero,
+            t("stateIncomeTaxTotal"),
+            "State income tax withheld",
+        ));
+    }
+    for (account, _, amount, description) in &per_state_lines {
+        e.extend(line(account, zero, *amount, description));
+    }
 
     let entry = entries::post(
         &mut tx,
@@ -1312,6 +1539,8 @@ pub struct Remit {
     pub date: String,
     pub amount: Option<Money>,
     pub reference: Option<String>,
+    /// D63: the state, for state income tax and unemployment (needed when several are owed).
+    pub state: Option<String>,
 }
 
 fn label(kind: &str) -> &'static str {
@@ -1335,13 +1564,53 @@ pub async fn remit(db: &Db, run_id: &str, r: Remit, by: &Actor) -> AppResult<Val
         return Err(AppError::bad_request("Post the run before recording tax payments"));
     }
     let owed = owed(&mut tx, &run).await?;
-    let left = |k: &str| -> AppResult<Money> {
-        let (_, total, done) =
-            owed.iter().find(|(t, _, _)| *t == k).copied().ok_or_else(|| AppError::internal("type"))?;
-        total.checked_sub(done).ok_or_else(too_large)
+    let per_state = matches!(r.kind.as_str(), "SUTA" | "STATE_INCOME_TAX");
+    // Which state a state income tax / unemployment payment is for.
+    let state: Option<String> = if per_state {
+        let open: Vec<&Owed> =
+            owed.iter().filter(|o| o.kind == r.kind && o.state.is_some() && o.total > o.remitted).collect();
+        match &r.state {
+            Some(st) => {
+                if !owed.iter().any(|o| o.kind == r.kind && o.state.as_deref() == Some(st.as_str())) {
+                    return Err(AppError::bad_request(format!(
+                        "Nothing is owed to {st} for {} on this run",
+                        label(&r.kind)
+                    )));
+                }
+                Some(st.clone())
+            }
+            // Without a state or an amount, the payment clears every state (one part each).
+            None if open.len() > 1 && r.amount.is_some() => {
+                return Err(AppError::bad_request(format!(
+                    "{} is owed to several states ({}) — choose the state this payment is for",
+                    label(&r.kind),
+                    open.iter().filter_map(|o| o.state.clone()).collect::<Vec<_>>().join(", ")
+                )))
+            }
+            None if open.len() > 1 => None,
+            None => open.first().and_then(|o| o.state.clone()),
+        }
+    } else {
+        None
     };
-    // The parts this payment clears: (type, amount).
-    let parts: Vec<(&str, Money)> = if r.kind == "FORM_941" {
+    let left = |k: &str| -> AppResult<Money> {
+        let o = owed
+            .iter()
+            .find(|o| o.kind == k && (o.state.is_none() || o.state == state))
+            .ok_or_else(|| AppError::internal("type"))?;
+        o.total.checked_sub(o.remitted).ok_or_else(too_large)
+    };
+    // The parts this payment clears: (type, state, amount).
+    let parts: Vec<(&str, Option<String>, Money)> = if per_state && state.is_none() {
+        let mut v = Vec::new();
+        for o in owed.iter().filter(|o| o.kind == r.kind) {
+            let a = o.total.checked_sub(o.remitted).ok_or_else(too_large)?;
+            if a > Money::ZERO {
+                v.push((o.kind, o.state.clone(), a));
+            }
+        }
+        v
+    } else if r.kind == "FORM_941" {
         if r.amount.is_some() {
             return Err(AppError::bad_request("A Form 941 deposit pays everything outstanding — leave amount out"));
         }
@@ -1349,7 +1618,7 @@ pub async fn remit(db: &Db, run_id: &str, r: Remit, by: &Actor) -> AppResult<Val
         for k in ["FEDERAL_INCOME_TAX", "SOCIAL_SECURITY", "MEDICARE"] {
             let a = left(k)?;
             if a > Money::ZERO {
-                v.push((k, a));
+                v.push((k, None, a));
             }
         }
         v
@@ -1363,7 +1632,7 @@ pub async fn remit(db: &Db, run_id: &str, r: Remit, by: &Actor) -> AppResult<Val
             )));
         }
         if amount > Money::ZERO {
-            vec![(REMIT_TYPES.iter().copied().find(|t| *t == r.kind).unwrap_or("SECTION_125"), amount)]
+            vec![(REMIT_TYPES.iter().copied().find(|t| *t == r.kind).unwrap_or("SECTION_125"), state.clone(), amount)]
         } else {
             Vec::new()
         }
@@ -1371,19 +1640,34 @@ pub async fn remit(db: &Db, run_id: &str, r: Remit, by: &Actor) -> AppResult<Val
     if parts.is_empty() {
         return Err(AppError::bad_request(format!("Nothing outstanding for {} on this run", label(&r.kind))));
     }
-    let total = sum(&parts.iter().map(|(_, a)| *a).collect::<Vec<_>>())?;
+    let total = sum(&parts.iter().map(|(_, _, a)| *a).collect::<Vec<_>>())?;
     let bank = accounts::find_one(&mut tx, &r.payment_account_id).await?;
     let mut lines = Vec::new();
-    for (k, a) in &parts {
-        let payable = accounts::find_one(&mut tx, &account_of(&run.accounts, payable_role(k))?).await?;
-        lines.extend(line(&payable.id, *a, Money::ZERO, &format!("{} cleared", payable.name)));
+    for (k, part_state, a) in &parts {
+        let role = payable_role(k);
+        let id = match part_state {
+            Some(st) => run.accounts[format!("{role}:{st}").as_str()]
+                .as_str()
+                .map(str::to_string)
+                .map_or_else(|| account_of(&run.accounts, role), Ok)?,
+            None => account_of(&run.accounts, role)?,
+        };
+        let payable = accounts::find_one(&mut tx, &id).await?;
+        let what = match part_state {
+            Some(st) => format!("{} cleared — {st}", payable.name),
+            None => format!("{} cleared", payable.name),
+        };
+        lines.extend(line(&payable.id, *a, Money::ZERO, &what));
     }
     lines.extend(line(&bank.id, Money::ZERO, total, &format!("Paid from {}", bank.name)));
     let entry = entries::post(
         &mut tx,
         NewEntry {
             date: r.date.clone(),
-            description: format!("{} for {} ({})", label(&r.kind), run.pay_date, run.run_number),
+            description: match &state {
+                Some(st) => format!("{} — {st} for {} ({})", label(&r.kind), run.pay_date, run.run_number),
+                None => format!("{} for {} ({})", label(&r.kind), run.pay_date, run.run_number),
+            },
             reference: Some(r.reference.clone().unwrap_or_else(|| run.run_number.clone())),
             source_type: Some("US_PAYROLL_REMITTANCE".into()),
             source_id: Some(run.id.clone()),
@@ -1391,10 +1675,10 @@ pub async fn remit(db: &Db, run_id: &str, r: Remit, by: &Actor) -> AppResult<Val
         },
     )
     .await?;
-    for (k, a) in &parts {
+    for (k, part_state, a) in &parts {
         sqlx::query(
             r#"INSERT INTO "us_payroll_remittances" ("id","runId","type","amount","date","paymentAccountId","reference",
-               "journalEntryId","createdByName") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"#,
+               "journalEntryId","createdByName","state") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"#,
         )
         .bind(new_id())
         .bind(run_id)
@@ -1405,6 +1689,7 @@ pub async fn remit(db: &Db, run_id: &str, r: Remit, by: &Actor) -> AppResult<Val
         .bind(&r.reference)
         .bind(&entry.id)
         .bind(&by.username)
+        .bind(part_state.as_deref())
         .execute(&mut *tx)
         .await?;
     }
@@ -1483,6 +1768,8 @@ mod tests {
             state_allowances: 2,
             state_extra_withholding: Money::from_cents(1_500),
             state_exempt: false,
+            resident_state: None,
+            other_work_states: Vec::new(),
         };
         assert_eq!(w4_from_snapshot(&w4_snapshot(&t)), (t.w4(), false));
         assert_eq!(cert_from_snapshot(&cert_snapshot(&t)), t.state_employee());

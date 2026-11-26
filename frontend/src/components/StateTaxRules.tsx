@@ -13,6 +13,8 @@ type Draft = {
   allowanceDeduction: string;
   allowanceCredit: string;
   excludes401k: boolean;
+  /** D63: as the home state, take the difference from residents working in a state that taxes less. */
+  residentCredit: boolean;
   notes: string;
 };
 
@@ -32,6 +34,7 @@ function draftOf(r?: StateTaxRule): Draft {
     allowanceDeduction: s(r?.allowanceDeduction),
     allowanceCredit: s(r?.allowanceCredit),
     excludes401k: r?.excludes401k ?? true,
+    residentCredit: r?.residentCredit === 'DIFFERENCE',
     notes: r?.notes ?? '',
   };
 }
@@ -45,6 +48,7 @@ function summary(r: StateTaxRule) {
     r.allowanceDeduction ? `${usd(r.allowanceDeduction)} per allowance` : '',
     r.allowanceCredit ? `${usd(r.allowanceCredit)} credit per allowance` : '',
     r.excludes401k ? '' : '401(k) taxed',
+    r.residentCredit === 'DIFFERENCE' ? 'residents working elsewhere: takes the difference' : '',
   ].filter(Boolean);
   return [base, ...extras].join(' · ');
 }
@@ -88,6 +92,7 @@ export default function StateTaxRules() {
         allowanceDeduction: num(draft.allowanceDeduction),
         allowanceCredit: num(draft.allowanceCredit),
         excludes401k: draft.excludes401k,
+        residentCredit: draft.residentCredit ? 'DIFFERENCE' : 'NONE',
         notes: draft.notes.trim() || null,
       });
       setEditing(null);
@@ -173,6 +178,13 @@ export default function StateTaxRules() {
             <label className="flex items-center gap-2 text-sm mt-5" style={{ gridColumn: 'span 2' }}>
               <input type="checkbox" checked={draft.excludes401k} onChange={(e) => setDraft({ ...draft, excludes401k: e.target.checked })} />
               401(k) deferrals are not state wages
+            </label>
+            <label className="flex items-start gap-2 text-sm mt-1" style={{ gridColumn: 'span 4' }}>
+              <input type="checkbox" className="mt-1" checked={draft.residentCredit} onChange={(e) => setDraft({ ...draft, residentCredit: e.target.checked })} />
+              <span>
+                For residents of {editing} who work in another state: also withhold {editing}'s tax less the other state's, when {editing}'s is more
+                <span className="block text-xs text-gray-500">Leave off if {editing} does not ask employers to withhold that difference (check its withholding guide).</span>
+              </span>
             </label>
           </div>
 

@@ -14,6 +14,7 @@ use payroll::us_setup::{
     STATES, W4_VERSIONS,
 };
 use payroll::us_state::{Bracket, StateRule, METHODS};
+use payroll::us_states::Registration;
 use serde_json::{Map, Value};
 
 const AMOUNT: &[Rule] = &[Rule::IsMoneyNumber, Rule::MinZero];
@@ -111,10 +112,21 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
     let mut v = Validator::new(body);
     to_number(&mut v, TAX_AMOUNTS);
     to_number(&mut v, &["allowances", "stateAllowances", "stateExtraWithholding"]);
-    if let Some(Value::String(s)) = v.input.get_mut("workState") {
-        *s = s.trim().to_ascii_uppercase();
+    for k in ["workState", "residentState"] {
+        if let Some(Value::String(s)) = v.input.get_mut(k) {
+            *s = s.trim().to_ascii_uppercase();
+        }
     }
+    if v.input.get("residentState").and_then(Value::as_str) == Some("") {
+        v.input.insert("residentState".into(), Value::Null);
+    }
+    let others = other_work_states(v.input.get("otherWorkStates"))?;
     v.field("workState", false, &[Rule::IsString, WORK_STATE])
+        .field(
+            "residentState",
+            true,
+            &[Rule::IsString, Rule::Matches(is_state, "residentState must be a two-letter US state code, like PA")],
+        )
         .field("payType", false, &[Rule::IsEnum(PAY_TYPES)])
         .field("w4Version", true, &[Rule::IsEnum(W4_VERSIONS)])
         .field("filingStatus", true, &[Rule::IsEnum(FILING_STATUSES)])
@@ -151,6 +163,8 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         state_allowances: m.get("stateAllowances").and_then(Value::as_i64).unwrap_or(0),
         state_extra_withholding: amount("stateExtraWithholding")?,
         state_exempt: flag("stateExempt"),
+        resident_state: opt_string(&m, "residentState"),
+        other_work_states: others,
     };
     if t.pay_type == "SALARY" && t.annual_salary == Money::ZERO {
         return Err(AppError::bad_request("annualSalary is required for a salaried employee"));
@@ -159,6 +173,30 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         return Err(AppError::bad_request("hourlyRate is required for an hourly employee"));
     }
     Ok(t)
+}
+
+/// D63: `otherWorkStates: [{state, percent}]` → shares in hundredths of a percent.
+fn other_work_states(v: Option<&Value>) -> Result<Vec<(String, i64)>, AppError> {
+    let bad = || {
+        AppError::validation(vec![
+            "otherWorkStates must be a list of {state, percent} with a two-letter state and a percent like 25 or 12.5"
+                .into(),
+        ])
+    };
+    let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
+    let items = v.as_array().ok_or_else(bad)?;
+    items
+        .iter()
+        .map(|item| {
+            let state =
+                item.get("state").and_then(Value::as_str).map(|s| s.trim().to_ascii_uppercase()).ok_or_else(bad)?;
+            if !is_state(&state) {
+                return Err(bad());
+            }
+            let share = item.get("percent").and_then(Money::from_json).map(Money::cents).ok_or_else(bad)?;
+            Ok((state, share))
+        })
+        .collect()
 }
 
 const YTD: &[&str] = &["ytdSocialSecurityWages", "ytdMedicareWages", "ytdFutaWages", "ytdSutaWages"];
@@ -259,7 +297,8 @@ pub fn remit(body: Map<String, Value>) -> Result<Remit, AppError> {
         .field("paymentAccountId", false, &[Rule::IsUuid])
         .field("date", false, &[Rule::IsDateFormat])
         .field("amount", true, &[Rule::IsMoneyNumber, Rule::MinNum(0.01, "0.01")])
-        .field("reference", true, &[Rule::IsString, Rule::MaxLength(100)]);
+        .field("reference", true, &[Rule::IsString, Rule::MaxLength(100)])
+        .field("state", true, &[Rule::IsString, STATE]);
     let m = v.finish()?;
     Ok(Remit {
         kind: opt_string(&m, "type").unwrap_or_default(),
@@ -267,6 +306,7 @@ pub fn remit(body: Map<String, Value>) -> Result<Remit, AppError> {
         date: opt_string(&m, "date").unwrap_or_default(),
         amount: money(&m, "amount")?,
         reference: opt_string(&m, "reference"),
+        state: opt_string(&m, "state").map(|s| s.to_ascii_uppercase()),
     })
 }
 
@@ -290,6 +330,48 @@ pub fn report_period(
         return Err(AppError::validation(errors));
     }
     Ok((year.unwrap_or(0), quarter.unwrap_or(0)))
+}
+
+// ─── States the company is registered in (D63) ──────────────────────────────
+
+/// `PUT /payroll/us/states/:state`: the company's details in that state.
+pub fn registration(state: String, body: Map<String, Value>) -> Result<Registration, AppError> {
+    let mut v = Validator::new(body);
+    to_number(&mut v, &["sutaRate", "sutaWageBase"]);
+    trim_or_null(&mut v, &["withholdingAccountNo", "unemploymentAccountNo"]);
+    v.field("withholdingAccountNo", true, &[Rule::IsString, Rule::MaxLength(40)])
+        .field("unemploymentAccountNo", true, &[Rule::IsString, Rule::MaxLength(40)])
+        .field("sutaRate", true, &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(100.0, "100")])
+        .field("sutaWageBase", true, AMOUNT)
+        .field("stateTaxAccountId", true, &[Rule::IsUuid])
+        .field("sutaAccountId", true, &[Rule::IsUuid]);
+    let m = v.finish()?;
+    Ok(Registration {
+        state,
+        withholding_account_no: opt_string(&m, "withholdingAccountNo"),
+        unemployment_account_no: opt_string(&m, "unemploymentAccountNo"),
+        suta_rate: percent(&m, "sutaRate")?.unwrap_or(0),
+        suta_wage_base: money(&m, "sutaWageBase")?,
+        state_tax_account_id: opt_string(&m, "stateTaxAccountId"),
+        suta_account_id: opt_string(&m, "sutaAccountId"),
+    })
+}
+
+/// `POST /payroll/us/reciprocity`: `{workState, residentState}`.
+pub fn reciprocity(body: Map<String, Value>) -> Result<(String, String), AppError> {
+    let mut v = Validator::new(body);
+    for k in ["workState", "residentState"] {
+        if let Some(Value::String(s)) = v.input.get_mut(k) {
+            *s = s.trim().to_ascii_uppercase();
+        }
+    }
+    v.field("workState", false, &[Rule::IsString, WORK_STATE]).field(
+        "residentState",
+        false,
+        &[Rule::IsString, Rule::Matches(is_state, "residentState must be a two-letter US state code, like PA")],
+    );
+    let m = v.finish()?;
+    Ok((opt_string(&m, "workState").unwrap_or_default(), opt_string(&m, "residentState").unwrap_or_default()))
 }
 
 // ─── State income tax rules ─────────────────────────────────────────────────
@@ -340,6 +422,7 @@ pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>
         .field("brackets", true, &[Rule::IsArray])
         .field("bracketsMarried", true, &[Rule::IsArray])
         .field("excludes401k", true, &[Rule::IsBoolean])
+        .field("residentCredit", true, &[Rule::IsEnum(&["NONE", "DIFFERENCE"])])
         .field("notes", true, &[Rule::IsString, Rule::MaxLength(500)]);
     for k in RULE_AMOUNTS {
         v.field(k, true, AMOUNT);
@@ -362,6 +445,7 @@ pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>
         allowance_deduction: amount("allowanceDeduction")?,
         allowance_credit: amount("allowanceCredit")?,
         excludes_401k: m.get("excludes401k").and_then(Value::as_bool).unwrap_or(true),
+        resident_credit: opt_string(&m, "residentCredit").as_deref() == Some("DIFFERENCE"),
         method,
     };
     if rule.method == "FLAT" && m.get("flatRate").is_none_or(Value::is_null) {

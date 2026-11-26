@@ -5931,3 +5931,199 @@ async fn automatic_backups_every_n_days_and_the_folder_window() -> TestResult {
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     Ok(())
 }
+
+/// D63: one company, employees in several states. Example rules for tests (no real rates ship):
+/// NJ 5%, PA 3.07% (taxes 401(k)), CO 4%, UT 5%, VA 6% with residentCredit DIFFERENCE. Biweekly
+/// salaries of $52,000, so gross 2,000.00 each.
+///   US-NJ lives in PA, works in NJ, NJ-PA reciprocity: PA 61.40, NJ nothing; SUTA NJ 3% = 60.00
+///   US-SPLIT lives in CO, works 75% CO / 25% UT: CO 60.00, UT 25.00; SUTA CO 1.7% = 34.00
+///   US-DIFF lives in VA, works in CO: CO 80.00, VA 120.00 - 80.00 = 40.00; SUTA CO = 34.00
+/// State income tax 266.40 (PA to its own account 2375), SUTA 128.00 (NJ 60, CO 68).
+#[tokio::test]
+async fn us_payroll_in_several_states() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let cash = us_company(&app, &admin, json!({})).await?;
+    let pa_payable = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "2375", "name": "PA Income Tax Payable", "type": "LIABILITY"})),
+        )
+        .await?;
+    let pa_payable = id_of(&pa_payable.body);
+    let rule = |rate: f64| json!({"method": "FLAT", "flatRate": rate, "notes": "Example rule for tests"});
+    for (st, body) in [
+        ("NJ", rule(5.0)),
+        ("PA", merged(&rule(3.07), json!({"excludes401k": false}))),
+        ("CO", rule(4.0)),
+        ("UT", rule(5.0)),
+        ("VA", merged(&rule(6.0), json!({"residentCredit": "DIFFERENCE"}))),
+    ] {
+        let r = us_send(&app, Method::PUT, format!("/api/payroll/us/state-taxes/{st}"), &admin, Some(body)).await?;
+        assert_eq!(r.status, StatusCode::OK, "{st}: {}", r.body);
+    }
+    for (st, body) in [
+        (
+            "NJ",
+            json!({"sutaRate": 3, "sutaWageBase": 43300, "withholdingAccountNo": "NJ-1", "unemploymentAccountNo": "NJ-UI-1"}),
+        ),
+        ("PA", json!({"sutaRate": 3.5, "sutaWageBase": 10000, "stateTaxAccountId": pa_payable})),
+        ("CO", json!({"sutaRate": 1.7, "sutaWageBase": 27200})),
+    ] {
+        let r = us_send(&app, Method::PUT, format!("/api/payroll/us/states/{st}"), &admin, Some(body)).await?;
+        assert_eq!(r.status, StatusCode::OK, "{st}: {}", r.body);
+    }
+    let r = app
+        .call(
+            Method::POST,
+            "/api/payroll/us/reciprocity",
+            Some(&admin),
+            Some(json!({"workState": "nj", "residentState": "PA"})),
+        )
+        .await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(r.body["reciprocity"], json!([{"workState": "NJ", "residentState": "PA"}]));
+    let bad = app
+        .call(
+            Method::POST,
+            "/api/payroll/us/reciprocity",
+            Some(&admin),
+            Some(json!({"workState": "NJ", "residentState": "NJ"})),
+        )
+        .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    let tax = |extra: Value| merged(&salary, extra);
+    let nj =
+        us_employee(&app, &admin, "US-NJ", json!({}), tax(json!({"workState": "NJ", "residentState": "PA"}))).await?;
+    us_employee(
+        &app,
+        &admin,
+        "US-SPLIT",
+        json!({}),
+        tax(json!({"workState": "CO", "otherWorkStates": [{"state": "UT", "percent": 25}]})),
+    )
+    .await?;
+    us_employee(&app, &admin, "US-DIFF", json!({}), tax(json!({"workState": "CO", "residentState": "VA"}))).await?;
+    let bad = us_employee(&app, &admin, "US-BAD", json!({}), Value::Null).await?;
+    let r = app
+        .call(
+            Method::PUT,
+            &format!("/api/payroll/employees/{bad}/us-tax"),
+            Some(&admin),
+            Some(tax(json!({"workState": "CO", "otherWorkStates": [{"state": "UT", "percent": 100}]}))),
+        )
+        .await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "a share of 100% leaves nothing for the work state");
+
+    let saved = app.call(Method::GET, &format!("/api/payroll/employees/{nj}/us-tax"), Some(&admin), None).await?;
+    assert_eq!(saved.body["residentState"], "PA");
+    let p = app
+        .call(
+            Method::POST,
+            "/api/payroll/us/preview",
+            Some(&admin),
+            Some(json!({"employeeId": nj, "payDate": "2026-11-06"})),
+        )
+        .await?;
+    assert_eq!(
+        p.body["stateTaxes"],
+        json!([{"state": "PA", "kind": "RESIDENT", "percent": 100, "wages": 2000, "tax": 61.4}]),
+        "{}",
+        p.body
+    );
+    assert_eq!(p.body["unemploymentState"], "NJ");
+    assert_eq!(p.body["taxes"]["suta"], json!(60));
+
+    let overview = app.call(Method::GET, "/api/payroll/us/states", Some(&admin), None).await?;
+    assert_eq!(overview.body["registrations"].as_array().map(Vec::len), Some(3));
+    assert_eq!(overview.body["statesInUse"], json!(["CO", "NJ", "PA", "UT", "VA"]));
+
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let taxes = |code: &str| us_line(&r.body, code)["stateTaxes"].clone();
+    assert_eq!(
+        taxes("US-NJ"),
+        json!([{"state": "PA", "kind": "RESIDENT", "percent": 100, "wages": 2000, "tax": 61.4}])
+    );
+    assert_eq!(
+        taxes("US-SPLIT"),
+        json!([
+            {"state": "CO", "kind": "WORK", "percent": 75, "wages": 1500, "tax": 60},
+            {"state": "UT", "kind": "WORK", "percent": 25, "wages": 500, "tax": 25}
+        ])
+    );
+    assert_eq!(
+        taxes("US-DIFF"),
+        json!([
+            {"state": "CO", "kind": "WORK", "percent": 100, "wages": 2000, "tax": 80},
+            {"state": "VA", "kind": "RESIDENT", "percent": 0, "wages": 2000, "tax": 40}
+        ])
+    );
+    for (code, st, suta) in [("US-NJ", "NJ", 60), ("US-SPLIT", "CO", 34), ("US-DIFF", "CO", 34)] {
+        let l = us_line(&r.body, code);
+        assert_eq!((&l["sutaState"], &l["suta"]), (&json!(st), &json!(suta)), "{code}");
+    }
+    assert_eq!(r.body["stateIncomeTaxTotal"], json!(266.4));
+    assert_eq!(r.body["sutaTotal"], json!(128));
+    assert_eq!(us_balance(&app, &admin, "2375").await?, json!(61.4), "PA to its own account");
+    assert_eq!(us_balance(&app, &admin, "2370").await?, json!(205));
+    assert_eq!(us_balance(&app, &admin, "2340").await?, json!(128));
+    let owed = |run: &Value, kind: &str, st: &str| -> Value {
+        run["taxes"]
+            .as_array()
+            .and_then(|t| t.iter().find(|t| t["type"] == kind && t["state"] == st))
+            .map(|t| t["outstanding"].clone())
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(owed(&r.body, "SUTA", "NJ"), json!(60));
+    assert_eq!(owed(&r.body, "SUTA", "CO"), json!(68));
+    assert_eq!(owed(&r.body, "STATE_INCOME_TAX", "VA"), json!(40));
+
+    let remit = |body: Value| us_send(&app, Method::POST, format!("{run_url}/remit"), &admin, Some(body));
+    let base = json!({"type": "STATE_INCOME_TAX", "paymentAccountId": cash, "date": "2026-11-15"});
+    let r = remit(merged(&base, json!({"amount": 10}))).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "an amount needs a state when several are owed");
+    let r = remit(merged(&base, json!({"state": "PA"}))).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2375").await?, json!(0));
+    assert_eq!(owed(&r.body, "STATE_INCOME_TAX", "PA"), json!(0));
+    let r = remit(base.clone()).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "no state and no amount clears every state: {}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2370").await?, json!(0));
+    let mut states: Vec<String> = r.body["remittances"]
+        .as_array()
+        .ok_or("remittances")?
+        .iter()
+        .filter_map(|x| x["state"].as_str().map(str::to_string))
+        .collect();
+    states.sort();
+    assert_eq!(states, vec!["CO", "PA", "UT", "VA"]);
+    let r = remit(json!({"type": "SUTA", "paymentAccountId": cash, "date": "2026-11-15", "state": "NJ"})).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2340").await?, json!(68));
+
+    let w2 = app.call(Method::GET, "/api/payroll/us/reports/w2?year=2026", Some(&admin), None).await?;
+    let row = |code: &str| {
+        w2.body["employees"]
+            .as_array()
+            .and_then(|e| e.iter().find(|e| e["employeeCode"] == code))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(
+        row("US-DIFF")["states"],
+        json!([{"box15": "CO", "box16": 2000, "box17": 80}, {"box15": "VA", "box16": 2000, "box17": 40}])
+    );
+    assert_eq!((&row("US-DIFF")["box15"], &row("US-DIFF")["box17"]), (&json!("CO"), &json!(80)));
+    assert_eq!(row("US-NJ")["states"], json!([{"box15": "PA", "box16": 2000, "box17": 61.4}]));
+    assert_eq!(w2.body["totals"]["box17"], json!(266.4));
+    Ok(())
+}

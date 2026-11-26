@@ -195,6 +195,53 @@ pub async fn report_w2(
     Ok(Json(us_reports::w2(&s.db, year).await?))
 }
 
+// ─── States the company is registered in, reciprocity (D63) ─────────────────
+
+pub async fn states(State(s): State<AppState>, _a: Authorized<perm::Payroll>) -> AppResult<Json<Value>> {
+    Ok(Json(payroll::us_states::overview(&s.db).await?))
+}
+
+pub async fn state_put(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Path(state): Path<String>,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    let state = dto::state_code(&state)?;
+    let r = dto::registration(state, body.object())?;
+    Ok(Json(payroll::us_states::put_registration(&s.db, r).await?))
+}
+
+pub async fn state_delete(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Path(state): Path<String>,
+) -> AppResult<StatusCode> {
+    let state = dto::state_code(&state)?;
+    payroll::us_states::delete_registration(&s.db, &state).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn reciprocity_add(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    body: JsonBody,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let (work, resident) = dto::reciprocity(body.object())?;
+    payroll::us_states::add_reciprocity(&s.db, &work, &resident).await?;
+    Ok((StatusCode::CREATED, Json(payroll::us_states::overview(&s.db).await?)))
+}
+
+pub async fn reciprocity_remove(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Path((work, resident)): Path<(String, String)>,
+) -> AppResult<StatusCode> {
+    let (work, resident) = (dto::state_code(&work)?, dto::state_code(&resident)?);
+    payroll::us_states::remove_reciprocity(&s.db, &work, &resident).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ─── State income tax rules ─────────────────────────────────────────────────
 
 pub async fn state_taxes(State(s): State<AppState>, _a: Authorized<perm::Payroll>) -> AppResult<Json<Value>> {

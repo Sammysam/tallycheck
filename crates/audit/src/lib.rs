@@ -373,6 +373,16 @@ pub fn summarize(method: &str, path: &str) -> String {
         return "Changed the books lock date".into();
     }
 
+    // D63: US payroll states and reciprocity.
+    if resource == "payroll" && at(1) == Some("us") {
+        match (at(2), method) {
+            (Some("states"), "DELETE") => return "Removed a US state registration".into(),
+            (Some("states"), _) => return "Saved a US state registration".into(),
+            (Some("reciprocity"), "DELETE") => return "Removed a state reciprocity agreement".into(),
+            (Some("reciprocity"), _) => return "Added a state reciprocity agreement".into(),
+            _ => {}
+        }
+    }
     if resource == "payroll" && at(1) == Some("runs") {
         match last {
             "post" => return "Posted a payroll run to the ledger".into(),
