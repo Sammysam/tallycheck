@@ -8,6 +8,9 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Easier first setup: a Getting started checklist on the dashboard that ticks itself off, backups
+  turned on in the setup wizard, and an opening-balances question that leads an existing business
+  to Quick start (D73).
 - First-time-user fixes: "Receive payment" / "Pay bill" with the amount filled in, plain-word payment
   forms and lists, editable customers and vendors, labelled bill dates, confirmations when posting,
   a getting-started list and a backups-off notice on the dashboard, Sri Lankan payroll accounts hidden

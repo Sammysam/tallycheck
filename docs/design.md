@@ -1076,6 +1076,17 @@ recommendations without answering each one individually; revisit any of them on 
   tax-number step asks a US company for its EIN; the dashboard tells an administrator when
   automatic backups are off and shows a getting-started list until anything is recorded; the
   first-run and sign-in labels are linked to their fields.
+- **D73 Easier first setup** (2026-11-27).
+  The company setup wizard gains two pages before the review: "Keep your books safe" (backup
+  folder with Choose folder… in the desktop app, a backup password the first time, and daily
+  automatic backups on — through the existing backup routes, so it needs the administrator on the
+  main PC; elsewhere the page says where to do it later) and "Do you already have a business
+  running?" (a new business, or an existing one — Finish then opens Move books in → Quick start).
+  The administrator's dashboard shows a Getting started checklist that ticks itself off from the
+  company's data: company details, opening balances (a conversion, or the new-business answer),
+  first customer, first posted invoice, automatic backups on, a second active user; each open
+  step has a Start button; it can be hidden and disappears when all are done. Steps the user
+  cannot check (a missing right, not on the main PC) are left out.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

@@ -244,11 +244,22 @@ try {
       await page(t);
       await clickText('Skip');
     }
+    // D73: the backup page (skipped here: it would write to a real folder) and the opening question.
+    await page('Keep your books safe');
+    await waitFor(`!!document.querySelector('input[aria-label="Backup folder"]')`, 'backup page fields');
+    await clickText('Skip');
+    await page('already have a business');
+    await clickText('Next');
+    await waitFor(`document.body.innerText.includes('Choose one of the two')`, 'opening needs an answer');
+    await clickText('It’s a new business', 'span');
+    await clickText('Next');
     await page('check your details');
-    await waitFor(`document.body.innerText.includes('accounts@acme.test') && document.body.innerText.includes('Sri Lanka')`, 'review lists the answers');
+    await waitFor(`document.body.innerText.includes('accounts@acme.test') && document.body.innerText.includes('Sri Lanka') && document.body.innerText.includes('New business — nothing to bring in')`, 'review lists the answers');
     await shot('00d-company-review');
     await clickText('Finish');
     await waitFor(`location.pathname === '/' && !!localStorage.getItem('accessToken')`, 'dashboard after setup');
+    // D73: the administrator's checklist, with the company and opening balances already ticked.
+    await waitFor(`document.body.innerText.includes('Getting started') && document.body.innerText.includes('2 of ') && document.body.innerText.includes('Add your first customer')`, 'getting-started checklist');
     const settings = await evaluate(`fetch('/api/settings', { headers: { authorization: 'Bearer ' + localStorage.getItem('accessToken') } }).then((r) => r.json())`);
     if (settings['company.name'] !== 'Acme Trading (Pvt) Ltd' || settings['region.currency'] !== 'LKR')
       throw new Error('company not saved: ' + JSON.stringify(settings).slice(0, 300));

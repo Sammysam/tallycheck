@@ -368,6 +368,9 @@ try {
     await next();
     await page('How do customers pay'); await set('textarea[aria-label="How customers pay you"]', COMPANY.payment); await next();
     await page('bottom of your invoices'); await set('input[aria-label="Footer note"]', COMPANY.footer); await next();
+    // D73: backups and opening balances are set up in their own phases.
+    await page('Keep your books safe'); await clickText('Skip');
+    await page('already have a business'); await clickText('Skip');
     await page('check your details');
     await shot('01-company-review');
     await clickText('Finish');

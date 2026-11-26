@@ -13,6 +13,7 @@ import {
 import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import PageHeader from '../components/PageHeader';
+import GettingStarted from '../components/GettingStarted';
 import { fiscalYearStart, region } from '../lib/region';
 import { compactAmount, money } from '../lib/money';
 
@@ -145,7 +146,9 @@ export default function Dashboard() {
     <div>
       <PageHeader title="Dashboard" subtitle={`Financial year from ${yearStart}. Press F5 to refresh.`} />
       {backupNotice}
-      {empty && (
+      {/* D73: the administrator's checklist; others see the short first-steps list. */}
+      {user?.role === 'Admin' && <GettingStarted />}
+      {empty && user?.role !== 'Admin' && (
         <div className="mb-3 px-4 py-3 bg-white border border-[#e0e0e0] rounded-md text-sm" aria-label="Getting started">
           <p className="font-semibold text-gray-800 mb-1">Getting started</p>
           <ol className="list-decimal pl-5 space-y-0.5 text-gray-700">

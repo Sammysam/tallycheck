@@ -5,6 +5,7 @@ import { COUNTRIES, offeredCountries } from '../lib/countries';
 import { toast } from '../lib/toast';
 import { syncPayrollCountry } from '../lib/usPayroll';
 import { regionFromSettings, setRegion, SETUP_LATER } from '../lib/region';
+import { NO_OPENING_BALANCES } from '../components/GettingStarted';
 
 /**
  * D25/D31: shown to the administrator after the first sign-in, until the company is entered.
@@ -39,13 +40,22 @@ const STEPS: Step[] = [
   { id: 'logo', title: 'Add your logo', help: 'Shown on invoices and statements. PNG, JPEG or WebP, under 250 KB.', keys: ['company.logo'] },
   { id: 'payment', title: 'How do customers pay you?', help: 'Printed on invoices and statements — for example your bank and account number.', keys: ['company.paymentInstructions'] },
   { id: 'footer', title: 'A note at the bottom of your invoices', help: 'For example “Thank you for your business”.', keys: ['company.footerNote'] },
+  // D73: keep the books safe, and bring in what an existing business already has.
+  { id: 'backup', title: 'Keep your books safe', help: 'TallyCheck can copy your books to a folder every day, protected by a password. Choose a folder that is not on this PC’s main drive if you can (a USB drive or a synced folder).', keys: [] },
+  { id: 'opening', title: 'Do you already have a business running?', help: 'If you do, bring in what you have today — your bank balance, what customers owe you and what you owe — so your reports start from the right figures.', keys: [] },
   { id: 'review', title: 'All done — check your details', help: 'Click a row to change it. You can change everything later under Administration → Settings.', keys: [] },
 ];
 
 const SHORT: Record<string, string> = {
   name: 'Company name', address: 'Address', email: 'Email', phone: 'Phone', website: 'Website',
   country: 'Country and currency', tax: 'Tax number', logo: 'Logo', payment: 'How customers pay', footer: 'Invoice note',
+  backup: 'Automatic backups', opening: 'Opening balances',
 };
+
+/** D73: what the backup page shows and saves. */
+interface BackupState { available: boolean; passwordSet: boolean; enabled: boolean; folder: string; canChooseFolder: boolean }
+const read = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const write = (k: string, v: string | null) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* private window */ } };
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const MAX_LOGO_BYTES = 250_000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -72,6 +82,13 @@ export default function CompanySetup() {
   const [savedCountry, setSavedCountry] = useState<string | undefined>(undefined);
   const step = STEPS[index];
   const last = STEPS.length - 1;
+  // D73: the backup page.
+  const [backup, setBackup] = useState<BackupState>({ available: false, passwordSet: false, enabled: false, folder: '', canChooseFolder: false });
+  const [backupPassword, setBackupPassword] = useState('');
+  const [backupConfirm, setBackupConfirm] = useState('');
+  const [daily, setDaily] = useState(true);
+  // D73: 'new' business, 'existing' (go on to Quick start), or not answered.
+  const [opening, setOpening] = useState<'' | 'new' | 'existing'>(read(NO_OPENING_BALANCES) === '1' ? 'new' : '');
 
   useEffect(() => {
     api.get('/settings')
@@ -81,6 +98,15 @@ export default function CompanySetup() {
       })
       .catch((e) => setError(errMsg(e, 'Could not load the company details')))
       .finally(() => setLoaded(true));
+    api.get('/system/backup')
+      .then((r) => setBackup({
+        available: true,
+        passwordSet: !!r.data.passwordSet,
+        enabled: !!r.data.settings?.enabled,
+        folder: r.data.settings?.folder || r.data.defaultFolder || '',
+        canChooseFolder: !!r.data.canChooseFolder,
+      }))
+      .catch(() => setBackup((b) => ({ ...b, available: false })));
   }, []);
 
   // Each page starts with its first field ready to type in.
@@ -137,7 +163,33 @@ export default function CompanySetup() {
       return;
     }
     sessionStorage.removeItem(SETUP_LATER);
-    navigate('/', { replace: true });
+    // D73: an existing business goes straight on to enter its opening balances.
+    navigate(opening === 'existing' ? '/move-books' : '/', { replace: true });
+  };
+
+  /** D73: sets the backup password (first time) and turns daily backups on. */
+  const saveBackup = async (): Promise<boolean> => {
+    if (!backup.available) return true;
+    if (!backup.folder.trim()) { setError('Choose a folder for the backups, or press Skip.'); return false; }
+    if (!backup.passwordSet) {
+      if (backupPassword.length < 8) { setError('The backup password needs at least 8 characters.'); return false; }
+      if (backupPassword !== backupConfirm) { setError('The two backup passwords are not the same.'); return false; }
+      await api.post('/system/backup/password', { password: backupPassword });
+    }
+    await api.put('/system/backup/settings', { enabled: daily, folder: backup.folder.trim(), everyDays: 1 });
+    setBackup((b) => ({ ...b, passwordSet: true, enabled: daily }));
+    setBackupPassword('');
+    setBackupConfirm('');
+    return true;
+  };
+
+  const chooseBackupFolder = async () => {
+    try {
+      const r = await api.post('/system/backup/choose-folder', { start: backup.folder || undefined });
+      if (r.data?.folder) setBackup((b) => ({ ...b, folder: r.data.folder }));
+    } catch (err) {
+      setError(errMsg(err, 'Could not open the folder window'));
+    }
   };
 
   const later = () => {
@@ -150,6 +202,24 @@ export default function CompanySetup() {
     e?.preventDefault();
     if (step.id === 'review') {
       finish();
+      return;
+    }
+    if (step.id === 'backup') {
+      setSaving(true);
+      setError('');
+      try {
+        if (await saveBackup()) go(index + 1);
+      } catch (err) {
+        setError(errMsg(err, 'Could not turn backups on'));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (step.id === 'opening') {
+      if (!opening) { setError('Choose one of the two, or press Skip.'); return; }
+      write(NO_OPENING_BALANCES, opening === 'new' ? '1' : null);
+      go(index + 1);
       return;
     }
     const body: Values = {};
@@ -190,6 +260,45 @@ export default function CompanySetup() {
 
   const fieldFor = (s: Step) => {
     switch (s.id) {
+      case 'backup':
+        if (!backup.available) {
+          return <p className="text-sm text-gray-600">Backups are set up on the main PC by an administrator. You can do it later under Settings → Backup &amp; restore.</p>;
+        }
+        return (
+          <div className="space-y-3">
+            <label className="block text-xs font-medium text-gray-600">Backup folder
+              <div className="flex gap-2 mt-1">
+                <input value={backup.folder} onChange={(e) => setBackup((b) => ({ ...b, folder: e.target.value }))} aria-label="Backup folder" />
+                {backup.canChooseFolder && <button type="button" className="btn btn-secondary whitespace-nowrap" onClick={chooseBackupFolder}>Choose folder…</button>}
+              </div>
+            </label>
+            {backup.passwordSet ? (
+              <p className="text-xs text-gray-500">A backup password is already set; backups use it.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-xs font-medium text-gray-600">Backup password (at least 8 characters)
+                  <input className="mt-1" type="password" autoComplete="new-password" value={backupPassword} onChange={(e) => setBackupPassword(e.target.value)} aria-label="Backup password" /></label>
+                <label className="block text-xs font-medium text-gray-600">Type it again
+                  <input className="mt-1" type="password" autoComplete="new-password" value={backupConfirm} onChange={(e) => setBackupConfirm(e.target.value)} aria-label="Confirm backup password" /></label>
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={daily} onChange={(e) => setDaily(e.target.checked)} />Back up automatically every day (the last 14 copies are kept)</label>
+            {!backup.passwordSet && <p className="text-xs text-amber-700">Write the backup password down and keep it somewhere safe — without it a backup cannot be opened.</p>}
+          </div>
+        );
+      case 'opening':
+        return (
+          <div className="space-y-2" role="radiogroup" aria-label="Opening balances">
+            <label className={`flex items-start gap-3 p-3 border rounded cursor-pointer ${opening === 'new' ? 'border-orange-500 bg-orange-50' : 'border-[#ddd]'}`}>
+              <input type="radio" name="opening" checked={opening === 'new'} onChange={() => setOpening('new')} className="mt-1" />
+              <span><span className="block text-sm font-medium text-gray-900">It’s a new business</span><span className="block text-xs text-gray-600">Nothing to bring in — start recording from today.</span></span>
+            </label>
+            <label className={`flex items-start gap-3 p-3 border rounded cursor-pointer ${opening === 'existing' ? 'border-orange-500 bg-orange-50' : 'border-[#ddd]'}`}>
+              <input type="radio" name="opening" checked={opening === 'existing'} onChange={() => setOpening('existing')} className="mt-1" />
+              <span><span className="block text-sm font-medium text-gray-900">It’s already running</span><span className="block text-xs text-gray-600">After this setup you enter your bank and cash balances, what each customer owes you and what you owe each supplier — about two minutes. You can also bring in files from QuickBooks, Xero or a spreadsheet.</span></span>
+            </label>
+          </div>
+        );
       case 'name':
         return <input value={val('company.name')} onChange={set('company.name')} maxLength={120} placeholder="Your company’s legal name" aria-label="Company name" />;
       case 'address':
@@ -256,6 +365,8 @@ export default function CompanySetup() {
       return c ? `${c.name} · ${val('region.currency')} · year starts in ${MONTHS[Number(val('region.fiscalYearStart') || 1) - 1]}` : '';
     }
     if (s.id === 'logo') return val('company.logo') ? 'Added' : '';
+    if (s.id === 'backup') return !backup.available ? '' : backup.enabled ? `On, every day, to ${backup.folder}` : 'Off';
+    if (s.id === 'opening') return opening === 'new' ? 'New business — nothing to bring in' : opening === 'existing' ? 'Existing business — enter them next' : '';
     return val(s.keys[0]).replace(/\s*\n\s*/g, ', ');
   };
 
@@ -307,7 +418,7 @@ export default function CompanySetup() {
                 <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => go(index + 1)}>Skip</button>
               )}
               <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : step.id === 'review' ? 'Finish' : 'Next'}
+                {saving ? 'Saving…' : step.id === 'review' ? (opening === 'existing' ? 'Finish and enter opening balances' : 'Finish') : 'Next'}
               </button>
             </div>
           </form>
