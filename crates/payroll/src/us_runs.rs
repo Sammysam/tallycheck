@@ -837,6 +837,11 @@ fn cert_snapshot(t: &UsTax) -> Value {
         "allowances": t.state_allowances,
         "extraWithholding": t.state_extra_withholding.cents(),
         "exempt": t.state_exempt,
+        "headOfHousehold": t.state_head_of_household,
+        "secondAllowances": t.state_second_allowances,
+        "deductionOverride": t.state_deduction_override.map(Money::cents),
+        "annualCredit": t.state_annual_credit.cents(),
+        "electedRate": t.state_elected_rate,
     })
 }
 
@@ -846,6 +851,11 @@ fn cert_from_snapshot(v: &Value) -> StateEmployee {
         allowances: v["allowances"].as_i64().unwrap_or(0),
         extra: Money::from_cents(v["extraWithholding"].as_i64().unwrap_or(0)),
         exempt: v["exempt"].as_bool().unwrap_or(false),
+        head_of_household: v["headOfHousehold"].as_bool().unwrap_or(false),
+        second_allowances: v["secondAllowances"].as_i64().unwrap_or(0),
+        deduction_override: v["deductionOverride"].as_i64(),
+        annual_credit: v["annualCredit"].as_i64().unwrap_or(0),
+        elected_rate: v["electedRate"].as_i64(),
     }
 }
 
@@ -860,10 +870,11 @@ fn states_missing(l: &Line) -> Vec<String> {
         .collect()
 }
 
-/// Fills in the rules a line has none for yet, if the company has entered them since.
-async fn fill_rule(conn: &mut SqliteConnection, l: &mut Line) -> AppResult<()> {
+/// Fills in the rules a line has none for yet, if the company has entered them since (or a
+/// built-in rule applies on the run's pay date).
+async fn fill_rule(conn: &mut SqliteConnection, l: &mut Line, pay_date: &str) -> AppResult<()> {
     for st in states_missing(l) {
-        if let Some(rule) = load_rule(conn, &st).await? {
+        if let Some(rule) = load_rule(conn, &st, pay_date).await? {
             if let Some(map) = l.state_rules.as_object_mut() {
                 map.insert(st.clone(), rule.to_snapshot());
             } else {
@@ -876,9 +887,10 @@ async fn fill_rule(conn: &mut SqliteConnection, l: &mut Line) -> AppResult<()> {
 }
 
 /// Copies the employee's states and the unemployment state onto a line (new or refreshed).
-async fn set_states(conn: &mut SqliteConnection, l: &mut Line, t: &UsTax) -> AppResult<()> {
+async fn set_states(conn: &mut SqliteConnection, l: &mut Line, t: &UsTax, pay_date: &str) -> AppResult<()> {
     let settings = load_settings(conn).await?;
-    let plan = us_states::plan(conn, &t.work_state, &t.other_work_states, t.resident_state.as_deref()).await?;
+    let plan =
+        us_states::plan(conn, &t.work_state, &t.other_work_states, t.resident_state.as_deref(), pay_date).await?;
     l.work_state = t.work_state.clone();
     l.resident_state = t.resident_state.clone().filter(|r| *r != t.work_state);
     l.work_split = t.other_work_states.clone();
@@ -1131,7 +1143,7 @@ async fn new_line(conn: &mut SqliteConnection, run: &Run, e: &Who, t: &UsTax) ->
         figures: UsFigures::default(),
         notes: None,
     };
-    set_states(conn, &mut l, t).await?;
+    set_states(conn, &mut l, t, &run.pay_date).await?;
     l.ytd = year_to_date(conn, &e.id, run.year()?, &run.id, l.suta_state.as_deref()).await?;
     let reciprocity = us_states::reciprocity(conn).await?.into_iter().collect();
     work_out(&mut l, run, &reciprocity)?;
@@ -1286,7 +1298,7 @@ pub async fn update_line(db: &Db, run_id: &str, line_id: &str, p: LinePatch) -> 
             l.hours = if t.pay_type == "HOURLY" { standard_hours(periods) } else { Money::ZERO };
             l.overtime_hours = Money::ZERO;
         }
-        set_states(&mut tx, &mut l, &t).await?;
+        set_states(&mut tx, &mut l, &t, &run.pay_date).await?;
         l.pay_type = t.pay_type.clone();
         l.annual_salary = t.annual_salary;
         l.hourly_rate = t.hourly_rate;
@@ -1298,7 +1310,7 @@ pub async fn update_line(db: &Db, run_id: &str, line_id: &str, p: LinePatch) -> 
         l.w4 = w4_snapshot(&t);
         l.state_cert = cert_snapshot(&t);
     }
-    fill_rule(&mut tx, &mut l).await?;
+    fill_rule(&mut tx, &mut l, &run.pay_date).await?;
     let hourly = l.pay_type == "HOURLY";
     if let Some(h) = p.hours {
         if !hourly {
@@ -1378,7 +1390,7 @@ pub async fn post(db: &Db, run_id: &str) -> AppResult<Value> {
     // Every work state needs its rules before money moves.
     let mut missing = std::collections::BTreeSet::new();
     for l in &mut lines {
-        fill_rule(&mut tx, l).await?;
+        fill_rule(&mut tx, l, &run.pay_date).await?;
         missing.extend(states_missing(l));
     }
     if !missing.is_empty() {
@@ -1768,6 +1780,11 @@ mod tests {
             state_allowances: 2,
             state_extra_withholding: Money::from_cents(1_500),
             state_exempt: false,
+            state_head_of_household: false,
+            state_second_allowances: 0,
+            state_deduction_override: None,
+            state_annual_credit: Money::ZERO,
+            state_elected_rate: None,
             resident_state: None,
             other_work_states: Vec::new(),
         };

@@ -866,6 +866,35 @@ recommendations without answering each one individually; revisit any of them on 
   (registrations and reciprocity), state rules (home-state difference), employee US tax section
   (lives in, also works in), pay run (taxes and payments per state). Not yet: built-in state
   rates and reciprocity pairs (steps 1–3), local taxes, disability / paid leave, state forms.
+- **D64 Built-in 2026 state rules, flat-rate states** (2026-11-26, step 1 of the US state payroll plan).
+  `payroll::us_state_packs` holds built-in 2026 withholding rules copied from each state's own
+  2026 employer publication (named in each rule's `source`, shown on screen): Arizona (A-4:
+  the employee elects 0–3.5% of wages, 2.0% without an A-4; method EMPLOYEE_RATE, built in
+  only), Colorado (DR 1098: 4.40%, $5,500 / $11,000 unless DR 0004 line 2 gives an amount),
+  Georgia (Employer's Guide 2026: 5.19% for pay dates before 11 May 2026, then 4.99%; $15,000 /
+  $30,000; $5,000 per allowance), Idaho (EPB00744 07-23-2026: 5.3% over $16,100 / $32,200, whole
+  dollars; from 23 July 2026 — the January–July table is not built in), Illinois (IL-700-T:
+  4.95%; $2,925 per line 1 and $1,000 per line 2 allowance), Indiana (Departmental Notice #1:
+  2.95%; $1,000 per personal and $1,500 per dependent exemption; county tax not included), Iowa
+  (2026 formula: 3.8%; $13,000 / $26,000 / $19,500 head of household; IA W-4 line 7 dollars as a
+  credit, $40 per allowance on a 2023 or earlier IA W-4), Kentucky (42A003: 3.5% after $3,360),
+  Louisiana (R-1306: 3.09%; $12,875 / $25,750, head of household as married), Michigan (Form 446:
+  4.25%; $5,900 per exemption), North Carolina (NC-30: 4.09%; $12,750 / $19,125 head of
+  household; $2,500 per allowance; whole dollars) and Pennsylvania (REV-415: 3.07%; 401(k)
+  deferrals taxable). Each rule applies from its `from` pay date to the next one for the state.
+  `load_rule(state, pay date)`: no income tax → NONE; the company's own rule when it entered one
+  (it always wins); else the built-in rule in force on the pay date; else none (posting waits).
+  Rules gain `rounding` CENT / DOLLAR, `standardDeductionHeadOfHousehold` and a second
+  allowance type (`secondAllowanceDeduction` / `Credit`); the employee's state certificate gains
+  head of household, second allowances, `stateDeductionOverride` (replaces the standard
+  deduction), `stateAnnualCredit` (dollars a year off the tax) and `stateElectedRate`. Each
+  state's worked examples from its publication are unit tests. `GET /payroll/us/state-taxes`
+  gives each state's `kind` (NO_TAX / BUILT_IN with `source` and `from` / COMPANY with
+  `builtInAvailable` / MISSING). Not built in yet: Ohio and Mississippi (brackets, step 2),
+  Utah and Massachusetts (credits and surtax, step 3), the bracket and special-formula states.
+  Known limits: Pennsylvania taxes some section 125 amounts (other than health, sickness,
+  disability or death plans) that the app takes off state wages; Louisiana's "no deduction" L-4
+  choice and negative adjustments are not offered.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

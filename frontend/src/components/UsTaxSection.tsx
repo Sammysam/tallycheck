@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
-import { FILING_LABEL, US_STATES, usd, type UsPreview, type UsTax } from '../lib/usPayroll';
+import { ARIZONA_RATES, FILING_LABEL, STATE_FORM, US_STATES, usd, type UsPreview, type UsTax } from '../lib/usPayroll';
 
 const AMOUNTS = ['annualSalary', 'hourlyRate', 'dependentsCredit', 'otherIncome', 'deductions', 'extraWithholding', 'pretax401k', 'pretaxSection125'] as const;
 
@@ -33,6 +33,10 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
       stateFilingStatus: t.stateFilingStatus,
       stateAllowances: String(t.stateAllowances),
       stateExtraWithholding: t.stateExtraWithholding ? String(t.stateExtraWithholding) : '',
+      stateSecondAllowances: String(t.stateSecondAllowances ?? 0),
+      stateDeductionOverride: t.stateDeductionOverride == null ? '' : String(t.stateDeductionOverride),
+      stateAnnualCredit: t.stateAnnualCredit ? String(t.stateAnnualCredit) : '',
+      stateElectedRate: t.stateElectedRate == null ? '' : String(t.stateElectedRate),
     };
     for (const k of AMOUNTS) f[k] = t[k] ? String(t[k]) : '';
     setForm(f);
@@ -64,6 +68,10 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
         stateFilingStatus: form.stateFilingStatus,
         stateAllowances: num(form.stateAllowances),
         stateExtraWithholding: num(form.stateExtraWithholding ?? ''),
+        stateSecondAllowances: num(form.stateSecondAllowances ?? ''),
+        stateDeductionOverride: (form.stateDeductionOverride ?? '').trim() === '' ? null : Number(form.stateDeductionOverride),
+        stateAnnualCredit: num(form.stateAnnualCredit ?? ''),
+        stateElectedRate: (form.stateElectedRate ?? '') === '' ? null : Number(form.stateElectedRate),
         ...flags,
       };
       for (const k of AMOUNTS) body[k] = num(form[k] ?? '');
@@ -97,6 +105,8 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
     setForm({ ...form, [k]: e.target.value });
   };
   const legacy = form.w4Version === 'LEGACY';
+  // D64: the work state's own form names for the state certificate fields.
+  const stateForm = STATE_FORM[form.workState ?? ''];
   const hourly = form.payType === 'HOURLY';
 
   if (!tax) {
@@ -207,19 +217,40 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
           Exempt from federal income tax withholding (claimed on the W-4; social security and Medicare still apply)
         </label>
 
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">State withholding certificate ({form.workState || 'work state'})</p>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+          State withholding certificate ({form.workState || 'work state'}{stateForm ? `, ${stateForm.form}` : ''})
+        </p>
         <div className="form-grid mb-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
           <label className="block">
             <span className="text-xs font-medium text-gray-500">State filing status</span>
-            <select value={form.stateFilingStatus} onChange={set('stateFilingStatus')}>
+            <select value={form.stateFilingStatus} onChange={set('stateFilingStatus')} aria-label="State filing status">
               <option value="SINGLE">Single</option>
               <option value="MARRIED">Married</option>
+              <option value="HEAD_OF_HOUSEHOLD">Head of household</option>
             </select>
           </label>
-          <label className="block">
-            <span className="text-xs font-medium text-gray-500">State allowances</span>
-            <input type="number" min="0" max="99" step="1" value={form.stateAllowances} onChange={set('stateAllowances')} />
-          </label>
+          {stateForm?.rate ? (
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500">A-4 percentage of wages</span>
+              <select value={form.stateElectedRate} onChange={set('stateElectedRate')} aria-label="A-4 percentage">
+                <option value="">No A-4 given (2.0%)</option>
+                {ARIZONA_RATES.map((r) => <option key={r} value={String(r)}>{r === 0 ? '0% (box 2: no Arizona tax expected)' : `${r}%`}</option>)}
+              </select>
+            </label>
+          ) : (
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500">{stateForm?.allowances ?? 'State allowances'}</span>
+              <input type="number" min="0" max="99" step="1" value={form.stateAllowances} onChange={set('stateAllowances')} aria-label="State allowances" />
+            </label>
+          )}
+          {stateForm?.second && (
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500">{stateForm.second}</span>
+              <input type="number" min="0" max="99" step="1" value={form.stateSecondAllowances} onChange={set('stateSecondAllowances')} aria-label="Second allowances" />
+            </label>
+          )}
+          {stateForm?.override && <Money label={stateForm.override} k="stateDeductionOverride" form={form} set={set} />}
+          {stateForm?.credit && <Money label={stateForm.credit} k="stateAnnualCredit" form={form} set={set} />}
           <Money label="Extra state withholding $ per paycheck" k="stateExtraWithholding" form={form} set={set} />
         </div>
         <label className="flex items-center gap-2 text-sm mb-4">

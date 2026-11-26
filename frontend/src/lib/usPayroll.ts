@@ -53,7 +53,12 @@ export interface UsTax {
   exemptFromWithholding: boolean;
   pretax401k: number;
   pretaxSection125: number;
-  stateFilingStatus: 'SINGLE' | 'MARRIED';
+  stateFilingStatus: 'SINGLE' | 'MARRIED' | 'HEAD_OF_HOUSEHOLD';
+  /** D64. */
+  stateSecondAllowances: number;
+  stateDeductionOverride: number | null;
+  stateAnnualCredit: number;
+  stateElectedRate: number | null;
   stateAllowances: number;
   stateExtraWithholding: number;
   stateExempt: boolean;
@@ -67,7 +72,16 @@ export interface UsTax {
 export interface StateTaxRule {
   state: string;
   builtIn: boolean;
-  method: 'NONE' | 'FLAT' | 'BRACKETS' | null;
+  method: 'NONE' | 'FLAT' | 'BRACKETS' | 'EMPLOYEE_RATE' | null;
+  /** D64: NO_TAX built in; BUILT_IN 2026 rule from the state's guide; COMPANY entered; MISSING. */
+  kind?: 'NO_TAX' | 'BUILT_IN' | 'COMPANY' | 'MISSING';
+  source?: string;
+  from?: string;
+  builtInAvailable?: boolean;
+  rounding?: 'CENT' | 'DOLLAR';
+  standardDeductionHeadOfHousehold?: number | null;
+  secondAllowanceDeduction?: number;
+  secondAllowanceCredit?: number;
   flatRate?: number;
   brackets?: [number | null, number][];
   bracketsMarried?: [number | null, number][] | null;
@@ -240,6 +254,23 @@ export const US_STATES = [
   'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR',
   'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'PR', 'VI',
 ];
+
+/**
+ * D64: what each state's own withholding form calls the fields of the state certificate, for the
+ * states whose built-in rules use them. States not listed use the plain labels.
+ */
+export const STATE_FORM: Record<string, { form: string; allowances?: string; second?: string; override?: string; credit?: string; rate?: boolean }> = {
+  AZ: { form: 'Form A-4', rate: true },
+  CO: { form: 'Form DR 0004', override: 'DR 0004 line 2: annual withholding allowance $ (blank = standard)' },
+  GA: { form: 'Form G-4', allowances: 'G-4 total allowances (lines 4 + 5)' },
+  IA: { form: 'IA W-4', allowances: 'Allowances (only on an IA W-4 from 2023 or earlier)', credit: 'IA W-4 line 7: total allowances $ (2024 or later)' },
+  IL: { form: 'IL-W-4', allowances: 'IL-W-4 line 1 allowances', second: 'IL-W-4 line 2 allowances (65+ / blind)' },
+  IN: { form: 'WH-4', allowances: 'WH-4 line 5 personal exemptions', second: 'WH-4 dependents (lines 6 + 7; an adopted child counts 2)' },
+  MI: { form: 'MI-W4', allowances: 'MI-W4 line 6 exemptions' },
+  NC: { form: 'NC-4', allowances: 'NC-4 allowances' },
+};
+
+export const ARIZONA_RATES = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5];
 
 /** Dollars with the sign, for the US screens (whatever the company's home currency). */
 export function usd(v: number | string | null | undefined): string {

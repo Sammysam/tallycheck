@@ -8,6 +8,12 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Built-in 2026 state income tax rules for Arizona, Colorado, Georgia, Idaho, Illinois, Indiana,
+  Iowa, Kentucky, Louisiana, Michigan, North Carolina and Pennsylvania, from each state's own 2026
+  withholding guide (shown on screen), including Georgia's and Idaho's mid-year changes. No setup
+  needed for employees in these states; a company can still use its own rule. The employee's
+  state form now has head of household, a second allowance type, Colorado's DR 0004 amount,
+  Iowa's dollar allowances and Arizona's elected percentage (D64).
 - US payroll in several states: register the company in each state (account numbers and the
   unemployment rate each state assigned), give employees a home state and other work states with
   their share, and list reciprocity agreements. Each state taxes its share, the home state takes

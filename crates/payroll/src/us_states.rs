@@ -201,19 +201,20 @@ impl StatePlan {
 }
 
 /// The plan for someone working in `work_state` (and `others`), living in `resident` (None =
-/// the work state), using the rules saved now.
+/// the work state), using the rules in force on pay date `date`.
 pub async fn plan(
     conn: &mut SqliteConnection,
     work_state: &str,
     others: &[(String, i64)],
     resident: Option<&str>,
+    date: &str,
 ) -> AppResult<StatePlan> {
     let allocations = allocations(work_state, others)?;
     let resident = resident.filter(|r| !r.is_empty()).unwrap_or(work_state).to_string();
     let mut rules = BTreeMap::new();
     let mut missing = Vec::new();
     for s in states_needed(&allocations, &resident) {
-        match us_state::load_rule(conn, &s).await? {
+        match us_state::load_rule(conn, &s, date).await? {
             Some(r) => {
                 rules.insert(s, r);
             }

@@ -15,6 +15,11 @@ type Draft = {
   excludes401k: boolean;
   /** D63: as the home state, take the difference from residents working in a state that taxes less. */
   residentCredit: boolean;
+  /** D64. */
+  roundToDollar: boolean;
+  standardDeductionHeadOfHousehold: string;
+  secondAllowanceDeduction: string;
+  secondAllowanceCredit: string;
   notes: string;
 };
 
@@ -35,6 +40,10 @@ function draftOf(r?: StateTaxRule): Draft {
     allowanceCredit: s(r?.allowanceCredit),
     excludes401k: r?.excludes401k ?? true,
     residentCredit: r?.residentCredit === 'DIFFERENCE',
+    roundToDollar: r?.rounding === 'DOLLAR',
+    standardDeductionHeadOfHousehold: r?.standardDeductionHeadOfHousehold == null ? '' : String(r.standardDeductionHeadOfHousehold),
+    secondAllowanceDeduction: s(r?.secondAllowanceDeduction),
+    secondAllowanceCredit: s(r?.secondAllowanceCredit),
     notes: r?.notes ?? '',
   };
 }
@@ -42,11 +51,15 @@ function draftOf(r?: StateTaxRule): Draft {
 function summary(r: StateTaxRule) {
   if (r.method === 'NONE') return 'No state income tax on wages';
   if (r.method === null) return 'Not set up — pay runs with employees here can’t be posted';
+  if (r.method === 'EMPLOYEE_RATE') return `The employee elects a percentage of wages (${r.flatRate}% when none is elected)`;
   const base = r.method === 'FLAT' ? `Flat ${r.flatRate}%` : `${r.brackets?.length ?? 0} brackets`;
   const extras = [
     r.standardDeductionSingle ? `std. deduction ${usd(r.standardDeductionSingle)}` : '',
     r.allowanceDeduction ? `${usd(r.allowanceDeduction)} per allowance` : '',
     r.allowanceCredit ? `${usd(r.allowanceCredit)} credit per allowance` : '',
+    r.standardDeductionHeadOfHousehold ? `head of household ${usd(r.standardDeductionHeadOfHousehold)}` : '',
+    r.secondAllowanceDeduction ? `${usd(r.secondAllowanceDeduction)} per second allowance` : '',
+    r.rounding === 'DOLLAR' ? 'whole dollars' : '',
     r.excludes401k ? '' : '401(k) taxed',
     r.residentCredit === 'DIFFERENCE' ? 'residents working elsewhere: takes the difference' : '',
   ].filter(Boolean);
@@ -74,7 +87,8 @@ export default function StateTaxRules() {
   const open = (state: string) => {
     setEditing(state);
     setSaveError('');
-    setDraft(draftOf(rules.find((r) => r.state === state && r.method !== null)));
+    const found = rules.find((r) => r.state === state && r.method !== null && r.method !== 'EMPLOYEE_RATE');
+    setDraft(draftOf(found));
   };
 
   const save = async (e: React.FormEvent) => {
@@ -93,6 +107,10 @@ export default function StateTaxRules() {
         allowanceCredit: num(draft.allowanceCredit),
         excludes401k: draft.excludes401k,
         residentCredit: draft.residentCredit ? 'DIFFERENCE' : 'NONE',
+        rounding: draft.roundToDollar ? 'DOLLAR' : 'CENT',
+        standardDeductionHeadOfHousehold: draft.standardDeductionHeadOfHousehold.trim() === '' ? null : Number(draft.standardDeductionHeadOfHousehold),
+        secondAllowanceDeduction: num(draft.secondAllowanceDeduction),
+        secondAllowanceCredit: num(draft.secondAllowanceCredit),
         notes: draft.notes.trim() || null,
       });
       setEditing(null);
@@ -103,7 +121,11 @@ export default function StateTaxRules() {
   };
 
   const remove = async (state: string) => {
-    if (!window.confirm(`Delete the ${state} income tax rule? Pay runs for employees in ${state} can't be posted until it is added again.`)) return;
+    const r = rules.find((x) => x.state === state);
+    const msg = r?.builtInAvailable
+      ? `Delete your own ${state} rule? The built-in ${state} rule from the state's 2026 guide is used again.`
+      : `Delete the ${state} income tax rule? Pay runs for employees in ${state} can't be posted until it is added again.`;
+    if (!window.confirm(msg)) return;
     try {
       await api.delete(`/payroll/us/state-taxes/${state}`);
       await load();
@@ -112,16 +134,17 @@ export default function StateTaxRules() {
     }
   };
 
-  const shown = rules.filter((r) => !r.builtIn);
-  const addable = US_STATES.filter((st) => !rules.some((r) => r.state === st && (r.builtIn || r.method !== null)));
+  const shown = rules.filter((r) => r.kind !== 'NO_TAX');
+  const addable = US_STATES.filter((st) => !rules.some((r) => r.state === st && r.method !== null));
   const set = (k: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setDraft({ ...draft, [k]: e.target.value });
 
   return (
     <div className="card mb-5">
       <h3 className="text-sm font-semibold text-gray-700 mb-1">State income tax</h3>
       <p className="text-xs text-gray-500 mb-3">
-        Copy each state's figures from its current employer withholding guide; update them when the state publishes new ones.
-        No state income tax on wages: {rules.filter((r) => r.builtIn).map((r) => r.state).join(', ')}.
+        Built in: the 2026 rules of the states listed as “built in”, copied from each state's own withholding guide (the source is shown).
+        For other states, copy the figures from the state's current employer withholding guide. You can replace a built-in rule with your own.
+        No state income tax on wages: {rules.filter((r) => r.kind === 'NO_TAX').map((r) => r.state).join(', ')}.
       </p>
       {error && <p className="text-sm text-red-600 mb-2">{error}</p>}
 
@@ -133,11 +156,15 @@ export default function StateTaxRules() {
               <td className="py-2 pr-3 font-medium w-12">{r.state}</td>
               <td className={`py-2 ${r.method === null ? 'text-amber-700' : 'text-gray-700'}`}>
                 {summary(r)}
+                {r.kind === 'BUILT_IN' && <div className="text-xs text-green-700">Built in{r.from && r.from > '2026-01-01' ? ` from ${r.from}` : ''} · {r.source}</div>}
+                {r.kind === 'COMPANY' && r.builtInAvailable && <div className="text-xs text-amber-700">Your own rule — replaces the built-in one</div>}
                 {r.notes && <div className="text-xs text-gray-400">{r.notes}</div>}
               </td>
               <td className="py-2 text-right whitespace-nowrap">
-                <button className="btn-link text-xs" onClick={() => open(r.state)}>{r.method === null ? 'Set up' : 'Edit'}</button>
-                {r.method !== null && <button className="btn-link text-xs ml-2" style={{ color: '#dc2626' }} onClick={() => remove(r.state)}>Delete</button>}
+                {r.kind !== 'BUILT_IN' || r.method !== 'EMPLOYEE_RATE'
+                  ? <button className="btn-link text-xs" onClick={() => open(r.state)}>{r.method === null ? 'Set up' : r.kind === 'BUILT_IN' ? 'Replace with my own' : 'Edit'}</button>
+                  : null}
+                {r.method !== null && r.kind !== 'BUILT_IN' && <button className="btn-link text-xs ml-2" style={{ color: '#dc2626' }} onClick={() => remove(r.state)}>Delete</button>}
               </td>
             </tr>
           ))}
@@ -175,6 +202,13 @@ export default function StateTaxRules() {
             <Amt label="Standard deduction, married $ (a year)" v={draft.standardDeductionMarried} on={set('standardDeductionMarried')} />
             <Amt label="Deduction per allowance $ (a year)" v={draft.allowanceDeduction} on={set('allowanceDeduction')} />
             <Amt label="Credit per allowance $ (a year)" v={draft.allowanceCredit} on={set('allowanceCredit')} />
+            <Amt label="Standard deduction, head of household $ (blank = single)" v={draft.standardDeductionHeadOfHousehold} on={set('standardDeductionHeadOfHousehold')} />
+            <Amt label="Deduction per second allowance $ (a year)" v={draft.secondAllowanceDeduction} on={set('secondAllowanceDeduction')} />
+            <Amt label="Credit per second allowance $ (a year)" v={draft.secondAllowanceCredit} on={set('secondAllowanceCredit')} />
+            <label className="flex items-center gap-2 text-sm mt-5">
+              <input type="checkbox" checked={draft.roundToDollar} onChange={(e) => setDraft({ ...draft, roundToDollar: e.target.checked })} />
+              Round to whole dollars
+            </label>
             <label className="flex items-center gap-2 text-sm mt-5" style={{ gridColumn: 'span 2' }}>
               <input type="checkbox" checked={draft.excludes401k} onChange={(e) => setDraft({ ...draft, excludes401k: e.target.checked })} />
               401(k) deferrals are not state wages

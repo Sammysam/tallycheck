@@ -9,6 +9,12 @@
 //!   annual tax   = flat rate × taxable, or the progressive brackets on taxable
 //!                  − allowances × credit (not below zero)
 //!   this period  = annual tax ÷ pay periods, half-up to the cent, + extra withholding
+//! D64 adds, from the states' own 2026 guides: whole-dollar rounding, a head-of-household
+//! standard deduction, a second allowance type with its own deduction / credit, and on the
+//! certificate a dollar amount replacing the standard deduction, an annual dollar credit and an
+//! elected percentage (method EMPLOYEE_RATE: elected % × this period's state wages, no
+//! annualizing; `flat_rate` is the default when the employee elected none). Built-in rules
+//! for each state and date are in [`crate::us_state_packs`]; a company's own rule wins.
 //! State wages are gross less section 125, and less 401(k) unless the state taxes 401(k)
 //! deferrals (`excludes_401k` false, e.g. Pennsylvania). Integer cents; rates in ppm.
 
@@ -24,7 +30,9 @@ use sqlx::{Row, SqliteConnection};
 /// States with no income tax on wages (built in; a company can't set rates for them).
 pub const NO_INCOME_TAX: &[&str] = &["AK", "FL", "NV", "NH", "SD", "TN", "TX", "WA", "WY"];
 
+/// What a company may enter (`EMPLOYEE_RATE` is built in only, for Arizona).
 pub const METHODS: &[&str] = &["NONE", "FLAT", "BRACKETS"];
+pub const ALL_METHODS: &[&str] = &["NONE", "FLAT", "BRACKETS", "EMPLOYEE_RATE"];
 
 /// `(upper bound of annual taxable income in cents, None = no limit; rate in ppm)`, ascending.
 pub type Bracket = (Option<i64>, i64);
@@ -44,6 +52,14 @@ pub struct StateRule {
     /// D63: as the home state, withhold its tax less the work state's when that is more
     /// (`residentCredit` DIFFERENCE); false = leave residents working elsewhere to that state.
     pub resident_credit: bool,
+    /// D64: round each paycheck's tax to the whole dollar (half-up) instead of the cent.
+    pub round_to_dollar: bool,
+    /// D64: standard deduction for head of household (None = the single amount).
+    pub standard_deduction_hoh: Option<i64>,
+    /// D64: a second allowance type (e.g. Illinois additional, Indiana dependent) — a yearly
+    /// deduction and credit per allowance.
+    pub second_allowance_deduction: i64,
+    pub second_allowance_credit: i64,
 }
 
 impl StateRule {
@@ -59,6 +75,10 @@ impl StateRule {
             allowance_credit: 0,
             excludes_401k: true,
             resident_credit: false,
+            round_to_dollar: false,
+            standard_deduction_hoh: None,
+            second_allowance_deduction: 0,
+            second_allowance_credit: 0,
         }
     }
 
@@ -76,11 +96,15 @@ impl StateRule {
             "allowanceCredit": self.allowance_credit,
             "excludes401k": self.excludes_401k,
             "residentCredit": self.resident_credit,
+            "roundToDollar": self.round_to_dollar,
+            "standardDeductionHeadOfHousehold": self.standard_deduction_hoh,
+            "secondAllowanceDeduction": self.second_allowance_deduction,
+            "secondAllowanceCredit": self.second_allowance_credit,
         })
     }
 
     pub fn from_snapshot(v: &Value) -> Option<StateRule> {
-        let method = v["method"].as_str().filter(|m| METHODS.contains(m))?.to_string();
+        let method = v["method"].as_str().filter(|m| ALL_METHODS.contains(m))?.to_string();
         let brackets = |x: &Value| -> Option<Vec<Bracket>> {
             x.as_array()?.iter().map(|p| Some((p.get(0)?.as_i64(), p.get(1)?.as_i64()?))).collect()
         };
@@ -95,6 +119,10 @@ impl StateRule {
             allowance_credit: v["allowanceCredit"].as_i64().unwrap_or(0),
             excludes_401k: v["excludes401k"].as_bool().unwrap_or(true),
             resident_credit: v["residentCredit"].as_bool().unwrap_or(false),
+            round_to_dollar: v["roundToDollar"].as_bool().unwrap_or(false),
+            standard_deduction_hoh: v["standardDeductionHeadOfHousehold"].as_i64(),
+            second_allowance_deduction: v["secondAllowanceDeduction"].as_i64().unwrap_or(0),
+            second_allowance_credit: v["secondAllowanceCredit"].as_i64().unwrap_or(0),
         })
     }
 }
@@ -123,6 +151,15 @@ pub struct StateEmployee {
     pub allowances: i64,
     pub extra: Money,
     pub exempt: bool,
+    /// D64.
+    pub head_of_household: bool,
+    pub second_allowances: i64,
+    /// Cents a year replacing the standard deduction (Colorado DR 0004 line 2).
+    pub deduction_override: Option<i64>,
+    /// Cents a year taken off the annual tax (Iowa IA W-4 line 7).
+    pub annual_credit: i64,
+    /// ppm, for EMPLOYEE_RATE states (Arizona A-4); None = the state's default.
+    pub elected_rate: Option<i64>,
 }
 
 fn too_large() -> AppError {
@@ -143,11 +180,26 @@ pub fn withholding(wages: Money, periods: i64, rule: &StateRule, e: &StateEmploy
     if e.exempt || rule.method == "NONE" {
         return Ok(Money::ZERO);
     }
+    if rule.method == "EMPLOYEE_RATE" {
+        // A percentage of this paycheck's state wages, as the employee elected.
+        let rate = i128::from(e.elected_rate.unwrap_or(rule.flat_rate).clamp(0, PPM));
+        let n = i128::from(wages.cents().max(0)) * rate;
+        let d = i128::from(PPM);
+        let tax = i64::try_from((2 * n + d) / (2 * d)).map_err(|_| too_large())?;
+        return Money::from_cents(tax).checked_add(e.extra).ok_or_else(too_large);
+    }
     let allowances = i128::from(e.allowances.max(0));
-    let std = if e.married { rule.standard_deduction_married } else { rule.standard_deduction_single };
+    let second = i128::from(e.second_allowances.max(0));
+    let std = match e.deduction_override {
+        Some(own) => own,
+        None if e.married => rule.standard_deduction_married,
+        None if e.head_of_household => rule.standard_deduction_hoh.unwrap_or(rule.standard_deduction_single),
+        None => rule.standard_deduction_single,
+    };
     let taxable = (i128::from(wages.cents().max(0)) * i128::from(periods)
         - i128::from(std.max(0))
-        - allowances * i128::from(rule.allowance_deduction.max(0)))
+        - allowances * i128::from(rule.allowance_deduction.max(0))
+        - second * i128::from(rule.second_allowance_deduction.max(0)))
     .max(0);
     // Annual tax in cents × ppm.
     let mut tax: i128 = match rule.method.as_str() {
@@ -173,9 +225,14 @@ pub fn withholding(wages: Money, periods: i64, rule: &StateRule, e: &StateEmploy
             t
         }
     };
-    tax = (tax - allowances * i128::from(rule.allowance_credit.max(0)) * i128::from(PPM)).max(0);
-    let d = i128::from(PPM) * i128::from(periods);
-    let per_period = i64::try_from((2 * tax + d) / (2 * d)).map_err(|_| too_large())?;
+    let credits = allowances * i128::from(rule.allowance_credit.max(0))
+        + second * i128::from(rule.second_allowance_credit.max(0))
+        + i128::from(e.annual_credit.max(0));
+    tax = (tax - credits * i128::from(PPM)).max(0);
+    // Half-up to the cent, or to the whole dollar (100 cents) when the state rounds so.
+    let unit: i128 = if rule.round_to_dollar { 100 } else { 1 };
+    let d = i128::from(PPM) * i128::from(periods) * unit;
+    let per_period = i64::try_from((2 * tax + d) / (2 * d) * unit).map_err(|_| too_large())?;
     Money::from_cents(per_period).checked_add(e.extra).ok_or_else(too_large)
 }
 
@@ -200,12 +257,17 @@ fn rule_from_row(r: &SqliteRow) -> AppResult<StateRule> {
         allowance_credit: r.try_get("allowanceCredit")?,
         excludes_401k: r.try_get("excludes401k")?,
         resident_credit: r.try_get::<String, _>("residentCredit")? == "DIFFERENCE",
+        round_to_dollar: r.try_get::<String, _>("rounding")? == "DOLLAR",
+        standard_deduction_hoh: r.try_get("standardDeductionHeadOfHousehold")?,
+        second_allowance_deduction: r.try_get("secondAllowanceDeduction")?,
+        second_allowance_credit: r.try_get("secondAllowanceCredit")?,
     })
 }
 
-/// The rule for a state: NONE for a state without an income tax on wages, the company's rule,
-/// or None when the company hasn't entered one yet.
-pub async fn load_rule(conn: &mut SqliteConnection, state: &str) -> AppResult<Option<StateRule>> {
+/// The rule for a state on `date` (the pay date): NONE for a state without an income tax on
+/// wages; the company's own rule when it entered one; else the built-in rule in force that day
+/// (D64); else None (the company has to enter one).
+pub async fn load_rule(conn: &mut SqliteConnection, state: &str, date: &str) -> AppResult<Option<StateRule>> {
     if NO_INCOME_TAX.contains(&state) {
         return Ok(Some(StateRule::none()));
     }
@@ -213,7 +275,10 @@ pub async fn load_rule(conn: &mut SqliteConnection, state: &str) -> AppResult<Op
         .bind(state)
         .fetch_optional(&mut *conn)
         .await?;
-    row.as_ref().map(rule_from_row).transpose()
+    if let Some(r) = row {
+        return Ok(Some(rule_from_row(&r)?));
+    }
+    Ok(crate::us_state_packs::built_in(state, date).map(|p| p.rule))
 }
 
 fn pct(ppm: i64) -> Value {
@@ -239,14 +304,21 @@ fn rule_json(state: &str, r: &StateRule, built_in: bool, notes: Option<String>, 
         "allowanceCredit": Money::from_cents(r.allowance_credit).to_json_number(),
         "excludes401k": r.excludes_401k,
         "residentCredit": if r.resident_credit { "DIFFERENCE" } else { "NONE" },
+        "rounding": if r.round_to_dollar { "DOLLAR" } else { "CENT" },
+        "standardDeductionHeadOfHousehold": r.standard_deduction_hoh.map(|c| Money::from_cents(c).to_json_number()),
+        "secondAllowanceDeduction": Money::from_cents(r.second_allowance_deduction).to_json_number(),
+        "secondAllowanceCredit": Money::from_cents(r.second_allowance_credit).to_json_number(),
         "notes": notes,
         "updatedAt": updated_at,
     })
 }
 
-/// `GET /payroll/us/state-taxes`: every state with a rule (built in or entered), and the states
-/// employees work in that still need one (`method` null).
+/// `GET /payroll/us/state-taxes`: every state with a rule — no income tax (`kind` NO_TAX), the
+/// company's own (COMPANY, with `builtInAvailable` when a built-in one exists), built in today
+/// (BUILT_IN, with its `source` and `from`) — and the states employees work in that still need
+/// one (MISSING, `method` null).
 pub async fn list_rules(db: &Db) -> AppResult<Value> {
+    let today = app_core::time::today_local().to_string();
     let mut c = db.read().acquire().await?;
     let rows = sqlx::query(r#"SELECT * FROM "us_state_tax_rules" ORDER BY "state""#).fetch_all(&mut *c).await?;
     let used: Vec<String> = sqlx::query_scalar(r#"SELECT DISTINCT "workState" FROM "employee_us_tax" ORDER BY 1"#)
@@ -256,18 +328,39 @@ pub async fn list_rules(db: &Db) -> AppResult<Value> {
     for st in STATES {
         let entered = rows.iter().find(|r| r.try_get::<String, _>("state").ok().as_deref() == Some(*st));
         let employees = used.iter().any(|u| u == st);
+        let pack = crate::us_state_packs::built_in(st, &today);
+        let with = |mut v: Value, kind: &str| {
+            if let Some(o) = v.as_object_mut() {
+                o.insert("kind".into(), json!(kind));
+            }
+            v
+        };
         if NO_INCOME_TAX.contains(st) {
-            out.push(rule_json(st, &StateRule::none(), true, None, None));
+            out.push(with(rule_json(st, &StateRule::none(), true, None, None), "NO_TAX"));
         } else if let Some(r) = entered {
-            out.push(rule_json(
-                st,
-                &rule_from_row(r)?,
-                false,
-                r.try_get("notes")?,
-                Some(r.try_get::<String, _>("updatedAt")?),
-            ));
+            let mut v = with(
+                rule_json(
+                    st,
+                    &rule_from_row(r)?,
+                    false,
+                    r.try_get("notes")?,
+                    Some(r.try_get::<String, _>("updatedAt")?),
+                ),
+                "COMPANY",
+            );
+            if let Some(o) = v.as_object_mut() {
+                o.insert("builtInAvailable".into(), json!(pack.is_some()));
+            }
+            out.push(v);
+        } else if let Some(p) = pack {
+            let mut v = with(rule_json(st, &p.rule, true, None, None), "BUILT_IN");
+            if let Some(o) = v.as_object_mut() {
+                o.insert("source".into(), json!(p.source));
+                o.insert("from".into(), json!(p.from));
+            }
+            out.push(v);
         } else if employees {
-            out.push(json!({ "state": st, "builtIn": false, "method": null }));
+            out.push(json!({ "state": st, "builtIn": false, "kind": "MISSING", "method": null }));
         }
     }
     Ok(Value::Array(out))
@@ -277,6 +370,9 @@ pub async fn list_rules(db: &Db) -> AppResult<Value> {
 pub async fn put_rule(db: &Db, state: &str, r: StateRule, notes: Option<String>) -> AppResult<Value> {
     if NO_INCOME_TAX.contains(&state) {
         return Err(AppError::bad_request(format!("{state} has no state income tax on wages")));
+    }
+    if !METHODS.contains(&r.method.as_str()) {
+        return Err(AppError::bad_request(format!("method must be one of {}", METHODS.join(", "))));
     }
     if r.method == "BRACKETS" && !brackets_valid(&r.brackets) {
         return Err(AppError::bad_request(BRACKETS_MESSAGE));
@@ -288,15 +384,19 @@ pub async fn put_rule(db: &Db, state: &str, r: StateRule, notes: Option<String>)
     let mut tx = db.begin().await?;
     sqlx::query(
         r#"INSERT INTO "us_state_tax_rules" ("state","method","flatRate","brackets","bracketsMarried","standardDeductionSingle",
-             "standardDeductionMarried","allowanceDeduction","allowanceCredit","excludes401k","notes","residentCredit","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             "standardDeductionMarried","allowanceDeduction","allowanceCredit","excludes401k","notes","residentCredit","rounding","standardDeductionHeadOfHousehold",
+             "secondAllowanceDeduction","secondAllowanceCredit","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
            ON CONFLICT ("state") DO UPDATE SET "method" = excluded."method", "flatRate" = excluded."flatRate",
              "brackets" = excluded."brackets", "bracketsMarried" = excluded."bracketsMarried",
              "standardDeductionSingle" = excluded."standardDeductionSingle",
              "standardDeductionMarried" = excluded."standardDeductionMarried",
              "allowanceDeduction" = excluded."allowanceDeduction", "allowanceCredit" = excluded."allowanceCredit",
              "excludes401k" = excluded."excludes401k", "notes" = excluded."notes",
-             "residentCredit" = excluded."residentCredit", "updatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ','now')"#,
+             "residentCredit" = excluded."residentCredit", "rounding" = excluded."rounding",
+             "standardDeductionHeadOfHousehold" = excluded."standardDeductionHeadOfHousehold",
+             "secondAllowanceDeduction" = excluded."secondAllowanceDeduction",
+             "secondAllowanceCredit" = excluded."secondAllowanceCredit", "updatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ','now')"#,
     )
     .bind(state)
     .bind(&r.method)
@@ -310,6 +410,10 @@ pub async fn put_rule(db: &Db, state: &str, r: StateRule, notes: Option<String>)
     .bind(r.excludes_401k)
     .bind(&notes)
     .bind(if r.resident_credit { "DIFFERENCE" } else { "NONE" })
+    .bind(if r.round_to_dollar { "DOLLAR" } else { "CENT" })
+    .bind(r.standard_deduction_hoh)
+    .bind(r.second_allowance_deduction)
+    .bind(r.second_allowance_credit)
     .execute(&mut *tx)
     .await?;
     let row =

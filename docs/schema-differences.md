@@ -120,6 +120,11 @@ and wage base, optional payable accounts) and `us_state_reciprocity` (work state
 pairs), and columns for an employee's home state and other work states, each pay line's state
 split and unemployment state, the home-state rule option and the state of a tax payment.
 
+D64 adds to `us_state_tax_rules` the rounding, a head-of-household standard deduction and a second
+allowance type, and to `employee_us_tax` head of household, second allowances, a deduction
+override, an annual credit and an elected rate for the state certificate. The built-in 2026 state
+rules live in code (`payroll::us_state_packs`), not in the database.
+
 ## Seeds
 
 Same as the reference migrations: roles Admin / Accountant / Viewer (Admin holds all 17 keys,

@@ -217,6 +217,20 @@ try {
     if (!run.remittances.some((x) => x.state === 'PA')) throw new Error('remittance without state');
     await shot('03-run');
   });
+  await check('built-in 2026 rules show their source; a company rule replaces one', async () => {
+    await go('/payroll/us');
+    if (await evaluate(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Payroll settings')`)) await clickText('Payroll settings');
+    await waitFor(`document.body.innerText.includes('Kentucky 2026 Withholding Tax Formula')`, 'KY built in with its source');
+    const t = await pageText();
+    if (!t.includes('NC-30')) throw new Error('NC source missing');
+    if (!t.includes('Your own rule — replaces the built-in one')) throw new Error('PA override not marked');
+    await go(`/employees/${employeeId}`);
+    await waitFor(`!!document.querySelector('select[aria-label="Lives in state"]')`, 'US tax section');
+    await evaluate(`(() => { const s = [...document.querySelectorAll('select')].find((x) => x.required && [...x.options].some((o) => o.value === 'IL'));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'IL'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(`document.body.innerText.includes('IL-W-4 line 2 allowances')`, 'Illinois form labels');
+    await shot('04-built-in');
+  });
 } catch (e) {
   failures.push('harness');
   results.push(`FAIL  harness: ${e.message}`);

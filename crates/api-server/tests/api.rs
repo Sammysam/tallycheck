@@ -4289,9 +4289,9 @@ async fn us_payroll_state_income_tax_rules() -> TestResult {
     let ga = us_employee(
         &app,
         &admin,
-        "US-GA",
+        "US-OR",
         json!({}),
-        json!({"workState": "GA", "payType": "HOURLY", "hourlyRate": 25.5}),
+        json!({"workState": "OR", "payType": "HOURLY", "hourlyRate": 25.5}),
     )
     .await?;
     us_employee(
@@ -4311,9 +4311,12 @@ async fn us_payroll_state_income_tax_rules() -> TestResult {
     let list = r.body.as_array().ok_or("list")?;
     let tx = list.iter().find(|s| s["state"] == "TX").ok_or("TX")?;
     assert_eq!((&tx["builtIn"], &tx["method"]), (&json!(true), &json!("NONE")));
-    assert_eq!(list.iter().filter(|s| s["builtIn"] == true).count(), 9);
+    assert_eq!(list.iter().filter(|s| s["kind"] == "NO_TAX").count(), 9);
+    // D64: Colorado has a built-in 2026 rule; Oregon (no built-in rule yet) still needs one.
+    let co_built_in = list.iter().find(|s| s["state"] == "CO").ok_or("CO")?;
+    assert_eq!((&co_built_in["kind"], &co_built_in["flatRate"]), (&json!("BUILT_IN"), &json!(4.4)));
     let open: Vec<Value> = list.iter().filter(|s| s["method"].is_null()).map(|s| s["state"].clone()).collect();
-    assert_eq!(open, vec![json!("CO"), json!("GA")]);
+    assert_eq!(open, vec![json!("OR")]);
 
     let put = |state: &str, body: Value| us_send(&app, Method::PUT, format!("{rules}/{state}"), &admin, Some(body));
     assert_eq!(put("TX", co_rule.clone()).await?.body["message"], json!("TX has no state income tax on wages"));
@@ -4357,27 +4360,27 @@ async fn us_payroll_state_income_tax_rules() -> TestResult {
     assert_eq!(p["stateTax"]["configured"], json!(false));
     assert!(p["notes"].as_array().is_some_and(|n| n
         .iter()
-        .any(|n| n.as_str().is_some_and(|n| n.starts_with("No state income tax rules for GA yet")))));
+        .any(|n| n.as_str().is_some_and(|n| n.starts_with("No state income tax rules for OR yet")))));
 
     // A state without rules stops posting; once entered, posting picks it up.
     let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
     let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
     let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
-    assert_eq!(us_line(&r.body, "US-GA")["stateTaxConfigured"], json!(false));
-    assert_eq!(us_line(&r.body, "US-GA")["stateIncomeTax"], json!(0));
+    assert_eq!(us_line(&r.body, "US-OR")["stateTaxConfigured"], json!(false));
+    assert_eq!(us_line(&r.body, "US-OR")["stateIncomeTax"], json!(0));
     let p = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
     assert_eq!(p.status, StatusCode::BAD_REQUEST);
     assert_eq!(
         p.body["message"],
-        json!("Add the state income tax rules for GA under US payroll settings before posting")
+        json!("Add the state income tax rules for OR under US payroll settings before posting")
     );
-    put("GA", ga_rule).await?;
+    put("OR", ga_rule).await?;
     let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
     assert_eq!(us_line(&r.body, "US-CO")["stateIncomeTax"], json!(69.23));
-    assert_eq!(us_line(&r.body, "US-GA")["stateIncomeTax"], json!(57.02));
-    assert_eq!(us_line(&r.body, "US-GA")["stateTaxConfigured"], json!(true));
+    assert_eq!(us_line(&r.body, "US-OR")["stateIncomeTax"], json!(57.02));
+    assert_eq!(us_line(&r.body, "US-OR")["stateTaxConfigured"], json!(true));
     assert_eq!(us_line(&r.body, "US-TX")["stateIncomeTax"], json!(0));
     assert_eq!(r.body["stateIncomeTaxTotal"], json!(126.25));
     assert_eq!(us_line(&r.body, "US-CO")["netPay"], json!(1621.62));
@@ -6125,5 +6128,71 @@ async fn us_payroll_in_several_states() -> TestResult {
     assert_eq!((&row("US-DIFF")["box15"], &row("US-DIFF")["box17"]), (&json!("CO"), &json!(80)));
     assert_eq!(row("US-NJ")["states"], json!([{"box15": "PA", "box16": 2000, "box17": 61.4}]));
     assert_eq!(w2.body["totals"]["box17"], json!(266.4));
+    Ok(())
+}
+
+/// D64: built-in 2026 rules need no company rule; the new certificate fields; a company rule
+/// still overrides a built-in one. Biweekly $52,000 salaries (gross 2,000.00), pay date 2026-11-06.
+///   NC head of household, 0 allowances: (52,000 − 19,125) × 4.09% ÷ 26 = 51.71 → $52 (whole dollars)
+///   IA IA W-4 line 7 $120: (52,000 − 13,000) × 3.8% − 120 = 1,362 ÷ 26 = 52.38
+///   AZ elected 3.5%: 70.00
+///   GA with the company's own 6% flat rule: 120.00 (instead of the built-in 4.99%)
+#[tokio::test]
+async fn us_payroll_built_in_state_rules() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    us_company(&app, &admin, json!({})).await?;
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    let tax = |extra: Value| merged(&salary, extra);
+    let nc = us_employee(
+        &app,
+        &admin,
+        "US-NC",
+        json!({}),
+        tax(json!({"workState": "NC", "stateFilingStatus": "HEAD_OF_HOUSEHOLD"})),
+    )
+    .await?;
+    us_employee(&app, &admin, "US-IA", json!({}), tax(json!({"workState": "IA", "stateAnnualCredit": 120}))).await?;
+    us_employee(&app, &admin, "US-AZ", json!({}), tax(json!({"workState": "AZ", "stateElectedRate": 3.5}))).await?;
+    us_employee(&app, &admin, "US-GA", json!({}), tax(json!({"workState": "GA"}))).await?;
+    let saved = app.call(Method::GET, &format!("/api/payroll/employees/{nc}/us-tax"), Some(&admin), None).await?;
+    assert_eq!(saved.body["stateFilingStatus"], "HEAD_OF_HOUSEHOLD");
+
+    let list = app.call(Method::GET, "/api/payroll/us/state-taxes", Some(&admin), None).await?;
+    let nc_rule = list.body.as_array().and_then(|l| l.iter().find(|s| s["state"] == "NC")).ok_or("NC")?;
+    assert_eq!((&nc_rule["kind"], &nc_rule["rounding"]), (&json!("BUILT_IN"), &json!("DOLLAR")));
+    assert!(nc_rule["source"].as_str().is_some_and(|s| s.contains("NC-30")), "{nc_rule}");
+
+    let r = us_send(
+        &app,
+        Method::PUT,
+        "/api/payroll/us/state-taxes/GA".into(),
+        &admin,
+        Some(json!({"method": "FLAT", "flatRate": 6, "notes": "Example rule for tests"})),
+    )
+    .await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let r = us_send(
+        &app,
+        Method::PUT,
+        "/api/payroll/us/state-taxes/AZ".into(),
+        &admin,
+        Some(json!({"method": "EMPLOYEE_RATE"})),
+    )
+    .await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "EMPLOYEE_RATE is built in only");
+
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "posting needs no company rule for built-in states: {}", r.body);
+    for (code, want) in [("US-NC", json!(52)), ("US-IA", json!(52.38)), ("US-AZ", json!(70)), ("US-GA", json!(120))] {
+        assert_eq!(us_line(&r.body, code)["stateIncomeTax"], want, "{code}");
+    }
+    let list = app.call(Method::GET, "/api/payroll/us/state-taxes", Some(&admin), None).await?;
+    let ga = list.body.as_array().and_then(|l| l.iter().find(|s| s["state"] == "GA")).ok_or("GA")?;
+    assert_eq!((&ga["kind"], &ga["builtInAvailable"]), (&json!("COMPANY"), &json!(true)));
     Ok(())
 }

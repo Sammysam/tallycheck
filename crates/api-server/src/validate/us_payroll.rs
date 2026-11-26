@@ -94,7 +94,7 @@ pub fn settings(body: Map<String, Value>) -> Result<UsSettingsPatch, AppError> {
     })
 }
 
-const STATE_FILING: &[&str] = &["SINGLE", "MARRIED"];
+const STATE_FILING: &[&str] = &["SINGLE", "MARRIED", "HEAD_OF_HOUSEHOLD"];
 
 const TAX_AMOUNTS: &[&str] = &[
     "annualSalary",
@@ -111,7 +111,18 @@ const TAX_AMOUNTS: &[&str] = &[
 pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
     let mut v = Validator::new(body);
     to_number(&mut v, TAX_AMOUNTS);
-    to_number(&mut v, &["allowances", "stateAllowances", "stateExtraWithholding"]);
+    to_number(
+        &mut v,
+        &[
+            "allowances",
+            "stateAllowances",
+            "stateExtraWithholding",
+            "stateSecondAllowances",
+            "stateDeductionOverride",
+            "stateAnnualCredit",
+            "stateElectedRate",
+        ],
+    );
     for k in ["workState", "residentState"] {
         if let Some(Value::String(s)) = v.input.get_mut(k) {
             *s = s.trim().to_ascii_uppercase();
@@ -136,7 +147,11 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         .field("stateFilingStatus", true, &[Rule::IsEnum(STATE_FILING)])
         .field("stateAllowances", true, &[Rule::IsInt, Rule::MinZero, Rule::MaxNum(99.0, "99")])
         .field("stateExtraWithholding", true, AMOUNT)
-        .field("stateExempt", true, &[Rule::IsBoolean]);
+        .field("stateExempt", true, &[Rule::IsBoolean])
+        .field("stateSecondAllowances", true, &[Rule::IsInt, Rule::MinZero, Rule::MaxNum(99.0, "99")])
+        .field("stateDeductionOverride", true, AMOUNT)
+        .field("stateAnnualCredit", true, AMOUNT)
+        .field("stateElectedRate", true, &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(100.0, "100")]);
     for k in TAX_AMOUNTS {
         v.field(k, true, AMOUNT);
     }
@@ -159,7 +174,16 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         exempt_from_withholding: flag("exemptFromWithholding"),
         pretax_401k: amount("pretax401k")?,
         pretax_section125: amount("pretaxSection125")?,
-        state_filing_status: opt_string(&m, "stateFilingStatus").unwrap_or_else(|| "SINGLE".into()),
+        // Head of household is kept as SINGLE plus a flag (the stored status is SINGLE / MARRIED).
+        state_filing_status: match opt_string(&m, "stateFilingStatus").as_deref() {
+            Some("MARRIED") => "MARRIED".into(),
+            _ => "SINGLE".into(),
+        },
+        state_head_of_household: opt_string(&m, "stateFilingStatus").as_deref() == Some("HEAD_OF_HOUSEHOLD"),
+        state_second_allowances: m.get("stateSecondAllowances").and_then(Value::as_i64).unwrap_or(0),
+        state_deduction_override: money(&m, "stateDeductionOverride")?,
+        state_annual_credit: amount("stateAnnualCredit")?,
+        state_elected_rate: percent(&m, "stateElectedRate")?,
         state_allowances: m.get("stateAllowances").and_then(Value::as_i64).unwrap_or(0),
         state_extra_withholding: amount("stateExtraWithholding")?,
         state_exempt: flag("stateExempt"),
@@ -408,14 +432,21 @@ fn brackets(v: &Value) -> Result<Vec<Bracket>, AppError> {
     Ok(out)
 }
 
-const RULE_AMOUNTS: &[&str] =
-    &["standardDeductionSingle", "standardDeductionMarried", "allowanceDeduction", "allowanceCredit"];
+const RULE_AMOUNTS: &[&str] = &[
+    "standardDeductionSingle",
+    "standardDeductionMarried",
+    "allowanceDeduction",
+    "allowanceCredit",
+    "secondAllowanceDeduction",
+    "secondAllowanceCredit",
+];
 
 /// The whole rule for one state; anything not sent takes its default.
 pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>), AppError> {
     let mut v = Validator::new(body);
     to_number(&mut v, &["flatRate"]);
     to_number(&mut v, RULE_AMOUNTS);
+    to_number(&mut v, &["standardDeductionHeadOfHousehold"]);
     trim_or_null(&mut v, &["notes"]);
     v.field("method", false, &[Rule::IsEnum(METHODS)])
         .field("flatRate", true, &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(100.0, "100")])
@@ -423,6 +454,8 @@ pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>
         .field("bracketsMarried", true, &[Rule::IsArray])
         .field("excludes401k", true, &[Rule::IsBoolean])
         .field("residentCredit", true, &[Rule::IsEnum(&["NONE", "DIFFERENCE"])])
+        .field("rounding", true, &[Rule::IsEnum(&["CENT", "DOLLAR"])])
+        .field("standardDeductionHeadOfHousehold", true, AMOUNT)
         .field("notes", true, &[Rule::IsString, Rule::MaxLength(500)]);
     for k in RULE_AMOUNTS {
         v.field(k, true, AMOUNT);
@@ -446,6 +479,10 @@ pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>
         allowance_credit: amount("allowanceCredit")?,
         excludes_401k: m.get("excludes401k").and_then(Value::as_bool).unwrap_or(true),
         resident_credit: opt_string(&m, "residentCredit").as_deref() == Some("DIFFERENCE"),
+        round_to_dollar: opt_string(&m, "rounding").as_deref() == Some("DOLLAR"),
+        standard_deduction_hoh: money(&m, "standardDeductionHeadOfHousehold")?.map(Money::cents),
+        second_allowance_deduction: amount("secondAllowanceDeduction")?,
+        second_allowance_credit: amount("secondAllowanceCredit")?,
         method,
     };
     if rule.method == "FLAT" && m.get("flatRate").is_none_or(Value::is_null) {
