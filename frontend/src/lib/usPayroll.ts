@@ -7,7 +7,7 @@ export type PayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
 export type UsRunStatus = 'DRAFT' | 'POSTED' | 'PAID' | 'VOID';
 export type UsRemitType =
   | 'FORM_941' | 'FEDERAL_INCOME_TAX' | 'SOCIAL_SECURITY' | 'MEDICARE' | 'FUTA' | 'SUTA' | 'RETIREMENT_401K' | 'SECTION_125'
-  | 'STATE_INCOME_TAX' | 'STATE_LEAVE';
+  | 'STATE_INCOME_TAX' | 'STATE_LEAVE' | 'LOCAL_TAX';
 
 export interface UsSettings {
   country: 'LK' | 'US';
@@ -65,6 +65,8 @@ export interface UsTax {
   stateCode: string | null;
   /** D67: leave programs the employee is exempt from (e.g. WA_CARES). */
   leaveExempt: string[];
+  /** D69: localities withheld for. */
+  localTaxes?: LocalAssignment[];
   stateAllowances: number;
   stateExtraWithholding: number;
   stateExempt: boolean;
@@ -132,6 +134,9 @@ export interface UsPreview {
   stateTax: { state: string; configured: boolean; wages: number; tax: number };
   stateTaxes?: UsStateTax[];
   unemploymentState?: string;
+  /** D67 / D69: disability and paid leave, local taxes. */
+  leave?: LeaveContribution[];
+  local?: LeaveContribution[];
   notes: string[];
 }
 
@@ -159,6 +164,8 @@ export interface UsRun {
   netPayTotal: number;
   employerTaxesTotal: number;
   leaveEmployeeTotal?: number;
+  localEmployeeTotal?: number;
+  localEmployerTotal?: number;
   leaveEmployerTotal?: number;
   stateIncomeTaxTotal: number;
   journalEntryId: string | null;
@@ -174,6 +181,9 @@ export interface UsLine extends UsTaxFigures {
   /** D67: disability / paid leave contributions. */
   leave?: LeaveContribution[];
   leaveEmployee?: number;
+  /** D69: local taxes. */
+  local?: LeaveContribution[];
+  localEmployee?: number;
   employeeId: string | null;
   employeeCode: string;
   employeeName: string;
@@ -226,6 +236,17 @@ export interface UnemploymentDefault {
   state: string; wageBase: number; newEmployerRate: number | null; verified: boolean;
   surcharges: { name: string; rate: number; note: string }[]; note: string; source: string;
 }
+
+/** D69: a local tax as the company keeps it (rates in ppm, amounts in cents). */
+export interface Locality {
+  code: string; name: string; state: string; method: string; formula: string | null;
+  residentRate: number; nonresidentRate: number; employerRate: number; exemption: number; secondExemption: number;
+  flatEmployee: number; flatEmployer: number; monthlyThreshold: number; employeeYearCap: number | null;
+  includes401k: boolean; includes125: boolean; group: string | null; accountId: string | null; source: string; verified: boolean;
+}
+
+/** D69: a locality an employee is withheld for (extra in dollars). */
+export interface LocalAssignment { code: string; resident: boolean; allowances: number; secondAllowances: number; extra: number; exempt: boolean }
 
 /** D67: a company's choice for one disability / paid leave program (rates in percent). */
 export interface LeaveOption { off?: boolean; employerRate?: number; small?: boolean }
@@ -291,6 +312,7 @@ export const US_REMIT_LABEL: Record<UsRemitType, string> = {
   SECTION_125: 'Section 125',
   STATE_INCOME_TAX: 'State income tax',
   STATE_LEAVE: 'State disability / paid leave',
+  LOCAL_TAX: 'Local tax',
 };
 
 export const US_RUN_STATUS_HELP: Record<UsRunStatus, string> = {

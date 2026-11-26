@@ -10,6 +10,7 @@ pub mod rates;
 pub mod runs;
 pub mod us;
 pub mod us_leave;
+pub mod us_local;
 pub mod us_reports;
 pub mod us_runs;
 pub mod us_setup;

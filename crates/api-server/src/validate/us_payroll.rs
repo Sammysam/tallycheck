@@ -36,6 +36,57 @@ fn leave_exempt(v: Option<&Value>) -> Result<Vec<String>, AppError> {
     Ok(out)
 }
 
+/// D69: `[{code, resident, allowances, secondAllowances, extra, exempt}]`, at most 6.
+fn local_taxes(v: Option<&Value>) -> Result<Vec<payroll::us_local::Assignment>, AppError> {
+    let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
+    let bad = |m: &str| AppError::bad_request(m.to_string());
+    let items = v.as_array().ok_or_else(|| bad("localTaxes must be a list"))?;
+    if items.len() > 6 {
+        return Err(bad("localTaxes can have at most 6 localities"));
+    }
+    let mut out: Vec<payroll::us_local::Assignment> = Vec::new();
+    for x in items {
+        let code = x["code"]
+            .as_str()
+            .map(|s| s.trim().to_ascii_uppercase())
+            .filter(|c| is_locality_code(c))
+            .ok_or_else(|| bad("Each local tax needs a locality code (letters, digits and dashes)"))?;
+        if out.iter().any(|a| a.code == code) {
+            return Err(bad(&format!("{code} is listed twice")));
+        }
+        let count = |k: &str| -> Result<i64, AppError> {
+            match &x[k] {
+                Value::Null => Ok(0),
+                v => v
+                    .as_i64()
+                    .filter(|n| (0..=99).contains(n))
+                    .ok_or_else(|| bad(&format!("{k} must be a whole number from 0 to 99"))),
+            }
+        };
+        let extra = match &x["extra"] {
+            Value::Null => 0,
+            e => Money::parse_decimal(&js_string(
+                e.as_f64().filter(|f| *f >= 0.0).ok_or_else(|| bad("extra must be an amount"))?,
+            ))
+            .ok_or_else(|| bad("extra must have at most 2 decimals"))?
+            .cents(),
+        };
+        out.push(payroll::us_local::Assignment {
+            code,
+            resident: x["resident"].as_bool().unwrap_or(false),
+            allowances: count("allowances")?,
+            second_allowances: count("secondAllowances")?,
+            extra,
+            exempt: x["exempt"].as_bool().unwrap_or(false),
+        });
+    }
+    Ok(out)
+}
+
+fn is_locality_code(s: &str) -> bool {
+    (1..=20).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-')
+}
+
 /// A state form's status code or table letter (D66).
 fn is_state_code(s: &str) -> bool {
     (1..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
@@ -158,6 +209,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
     }
     let others = other_work_states(v.input.get("otherWorkStates"))?;
     let leave_exempt = leave_exempt(v.input.get("leaveExempt"))?;
+    let local_taxes = local_taxes(v.input.get("localTaxes"))?;
     v.field("workState", false, &[Rule::IsString, WORK_STATE])
         .field(
             "residentState",
@@ -222,6 +274,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         state_annual_deduction: amount("stateAnnualDeduction")?,
         state_code: opt_string(&m, "stateCode"),
         leave_exempt,
+        local_taxes,
         state_allowances: m.get("stateAllowances").and_then(Value::as_i64).unwrap_or(0),
         state_extra_withholding: amount("stateExtraWithholding")?,
         state_exempt: flag("stateExempt"),
@@ -371,16 +424,29 @@ pub fn remit(body: Map<String, Value>) -> Result<Remit, AppError> {
                     "program must be a leave program, like CA_SDI",
                 ),
             ],
-        );
+        )
+        .field("locality", true, &[Rule::IsString, Rule::MaxLength(20)]);
     let m = v.finish()?;
     let kind = opt_string(&m, "type").unwrap_or_default();
-    // D67: a leave payment names its program (kept where per-state payments keep the state).
+    // D67: a leave payment names its program, D69 a local tax payment its locality (kept where
+    // per-state payments keep the state).
     let program = opt_string(&m, "program").map(|s| s.to_ascii_uppercase());
     if program.is_some() && kind != "STATE_LEAVE" {
         return Err(AppError::bad_request("program only applies to a STATE_LEAVE payment"));
     }
+    let locality = opt_string(&m, "locality").map(|s| s.trim().to_ascii_uppercase());
+    if locality.is_some() && kind != "LOCAL_TAX" {
+        return Err(AppError::bad_request("locality only applies to a LOCAL_TAX payment"));
+    }
+    if locality.as_deref().is_some_and(|c| !is_locality_code(c)) {
+        return Err(AppError::bad_request("locality must be a locality code, like NYC"));
+    }
     Ok(Remit {
-        state: if kind == "STATE_LEAVE" { program } else { opt_string(&m, "state").map(|s| s.to_ascii_uppercase()) },
+        state: match kind.as_str() {
+            "STATE_LEAVE" => program,
+            "LOCAL_TAX" => locality,
+            _ => opt_string(&m, "state").map(|s| s.to_ascii_uppercase()),
+        },
         kind,
         payment_account_id: opt_string(&m, "paymentAccountId").unwrap_or_default(),
         date: opt_string(&m, "date").unwrap_or_default(),
@@ -468,6 +534,82 @@ fn suta_surcharges(v: Option<&Value>) -> Result<Vec<(String, i64)>, AppError> {
         out.push((name.to_string(), ppm));
     }
     Ok(out)
+}
+
+/// D69: `PUT /payroll/us/localities/{code}`: a locality (rates in percent, amounts in dollars).
+pub fn locality(code: String, body: Map<String, Value>) -> Result<payroll::us_local::Locality, AppError> {
+    let bad = |m: &str| AppError::bad_request(m.to_string());
+    let code = code.trim().to_ascii_uppercase();
+    if !is_locality_code(&code) {
+        return Err(bad("The locality code must be 1 to 20 letters, digits or dashes, like OH-COLUMBUS"));
+    }
+    let mut v = Validator::new(body);
+    to_number(
+        &mut v,
+        &[
+            "residentRate",
+            "nonresidentRate",
+            "employerRate",
+            "exemption",
+            "secondExemption",
+            "flatEmployee",
+            "flatEmployer",
+            "monthlyThreshold",
+            "employeeYearCap",
+        ],
+    );
+    if let Some(Value::String(s)) = v.input.get_mut("state") {
+        *s = s.trim().to_ascii_uppercase();
+    }
+    const RATE: &[Rule] = &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(20.0, "20")];
+    v.field("name", false, &[Rule::IsString, Rule::MaxLength(120)])
+        .field("state", false, &[Rule::IsString, STATE])
+        .field("method", false, &[Rule::IsEnum(&["PERCENT", "MONTHLY_FLAT", "WEEKLY_FLAT", "PERIOD_FLAT", "FORMULA"])])
+        .field("formula", true, &[Rule::IsString, Rule::MaxLength(40)])
+        .field("residentRate", true, RATE)
+        .field("nonresidentRate", true, RATE)
+        .field("employerRate", true, RATE)
+        .field("exemption", true, AMOUNT)
+        .field("secondExemption", true, AMOUNT)
+        .field("flatEmployee", true, AMOUNT)
+        .field("flatEmployer", true, AMOUNT)
+        .field("monthlyThreshold", true, AMOUNT)
+        .field("employeeYearCap", true, AMOUNT)
+        .field("includes401k", true, &[Rule::IsBoolean])
+        .field("includes125", true, &[Rule::IsBoolean])
+        .field("group", true, &[Rule::IsString, Rule::MaxLength(20)])
+        .field("accountId", true, &[Rule::IsUuid])
+        .field("source", true, &[Rule::IsString, Rule::MaxLength(400)])
+        .field("verified", true, &[Rule::IsBoolean]);
+    let m = v.finish()?;
+    let rate = |k: &str| -> Result<i64, AppError> { Ok(percent(&m, k)?.unwrap_or(0)) };
+    let cents = |k: &str| -> Result<i64, AppError> { Ok(money(&m, k)?.map_or(0, Money::cents)) };
+    let name = opt_string(&m, "name").unwrap_or_default();
+    if name.trim().is_empty() {
+        return Err(bad("name should not be empty"));
+    }
+    Ok(payroll::us_local::Locality {
+        code,
+        name: name.trim().to_string(),
+        state: opt_string(&m, "state").unwrap_or_default(),
+        method: opt_string(&m, "method").unwrap_or_default(),
+        formula: opt_string(&m, "formula"),
+        resident_rate: rate("residentRate")?,
+        nonresident_rate: rate("nonresidentRate")?,
+        employer_rate: rate("employerRate")?,
+        exemption: cents("exemption")?,
+        second_exemption: cents("secondExemption")?,
+        flat_employee: cents("flatEmployee")?,
+        flat_employer: cents("flatEmployer")?,
+        monthly_threshold: cents("monthlyThreshold")?,
+        employee_year_cap: money(&m, "employeeYearCap")?.map(Money::cents),
+        includes_401k: m.get("includes401k").and_then(Value::as_bool).unwrap_or(true),
+        includes_125: m.get("includes125").and_then(Value::as_bool).unwrap_or(false),
+        group: opt_string(&m, "group").map(|g| g.trim().to_ascii_uppercase()).filter(|g| !g.is_empty()),
+        account_id: opt_string(&m, "accountId"),
+        source: opt_string(&m, "source").unwrap_or_default(),
+        verified: m.get("verified").and_then(Value::as_bool).unwrap_or(true),
+    })
 }
 
 /// D67: `{"NJ_TDI": {"employerRate": 0.5}, "NY_DBL": {"off": true}, "MN_PL": {"small": true}}`

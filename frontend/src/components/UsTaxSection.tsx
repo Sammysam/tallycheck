@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
-import { ARIZONA_RATES, FILING_LABEL, STATE_FORM, US_STATES, usd, type UsPreview, type UsTax } from '../lib/usPayroll';
+import { ARIZONA_RATES, FILING_LABEL, STATE_FORM, US_STATES, usd, type UsPreview, type UsTax, type LocalAssignment, type Locality } from '../lib/usPayroll';
 
 const AMOUNTS = ['annualSalary', 'hourlyRate', 'dependentsCredit', 'otherIncome', 'deductions', 'extraWithholding', 'pretax401k', 'pretaxSection125'] as const;
 
@@ -12,6 +12,9 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
   const [tax, setTax] = useState<UsTax | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [flags, setFlags] = useState({ multipleJobs: false, exemptFromWithholding: false, stateExempt: false, waCaresExempt: false });
+  // D69: local taxes.
+  const [locals, setLocals] = useState<LocalAssignment[]>([]);
+  const [localities, setLocalities] = useState<Locality[]>([]);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,6 +46,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
     for (const k of AMOUNTS) f[k] = t[k] ? String(t[k]) : '';
     setForm(f);
     setFlags({ multipleJobs: t.multipleJobs, exemptFromWithholding: t.exemptFromWithholding, stateExempt: t.stateExempt, waCaresExempt: (t.leaveExempt ?? []).includes('WA_CARES') });
+    setLocals(t.localTaxes ?? []);
     setOthers((t.otherWorkStates ?? []).map((o) => ({ state: o.state, percent: String(o.percent) })));
   };
 
@@ -51,6 +55,9 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
     [employeeId],
   );
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    api.get<{ localities: Locality[] }>('/payroll/us/localities').then((r) => setLocalities(r.data.localities)).catch(() => setLocalities([]));
+  }, []);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,6 +84,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
         stateAnnualDeduction: num(form.stateAnnualDeduction ?? ''),
         stateCode: (form.stateCode ?? '') === '' ? null : form.stateCode,
         leaveExempt: flags.waCaresExempt ? ['WA_CARES'] : [],
+        localTaxes: locals.filter((x) => x.code),
         ...flags,
       };
       for (const k of AMOUNTS) body[k] = num(form[k] ?? '');
@@ -274,6 +282,29 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
             Approved WA Cares exemption (no WA Cares premium)
           </label>
         )}
+        <div className="mb-4" aria-label="Local taxes for this employee">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Local taxes</p>
+          {localities.length === 0 && <p className="text-xs text-gray-400">No local taxes set up yet (US payroll settings → Local taxes).</p>}
+          {locals.map((x, i) => {
+            const change = (c: Partial<LocalAssignment>) => { setSaved(false); setLocals(locals.map((y, j) => (j === i ? { ...y, ...c } : y))); };
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-3 text-sm mb-1">
+                <select value={x.code} onChange={(e) => change({ code: e.target.value })} aria-label="Local tax">
+                  <option value="">Choose</option>
+                  {localities.map((l) => <option key={l.code} value={l.code}>{l.name} ({l.code})</option>)}
+                </select>
+                <label className="flex items-center gap-1"><input type="checkbox" checked={x.resident} onChange={(e) => change({ resident: e.target.checked })} aria-label="Lives there" />Lives there</label>
+                <label className="flex items-center gap-1">Local allowances <input type="number" min="0" max="99" style={{ width: '4rem' }} value={x.allowances} onChange={(e) => change({ allowances: Number(e.target.value || 0) })} aria-label="Local allowances" /></label>
+                <label className="flex items-center gap-1">Extra $ <input type="number" min="0" step="0.01" style={{ width: '6rem' }} value={x.extra} onChange={(e) => change({ extra: Number(e.target.value || 0) })} aria-label="Local extra" /></label>
+                <label className="flex items-center gap-1"><input type="checkbox" checked={x.exempt} onChange={(e) => change({ exempt: e.target.checked })} />Exempt</label>
+                <button type="button" className="btn-link text-xs" style={{ color: '#dc2626' }} onClick={() => { setSaved(false); setLocals(locals.filter((_, j) => j !== i)); }}>Remove</button>
+              </div>
+            );
+          })}
+          {localities.length > 0 && locals.length < 6 && (
+            <button type="button" className="btn-link text-xs" onClick={() => { setSaved(false); setLocals([...locals, { code: '', resident: false, allowances: 0, secondAllowances: 0, extra: 0, exempt: false }]); }}>+ Add a local tax</button>
+          )}
+        </div>
         <label className="flex items-center gap-2 text-sm mb-4">
           <input type="checkbox" checked={flags.stateExempt} onChange={(e) => { setSaved(false); setFlags({ ...flags, stateExempt: e.target.checked }); }} />
           Exempt from state income tax withholding
@@ -319,6 +350,9 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
                     <Row key={st.state} k={`State income tax ${st.state}${st.kind === 'RESIDENT' ? ' (home state)' : st.percent < 100 ? ` (${st.percent}% of the work)` : ''}`} v={`− ${usd(st.tax)}`} />
                   ))
                   : <Row k={`State income tax (${preview.stateTax.state})`} v={preview.stateTax.configured ? `− ${usd(preview.stateTax.tax)}` : 'not set up'} />}
+                {[...(preview.leave ?? []), ...(preview.local ?? [])].filter((c) => c.employee > 0).map((c) => (
+                  <Row key={`e-${c.id}`} k={c.name} v={`− ${usd(c.employee)}`} />
+                ))}
                 <Row k="Net pay" v={usd(preview.taxes.netPay)} strong />
               </dl>
               <dl className="space-y-1">
@@ -326,6 +360,9 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
                 <Row k="Employer Medicare" v={usd(preview.taxes.medicareEmployer)} />
                 <Row k="FUTA" v={usd(preview.taxes.futa)} />
                 <Row k={`State unemployment${preview.unemploymentState ? ` (${preview.unemploymentState})` : ''}`} v={usd(preview.taxes.suta)} />
+                {[...(preview.leave ?? []), ...(preview.local ?? [])].filter((c) => c.employer > 0).map((c) => (
+                  <Row key={`r-${c.id}`} k={`Employer ${c.name}`} v={usd(c.employer)} />
+                ))}
                 <Row k="Total cost to the company" v={usd(preview.taxes.costToEmployer)} strong />
                 {preview.notes.map((note) => <p key={note} className="text-xs text-gray-500 pt-1">{note}</p>)}
               </dl>

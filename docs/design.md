@@ -996,6 +996,35 @@ recommendations without answering each one individually; revisit any of them on 
   programs but are owed with (and paid as) that state's unemployment tax. Not covered: the
   quarterly New Hampshire rate changes and West Virginia's July 2026 fee (on the company's notice),
   Massachusetts' COVID recovery assessment (on the notice), industry-specific new-employer rates.
+- **D69 Local taxes** (2026-11-27, step 6 of the US state payroll plan).
+  `payroll::us_local`: each company keeps its localities (`us_localities`: code, name, state and
+  the locality as JSON) and each employee lists those withheld for (`employee_us_tax.localTaxes`:
+  code, lives there or not, local allowances / second allowances, extra per paycheck, exempt; at
+  most 6). Methods: PERCENT (resident / nonresident rate, employer rate, yearly exemption per
+  allowance taken off per paycheck half-up), MONTHLY_FLAT (employee / employer amount on the first
+  pay date of a month when the month's wages reach a threshold — Colorado occupational privilege
+  taxes), WEEKLY_FLAT (weekly fee × 52 ÷ pay periods — West Virginia city service fees),
+  PERIOD_FLAT (yearly amount ÷ pay periods rounded down, with a yearly cap — Pennsylvania LST) and
+  built-in FORMULA (New York City NYS-50-T-NYC Method II; Yonkers resident 16.75% of the New York
+  State withholding and nonresident 0.50% less the Method VII exclusion; Philadelphia 3.74% /
+  3.43% to 30 June 2026 then 3.735% / 3.425%; Portland Metro SHS and Multnomah PFA with the Oregon
+  federal-tax deduction). Localities sharing a group withhold only the largest employee amount
+  (Pennsylvania EIT: the higher of the home PSD's resident and the work PSD's nonresident rate).
+  Built in to add with one click (`GET /payroll/us/localities` → `catalog`): the formulas above,
+  Indiana's 92 county rates (Departmental Notice #1, R47, from 1 October 2026; Boone 1.70% before),
+  22 Michigan city taxes (Detroit Form 5469; Saginaw and Springfield to be checked; Lansing and
+  Muskegon Heights not found), the 10 largest Ohio cities, Louisville Metro, Lexington-Fayette and
+  Fayette County schools, nine Alabama occupational taxes, six West Virginia city fees, Greenwood
+  Village and Glendale (CO); Denver, Kansas City, St. Louis and the Oregon transit taxes are
+  marked to be checked (their pages could only be read through search excerpts). Anything else —
+  other Ohio cities and school districts, Pennsylvania EIT by PSD, Kentucky — the company enters
+  (`PUT|DELETE /payroll/us/localities/{code}`, permission `payroll`; a locality in use can't be
+  removed). Pay lines keep `localPlan`, `localYtd`, `local`, `localEmployee`, `localEmployer`;
+  the employee's amount comes off net pay, the employer's is an employer tax; posting credits each
+  locality to its own account or 2390 Local Income Tax Withheld (added when a run first has local
+  tax), kept as `localTax:NYC`; payments are type `LOCAL_TAX` with a `locality`. Not worked out:
+  Ohio's 20-day rule and resident credits, Michigan's resident / work-city split, Yonkers'
+  allocation by days worked, nonresident apportioning (the company sets the localities to match).
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

@@ -132,6 +132,9 @@ D67 adds leave-program columns: `us_state_registrations.employees` / `leaveOptio
 `leaveEmployer`, `us_payroll_runs.leaveEmployeeTotal` / `leaveEmployerTotal`, and rebuilds
 `us_payroll_remittances` so its type may be `STATE_LEAVE`.
 D68 adds `us_state_registrations.sutaSurcharges` and `us_payroll_lines.sutaSurchargeRate`.
+D69 adds `us_localities`, `employee_us_tax.localTaxes`, `us_payroll_lines.localPlan` / `localYtd` /
+`local` / `localEmployee` / `localEmployer`, `us_payroll_runs.localEmployeeTotal` / `localEmployerTotal`,
+and rebuilds `us_payroll_remittances` so its type may be `LOCAL_TAX`.
 
 ## Seeds
 

@@ -245,6 +245,27 @@ try {
     await waitFor(`[...document.querySelectorAll('select[aria-label="State form code"] option')].some((o) => o.textContent.includes('no withholding'))`, 'Connecticut withholding codes');
     await shot('04-built-in');
   });
+
+  await check('local taxes: add a built-in one and withhold it for the employee', async () => {
+    // D69: Yonkers nonresident earnings tax: 0.50% of $2,000 biweekly (no exclusion at that pay) = 10.00.
+    await go('/payroll/us');
+    if (await evaluate(`[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Payroll settings')`)) await clickText('Payroll settings');
+    await waitFor(`[...(document.querySelector('select[aria-label="Add a built-in local tax"]')?.options ?? [])].some((o) => o.value === 'YONKERS-NR')`, 'built-in local taxes listed');
+    await setValue('select[aria-label="Add a built-in local tax"]', 'YONKERS-NR');
+    await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Add' && x.closest('[aria-label="Local taxes"]')); b.click(); return true; })()`);
+    await waitFor(`!!document.querySelector('form[aria-label="Local tax"]')`, 'local tax form');
+    await clickText('Save local tax');
+    await waitFor(`document.body.innerText.includes('Yonkers (nonresident earnings tax)') && !document.querySelector('form[aria-label="Local tax"]')`, 'Yonkers saved');
+    await go(`/employees/${employeeId}`);
+    await waitFor(`document.body.innerText.includes('+ Add a local tax')`, 'local taxes on the employee');
+    await clickText('+ Add a local tax');
+    await setValue('select[aria-label="Local tax"]', 'YONKERS-NR');
+    await clickText('Save US pay & W-4');
+    await waitFor(`document.body.innerText.includes('Saved. New and refreshed pay run lines')`, 'saved');
+    await clickText('Work it out');
+    await waitFor(`document.body.innerText.includes('Yonkers (nonresident earnings tax)') && document.body.innerText.includes('$10.00')`, 'Yonkers in the preview');
+    await shot('05-local');
+  });
 } catch (e) {
   failures.push('harness');
   results.push(`FAIL  harness: ${e.message}`);

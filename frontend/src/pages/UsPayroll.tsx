@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader';
 import Table from '../components/Table';
 import StateTaxRules from '../components/StateTaxRules';
 import UsStateRegistrations from '../components/UsStateRegistrations';
+import UsLocalities from '../components/UsLocalities';
 import StatusBadge from '../components/StatusBadge';
 import { fmtDate } from '../lib/region';
 import { PAY_FREQUENCY_LABEL, US_STATES, usd, type PayFrequency, type UsRun, type UsSettings } from '../lib/usPayroll';
@@ -225,6 +226,7 @@ export default function UsPayroll() {
       )}
 
       {showSettings && isUs && <UsStateRegistrations accounts={ledgerAccounts} />}
+      {showSettings && isUs && <UsLocalities accounts={ledgerAccounts} />}
       {showSettings && isUs && <StateTaxRules />}
 
       {isUs && (

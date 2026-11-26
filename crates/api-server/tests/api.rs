@@ -3695,7 +3695,7 @@ async fn us_payroll_settings_w4_and_preview_through_the_api() -> TestResult {
                "futaWages": 2000, "futa": 12, "sutaWages": 2000, "suta": 54,
                "employeeTaxes": 309.15, "netPay": 1690.85, "employerTaxes": 219, "costToEmployer": 2219})
     );
-    assert_eq!(r.body["notes"], json!(["Local (city / county) income tax is not included."]));
+    assert_eq!(r.body["notes"], json!(["No local (city / county) taxes are set for this employee."]));
     assert_eq!(r.body["stateTax"], json!({"state": "TX", "configured": true, "wages": 2000, "tax": 0}));
 
     let r = preview(json!({"employeeId": emp[1]})).await?;
@@ -6482,5 +6482,83 @@ async fn us_payroll_unemployment_defaults_and_employee_ui() -> TestResult {
     .await?;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
     assert_eq!(owed(&r.body, "SUTA", "PA"), json!(0));
+    Ok(())
+}
+
+/// D69: local taxes through a pay run (biweekly $52,000, gross 2,000.00, pay date 2026-11-06):
+///   NYC resident, single, 1 allowance: 2,000 − 192.30 − 38.50 = 1,769.20 → 30.12 + 807.20 × 4.15% = 63.62
+///   Columbus (company-entered 2.5% for nonresidents working there): 50.00
+///   Greenwood Village OPT (first pay date of the month): 2.00 + employer 2.00
+#[tokio::test]
+async fn us_payroll_local_taxes() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let cash = us_company(&app, &admin, json!({})).await?;
+    let all = app.call(Method::GET, "/api/payroll/us/localities", Some(&admin), None).await?;
+    let catalog = all.body["catalog"].as_array().ok_or("catalog")?.clone();
+    let built = |code: &str| catalog.iter().find(|l| l["code"] == code).cloned().ok_or("built-in");
+    let put = |code: &str, body: Value| {
+        us_send(&app, Method::PUT, format!("/api/payroll/us/localities/{code}"), &admin, Some(body))
+    };
+    // A built-in locality is added as it is (rates come back in ppm from the catalog, so only the
+    // formula and names are sent).
+    let nyc = built("NYC")?;
+    let r = put("NYC", json!({"name": nyc["name"], "state": "NY", "method": "FORMULA", "formula": "NYC-2026", "source": nyc["source"]})).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let gv = built("GV-OPT")?;
+    let r = put("GV-OPT", json!({"name": gv["name"], "state": "CO", "method": "MONTHLY_FLAT", "flatEmployee": 2, "flatEmployer": 2, "monthlyThreshold": 250})).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let r = put(
+        "oh-columbus",
+        json!({"name": "Columbus", "state": "OH", "method": "PERCENT", "residentRate": 2.5, "nonresidentRate": 2.5}),
+    )
+    .await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["code"], json!("OH-COLUMBUS"));
+    let bad = put("MINE", json!({"name": "Mine", "state": "OH", "method": "FORMULA", "formula": "MY-OWN"})).await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "only built-in formulas: {}", bad.body);
+
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    let staff = [
+        ("US-NYC", json!({"workState": "NY", "localTaxes": [{"code": "nyc", "resident": true, "allowances": 1}]})),
+        ("US-COL", json!({"workState": "OH", "localTaxes": [{"code": "OH-COLUMBUS", "resident": false}]})),
+        ("US-GV", json!({"workState": "CO", "localTaxes": [{"code": "GV-OPT"}]})),
+    ];
+    for (code, extra) in staff {
+        us_employee(&app, &admin, code, json!({}), merged(&salary, extra)).await?;
+    }
+    let bad = put("NYC", json!({"name": "x", "state": "NY", "method": "PERCENT"})).await?;
+    assert_eq!(bad.status, StatusCode::OK, "{}", bad.body);
+    // Put New York City back as the built-in formula.
+    put("NYC", json!({"name": "New York City", "state": "NY", "method": "FORMULA", "formula": "NYC-2026"})).await?;
+    let gone = us_send(&app, Method::DELETE, "/api/payroll/us/localities/NYC".into(), &admin, None).await?;
+    assert_eq!(gone.status, StatusCode::BAD_REQUEST, "in use: {}", gone.body);
+
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let local = |code: &str| -> (Value, Value) {
+        let l = us_line(&r.body, code);
+        (l["localEmployee"].clone(), l["localEmployer"].clone())
+    };
+    assert_eq!(local("US-NYC"), (json!(63.62), json!(0)));
+    assert_eq!(local("US-COL"), (json!(50), json!(0)));
+    assert_eq!(local("US-GV"), (json!(2), json!(2)));
+    assert_eq!(r.body["localEmployeeTotal"], json!(115.62));
+    assert_eq!(us_balance(&app, &admin, "2390").await?, json!(117.62), "added when first needed");
+
+    let remit = |body: Value| us_send(&app, Method::POST, format!("{run_url}/remit"), &admin, Some(body));
+    let base = json!({"type": "LOCAL_TAX", "paymentAccountId": cash, "date": "2026-11-15"});
+    let r = remit(merged(&base, json!({"amount": 5}))).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "several localities owed: {}", r.body);
+    let r = remit(merged(&base, json!({"locality": "nyc"}))).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2390").await?, json!(54));
+    let r = remit(base.clone()).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2390").await?, json!(0));
     Ok(())
 }

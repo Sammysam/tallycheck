@@ -291,6 +291,8 @@ pub struct UsTax {
     pub state_code: Option<String>,
     /// D67: leave programs the employee is exempt from (e.g. WA_CARES).
     pub leave_exempt: Vec<String>,
+    /// D69: the localities the employee is withheld for.
+    pub local_taxes: Vec<crate::us_local::Assignment>,
     /// D63: the home state (None = lives in the work state) and the other states worked in,
     /// with shares in hundredths of a percent (the work state has the rest).
     pub resident_state: Option<String>,
@@ -364,6 +366,7 @@ impl UsTax {
             state_annual_deduction: Money::ZERO,
             state_code: None,
             leave_exempt: Vec::new(),
+            local_taxes: Vec::new(),
             resident_state: None,
             other_work_states: Vec::new(),
         }
@@ -402,6 +405,10 @@ fn from_row(r: &SqliteRow) -> AppResult<UsTax> {
         leave_exempt: json_col(r, "leaveExempt")?
             .as_array()
             .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+            .unwrap_or_default(),
+        local_taxes: json_col(r, "localTaxes")?
+            .as_array()
+            .map(|a| a.iter().filter_map(crate::us_local::Assignment::from_json).collect())
             .unwrap_or_default(),
         resident_state: r.try_get::<Option<String>, _>("residentState")?.filter(|s| !s.is_empty()),
         other_work_states: crate::us_states::parse_others(&r.try_get::<String, _>("otherWorkStates")?),
@@ -450,6 +457,8 @@ fn tax_json(employee_id: &str, t: &UsTax, updated_at: Option<String>) -> Value {
         "stateAnnualDeduction": t.state_annual_deduction.to_json_number(),
         "stateCode": t.state_code,
         "leaveExempt": t.leave_exempt,
+        "localTaxes": t.local_taxes.iter().map(|a| json!({"code": a.code, "resident": a.resident, "allowances": a.allowances,
+            "secondAllowances": a.second_allowances, "extra": Money::from_cents(a.extra).to_json_number(), "exempt": a.exempt})).collect::<Vec<_>>(),
         "residentState": t.resident_state,
         "otherWorkStates": t.other_work_states.iter()
             .map(|(s, share)| json!({"state": s, "percent": Money::from_cents(*share).to_json_number()}))
@@ -484,8 +493,8 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
              "filingStatus","multipleJobs","dependentsCredit","otherIncome","deductions","extraWithholding","allowances",
              "exemptFromWithholding","pretax401k","pretaxSection125","stateFilingStatus","stateAllowances",
              "stateExtraWithholding","stateExempt","residentState","otherWorkStates","stateHeadOfHousehold",
-             "stateSecondAllowances","stateDeductionOverride","stateAnnualCredit","stateElectedRate","stateAnnualDeduction","stateCode","leaveExempt","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?21,?21)
+             "stateSecondAllowances","stateDeductionOverride","stateAnnualCredit","stateElectedRate","stateAnnualDeduction","stateCode","leaveExempt","localTaxes","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?21,?21)
            ON CONFLICT ("employeeId") DO UPDATE SET
              "workState" = excluded."workState", "payType" = excluded."payType",
              "annualSalary" = excluded."annualSalary", "hourlyRate" = excluded."hourlyRate",
@@ -504,6 +513,7 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
              "stateAnnualDeduction" = excluded."stateAnnualDeduction",
              "stateCode" = excluded."stateCode",
              "leaveExempt" = excluded."leaveExempt",
+             "localTaxes" = excluded."localTaxes",
              "updatedAt" = excluded."updatedAt""#,
     )
     .bind(employee_id)
@@ -537,6 +547,7 @@ pub async fn put_tax(db: &Db, employee_id: &str, t: UsTax) -> AppResult<Value> {
     .bind(t.state_annual_deduction.cents())
     .bind(&t.state_code)
     .bind(serde_json::to_string(&t.leave_exempt).unwrap_or_else(|_| "[]".into()))
+    .bind(Value::Array(t.local_taxes.iter().map(crate::us_local::Assignment::to_json).collect()).to_string())
     .execute(&mut *tx)
     .await?;
     let (saved, at) = load_tax(&mut tx, employee_id).await?.ok_or_else(|| AppError::internal("US tax row missing"))?;
@@ -659,7 +670,29 @@ pub async fn preview(db: &Db, employee_id: &str, req: PreviewRequest) -> AppResu
     figures.net_pay = figures.net_pay.checked_sub(leave_employee).ok_or_else(too_large)?;
     figures.employer_taxes = figures.employer_taxes.checked_add(leave_employer).ok_or_else(too_large)?;
     figures.cost_to_employer = figures.cost_to_employer.checked_add(leave_employer).ok_or_else(too_large)?;
-    let mut notes = vec!["Local (city / county) income tax is not included.".to_string()];
+    // D69: local taxes (as if nothing were counted earlier this year).
+    let local_plans = crate::us_local::plans_for(&mut c, &t.local_taxes).await?;
+    let local = crate::us_local::contributions(
+        &local_plans,
+        gross,
+        t.pretax_401k,
+        t.pretax_section125,
+        periods,
+        &pay_date,
+        &crate::us_states::context(&figures)?,
+        t.state_filing_status == "MARRIED",
+        &Default::default(),
+    )?;
+    let local_employee = Money::from_cents(local.iter().map(|x| x.employee).sum());
+    let local_employer = Money::from_cents(local.iter().map(|x| x.employer).sum());
+    figures.employee_taxes = figures.employee_taxes.checked_add(local_employee).ok_or_else(too_large)?;
+    figures.net_pay = figures.net_pay.checked_sub(local_employee).ok_or_else(too_large)?;
+    figures.employer_taxes = figures.employer_taxes.checked_add(local_employer).ok_or_else(too_large)?;
+    figures.cost_to_employer = figures.cost_to_employer.checked_add(local_employer).ok_or_else(too_large)?;
+    let mut notes: Vec<String> = Vec::new();
+    if t.local_taxes.is_empty() {
+        notes.push("No local (city / county) taxes are set for this employee.".to_string());
+    }
     for st in &plan.missing {
         notes.push(format!(
             "No state income tax rules for {st} yet — add them under US payroll settings. State tax is left out here."
@@ -693,6 +726,12 @@ pub async fn preview(db: &Db, employee_id: &str, req: PreviewRequest) -> AppResu
         })).collect::<Vec<_>>(),
         "unemploymentState": suta_state,
         "leave": leave.iter().map(|x| json!({
+            "id": x.id, "state": x.state, "name": x.name,
+            "wages": Money::from_cents(x.wages).to_json_number(),
+            "employee": Money::from_cents(x.employee).to_json_number(),
+            "employer": Money::from_cents(x.employer).to_json_number(),
+        })).collect::<Vec<_>>(),
+        "local": local.iter().map(|x| json!({
             "id": x.id, "state": x.state, "name": x.name,
             "wages": Money::from_cents(x.wages).to_json_number(),
             "employee": Money::from_cents(x.employee).to_json_number(),

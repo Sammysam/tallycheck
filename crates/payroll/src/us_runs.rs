@@ -24,6 +24,7 @@
 
 use crate::us::{self, FilingStatus, UsFigures, UsInputs, YearToDate, W4};
 use crate::us_leave;
+use crate::us_local;
 use crate::us_setup::{load_settings, load_tax, periods_per_year, UsSettings, UsTax};
 use crate::us_state::{load_rule, StateEmployee};
 use crate::us_states::{self, StateTax};
@@ -52,6 +53,7 @@ pub const REMIT_TYPES: &[&str] = &[
     "SECTION_125",
     "STATE_INCOME_TAX",
     "STATE_LEAVE",
+    "LOCAL_TAX",
 ];
 
 /// What US payroll posts to. Each role's account is chosen in the US payroll settings
@@ -111,6 +113,10 @@ pub const LEAVE_ROLE: Role = role(
     "State Disability and Paid Leave Payable",
     AccountType::Liability,
 );
+
+/// D69: local taxes, chosen (or added) only when a run first has them.
+pub const LOCAL_ROLE: Role =
+    role("localTax", "Local income tax withheld", "2390", "Local Income Tax Withheld", AccountType::Liability);
 
 pub fn setting_key(role: &str) -> String {
     format!("payroll.us.account.{role}")
@@ -230,6 +236,8 @@ const TOTALS: &[(&str, &str)] = &[
     ("stateIncomeTaxTotal", "stateIncomeTax"),
     ("leaveEmployeeTotal", "leaveEmployee"),
     ("leaveEmployerTotal", "leaveEmployer"),
+    ("localEmployeeTotal", "localEmployee"),
+    ("localEmployerTotal", "localEmployer"),
 ];
 
 #[derive(Debug, Clone)]
@@ -467,6 +475,12 @@ struct Line {
     leave: Vec<us_leave::Contribution>,
     leave_employee: Money,
     leave_employer: Money,
+    /// D69: local taxes (localities used, year to date, amounts, totals).
+    local_plan: Vec<us_local::Plan>,
+    local_ytd: BTreeMap<String, us_leave::Ytd>,
+    local: Vec<us_leave::Contribution>,
+    local_employee: Money,
+    local_employer: Money,
     ytd: YearToDate,
     figures: UsFigures,
     notes: Option<String>,
@@ -591,6 +605,17 @@ fn line_from_row(r: &SqliteRow) -> AppResult<Line> {
             .unwrap_or_default(),
         leave_employee: m("leaveEmployee")?,
         leave_employer: m("leaveEmployer")?,
+        local_plan: crate::us_setup::json_col(r, "localPlan")?
+            .as_array()
+            .map(|a| a.iter().filter_map(us_local::Plan::from_json).collect())
+            .unwrap_or_default(),
+        local_ytd: us_leave::ytd_from_json(&crate::us_setup::json_col(r, "localYtd")?),
+        local: crate::us_setup::json_col(r, "local")?
+            .as_array()
+            .map(|a| a.iter().filter_map(us_leave::Contribution::from_json).collect())
+            .unwrap_or_default(),
+        local_employee: m("localEmployee")?,
+        local_employer: m("localEmployer")?,
         ytd: YearToDate {
             social_security_wages: m("ytdSocialSecurityWages")?,
             medicare_wages: m("ytdMedicareWages")?,
@@ -657,6 +682,14 @@ fn line_json(l: &Line) -> Value {
         })).collect::<Vec<_>>(),
         "leaveEmployee": l.leave_employee.to_json_number(),
         "leaveEmployer": l.leave_employer.to_json_number(),
+        "local": l.local.iter().map(|c| json!({
+            "id": c.id, "state": c.state, "name": c.name,
+            "wages": Money::from_cents(c.wages).to_json_number(),
+            "employee": Money::from_cents(c.employee).to_json_number(),
+            "employer": Money::from_cents(c.employer).to_json_number(),
+        })).collect::<Vec<_>>(),
+        "localEmployee": l.local_employee.to_json_number(),
+        "localEmployer": l.local_employer.to_json_number(),
         "stateIncomeTaxWages": l.state_wages.to_json_number(),
         "stateIncomeTax": l.state_tax.to_json_number(),
         "w4": l.w4,
@@ -740,6 +773,11 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
         "leaveEmployee",
         "leaveEmployer",
         "sutaSurchargeRate",
+        "localPlan",
+        "localYtd",
+        "local",
+        "localEmployee",
+        "localEmployer",
     ]);
     let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
     let updates: Vec<String> = cols.iter().skip(1).map(|c| format!(r#""{c}" = excluded."{c}""#)).collect();
@@ -798,7 +836,12 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
         .bind(Value::Array(l.leave.iter().map(us_leave::Contribution::to_json).collect()).to_string())
         .bind(l.leave_employee.cents())
         .bind(l.leave_employer.cents())
-        .bind(l.suta_surcharge_rate);
+        .bind(l.suta_surcharge_rate)
+        .bind(Value::Array(l.local_plan.iter().map(us_local::Plan::to_json).collect()).to_string())
+        .bind(us_leave::ytd_to_json(&l.local_ytd).to_string())
+        .bind(Value::Array(l.local.iter().map(us_leave::Contribution::to_json).collect()).to_string())
+        .bind(l.local_employee.cents())
+        .bind(l.local_employer.cents());
     q.execute(&mut *conn).await?;
     Ok(())
 }
@@ -907,6 +950,24 @@ fn work_out(l: &mut Line, run: &Run, reciprocity: &BTreeSet<(String, String)>) -
     l.figures.net_pay = l.figures.net_pay.checked_sub(l.leave_employee).ok_or_else(too_large)?;
     l.figures.employer_taxes = add(l.figures.employer_taxes, l.leave_employer)?;
     l.figures.cost_to_employer = add(l.figures.cost_to_employer, l.leave_employer)?;
+    // D69: local taxes.
+    l.local = us_local::contributions(
+        &l.local_plan,
+        l.gross,
+        l.pretax_401k,
+        l.pretax_section125,
+        periods_per_year(&run.pay_frequency),
+        &run.pay_date,
+        &us_states::context(&l.figures)?,
+        cert_from_snapshot(&l.state_cert).married,
+        &l.local_ytd,
+    )?;
+    l.local_employee = Money::from_cents(l.local.iter().map(|c| c.employee).sum());
+    l.local_employer = Money::from_cents(l.local.iter().map(|c| c.employer).sum());
+    l.figures.employee_taxes = add(l.figures.employee_taxes, l.local_employee)?;
+    l.figures.net_pay = l.figures.net_pay.checked_sub(l.local_employee).ok_or_else(too_large)?;
+    l.figures.employer_taxes = add(l.figures.employer_taxes, l.local_employer)?;
+    l.figures.cost_to_employer = add(l.figures.cost_to_employer, l.local_employer)?;
     Ok(())
 }
 
@@ -987,6 +1048,7 @@ async fn set_states(conn: &mut SqliteConnection, l: &mut Line, t: &UsTax, pay_da
     l.suta_surcharge_rate = Some(us_states::surcharge_for(conn, &t.work_state).await?);
     // D67: the leave programs of the state the work is based in.
     l.leave_plan = us_leave::plans_for(conn, &t.work_state, pay_date, &t.leave_exempt).await?;
+    l.local_plan = us_local::plans_for(conn, &t.local_taxes).await?;
     Ok(())
 }
 
@@ -1050,6 +1112,18 @@ async fn per_program(conn: &mut SqliteConnection, run: &Run) -> AppResult<BTreeM
     Ok(out)
 }
 
+/// D69: what each locality is owed on a run (code → employee + employer amounts).
+async fn per_locality(conn: &mut SqliteConnection, run: &Run) -> AppResult<BTreeMap<String, Money>> {
+    let mut out = BTreeMap::new();
+    for l in lines_of(conn, &run.id).await? {
+        for c in &l.local {
+            let e = out.entry(c.id.clone()).or_insert(Money::ZERO);
+            *e = add(*e, Money::from_cents(c.employee + c.employer))?;
+        }
+    }
+    Ok(out)
+}
+
 /// The state a leave program belongs to.
 fn program_state(id: &str) -> &'static str {
     us_leave::PROGRAMS.iter().find(|p| p.id == id).map_or("", |p| p.state)
@@ -1079,13 +1153,16 @@ async fn owed(conn: &mut SqliteConnection, run: &Run) -> AppResult<Vec<Owed>> {
         .collect();
     let (income, unemployment) = per_state(conn, run).await?;
     let leave = per_program(conn, run).await?;
+    let locals = per_locality(conn, run).await?;
+    let local_total = sum(&locals.values().copied().collect::<Vec<_>>())?;
     let leave_total = sum(&leave.values().copied().collect::<Vec<_>>())?;
     for (kind, by_state, total) in [
         ("SUTA", &unemployment, t("sutaTotal")),
         ("STATE_INCOME_TAX", &income, t("stateIncomeTaxTotal")),
         ("STATE_LEAVE", &leave, leave_total),
+        ("LOCAL_TAX", &locals, local_total),
     ] {
-        if kind == "STATE_LEAVE" && by_state.is_empty() {
+        if matches!(kind, "STATE_LEAVE" | "LOCAL_TAX") && by_state.is_empty() {
             continue;
         }
         // Payments recorded before D63 carry no state: they count for the first state.
@@ -1137,6 +1214,7 @@ fn payable_role(kind: &str) -> &'static str {
         "RETIREMENT_401K" => "retirement401k",
         "STATE_INCOME_TAX" => "stateIncomeTax",
         "STATE_LEAVE" => "stateLeave",
+        "LOCAL_TAX" => "localTax",
         _ => "section125",
     }
 }
@@ -1262,6 +1340,11 @@ async fn new_line(conn: &mut SqliteConnection, run: &Run, e: &Who, t: &UsTax) ->
         leave: Vec::new(),
         leave_employee: Money::ZERO,
         leave_employer: Money::ZERO,
+        local_plan: Vec::new(),
+        local_ytd: BTreeMap::new(),
+        local: Vec::new(),
+        local_employee: Money::ZERO,
+        local_employer: Money::ZERO,
         ytd: YearToDate::default(),
         figures: UsFigures::default(),
         notes: None,
@@ -1269,6 +1352,7 @@ async fn new_line(conn: &mut SqliteConnection, run: &Run, e: &Who, t: &UsTax) ->
     set_states(conn, &mut l, t, &run.pay_date).await?;
     l.ytd = year_to_date(conn, &e.id, run.year()?, &run.id, l.suta_state.as_deref()).await?;
     l.leave_ytd = us_leave::ytd(conn, &e.id, run.year()?, &run.id).await?;
+    l.local_ytd = us_local::ytd(conn, &e.id, run.year()?, &run.id).await?;
     let reciprocity = us_states::reciprocity(conn).await?.into_iter().collect();
     work_out(&mut l, run, &reciprocity)?;
     Ok(l)
@@ -1466,6 +1550,7 @@ pub async fn update_line(db: &Db, run_id: &str, line_id: &str, p: LinePatch) -> 
     if let Some(emp) = l.employee_id.clone() {
         l.ytd = year_to_date(&mut tx, &emp, run.year()?, run_id, l.suta_state.as_deref()).await?;
         l.leave_ytd = us_leave::ytd(&mut tx, &emp, run.year()?, run_id).await?;
+        l.local_ytd = us_local::ytd(&mut tx, &emp, run.year()?, run_id).await?;
     }
     let reciprocity = us_states::reciprocity(&mut tx).await?.into_iter().collect();
     work_out(&mut l, &run, &reciprocity)?;
@@ -1530,6 +1615,7 @@ pub async fn post(db: &Db, run_id: &str) -> AppResult<Value> {
         if let Some(emp) = l.employee_id.clone() {
             l.ytd = year_to_date(&mut tx, &emp, run.year()?, run_id, l.suta_state.as_deref()).await?;
             l.leave_ytd = us_leave::ytd(&mut tx, &emp, run.year()?, run_id).await?;
+            l.local_ytd = us_local::ytd(&mut tx, &emp, run.year()?, run_id).await?;
         }
         work_out(l, &run, &reciprocity)?;
         write_line(&mut tx, l).await?;
@@ -1573,6 +1659,20 @@ pub async fn post(db: &Db, run_id: &str) -> AppResult<Value> {
         let name = us_leave::PROGRAMS.iter().find(|p| p.id == program).map_or(program.as_str(), |p| p.name);
         per_state_lines.push((account, st.to_string(), amount, name.to_string()));
     }
+    // D69: each locality to its own account, else 2390 Local Income Tax Withheld (added when
+    // first needed); kept as "localTax:NYC".
+    for (code, amount) in per_locality(&mut tx, &run).await? {
+        let locality = us_local::get(&mut tx, &code).await?;
+        let account = match locality.as_ref().and_then(|x| x.account_id.clone()) {
+            Some(id) => id,
+            None => ensure_one(&mut tx, &LOCAL_ROLE).await?,
+        };
+        if let Some(map) = snap.as_object_mut() {
+            map.insert(format!("localTax:{code}"), Value::String(account.clone()));
+        }
+        let name = locality.map_or_else(|| code.clone(), |x| x.name);
+        per_state_lines.push((account, code.clone(), amount, name));
+    }
     let t = |k: &str| run.total(k);
     let zero = Money::ZERO;
 
@@ -1582,7 +1682,7 @@ pub async fn post(db: &Db, run_id: &str) -> AppResult<Value> {
         &account_of(&snap, "payrollTaxExpense")?,
         t("employerTaxesTotal"),
         zero,
-        "Employer social security, Medicare, FUTA, SUTA and leave contributions",
+        "Employer social security, Medicare, FUTA, SUTA, leave and local taxes",
     ));
     e.extend(line(&account_of(&snap, "salariesPayable")?, zero, t("netPayTotal"), "Net pay"));
     e.extend(line(
@@ -1706,6 +1806,7 @@ fn label(kind: &str) -> &'static str {
         "RETIREMENT_401K" => "401(k)",
         "STATE_INCOME_TAX" => "State income tax",
         "STATE_LEAVE" => "State disability / paid leave",
+        "LOCAL_TAX" => "Local tax",
         _ => "Section 125",
     }
 }
@@ -1718,7 +1819,8 @@ pub async fn remit(db: &Db, run_id: &str, r: Remit, by: &Actor) -> AppResult<Val
     }
     let owed = owed(&mut tx, &run).await?;
     // For STATE_LEAVE the "state" is the program (e.g. CA_SDI).
-    let per_state = matches!(r.kind.as_str(), "SUTA" | "STATE_INCOME_TAX" | "STATE_LEAVE");
+    // For LOCAL_TAX the "state" is the locality (e.g. NYC).
+    let per_state = matches!(r.kind.as_str(), "SUTA" | "STATE_INCOME_TAX" | "STATE_LEAVE" | "LOCAL_TAX");
     // Which state a state income tax / unemployment payment is for.
     let state: Option<String> = if per_state {
         let open: Vec<&Owed> =
@@ -1930,6 +2032,7 @@ mod tests {
             state_annual_deduction: Money::ZERO,
             state_code: None,
             leave_exempt: Vec::new(),
+            local_taxes: Vec::new(),
             resident_state: None,
             other_work_states: Vec::new(),
         };

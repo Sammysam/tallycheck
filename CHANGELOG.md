@@ -8,6 +8,11 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Local taxes: a company's own city, county and school district taxes, plus built-in 2026 rules
+  for New York City, Yonkers, Philadelphia, the Portland Metro and Multnomah taxes, Indiana's 92
+  counties, Michigan cities, Ohio's largest cities, Louisville, Lexington, Alabama occupational
+  taxes, West Virginia city fees and Colorado occupational privilege taxes; withheld per
+  employee, posted and paid per locality (D69).
 - Every state's 2026 unemployment wage base, new-employer rate and extra employer charges filled
   in when a state is registered (with the source shown), extra charges such as California ETT on
   the unemployment wages, and the employee unemployment contributions of Alaska, New Jersey and

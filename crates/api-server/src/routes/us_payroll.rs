@@ -211,6 +211,30 @@ pub async fn unemployment_defaults(_a: Authorized<perm::Payroll>) -> AppResult<J
     Ok(Json(payroll::us_unemployment::catalog()))
 }
 
+/// D69: the company's localities and the built-in ones it can add.
+pub async fn localities(State(s): State<AppState>, _a: Authorized<perm::Payroll>) -> AppResult<Json<Value>> {
+    Ok(Json(payroll::us_local::overview(&s.db).await?))
+}
+
+pub async fn locality_put(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Path(code): Path<String>,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    let l = dto::locality(code, body.object())?;
+    Ok(Json(payroll::us_local::put(&s.db, l).await?))
+}
+
+pub async fn locality_delete(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Path(code): Path<String>,
+) -> AppResult<StatusCode> {
+    payroll::us_local::delete(&s.db, &code.trim().to_ascii_uppercase()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn state_put(
     State(s): State<AppState>,
     _a: Authorized<perm::Payroll>,
