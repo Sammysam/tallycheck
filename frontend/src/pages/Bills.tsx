@@ -7,12 +7,14 @@ import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { money, moneyIn } from '../lib/money';
 import CurrencyPicker from '../components/CurrencyPicker';
-import { region } from '../lib/region';
+import { fmtDate, region } from '../lib/region';
+import { toast } from '../lib/toast';
+import { useNavigate } from 'react-router-dom';
 import { lineCodes, summarize, useTaxCodes } from '../lib/taxes';
 import TxnLink from '../components/TxnLink';
 import type { PickItem } from '../lib/items';
 
-interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; totalAmount: number; status: string; currency?: string | null }
+interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; dueDate?: string | null; totalAmount: number; status: string; currency?: string | null }
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const emptyLine = () => ({ _key: uid(), itemId: '', description: '', quantity: 1, unitPrice: 0, accountId: '', taxCodeId: region().defaultPurchaseTax });
@@ -104,8 +106,13 @@ export default function Bills() {
     }
   };
 
+  const navigate = useNavigate();
   const action = async (id: string, ep: string) => {
-    try { await api.post(`/bills/${id}/${ep}`); load(); }
+    try {
+      await api.post(`/bills/${id}/${ep}`);
+      toast(ep === 'post' ? 'Bill posted to the books' : ep === 'void' ? 'Bill voided' : 'Done');
+      load();
+    }
     catch (err: any) { alert(err?.response?.data?.message ?? 'Action failed'); }
   };
 
@@ -125,8 +132,10 @@ export default function Bills() {
                 <option value="">Select Vendor</option>
                 {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
-              <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-              <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+              <label className="block"><span className="text-xs font-medium text-gray-500">Bill date</span>
+                <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} aria-label="Bill date" /></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Due date (optional)</span>
+                <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} aria-label="Due date" /></label>
             </div>
             <div style={{ maxWidth: 520 }}>
               <CurrencyPicker compact currency={form.currency} rate={form.exchangeRate}
@@ -203,12 +212,14 @@ export default function Bills() {
       <Table data={rows} columns={[
         { header: '#',       accessor: (r) => <TxnLink entryId={(r as { journalEntryId?: string }).journalEntryId}>{r.billNumber}</TxnLink> },
         { header: 'Vendor',  accessor: (r) => r.vendor?.name ?? '—' },
-        { header: 'Date',    accessor: 'date' },
+        { header: 'Date',    accessor: (r) => fmtDate(r.date) },
+        { header: 'Due',     accessor: (r) => (r.dueDate ? fmtDate(r.dueDate) : '—') },
         { header: 'Amount',  accessor: (r) => moneyIn(Number(r.totalAmount), r.currency) },
         { header: 'Status',  accessor: (r) => <StatusBadge status={r.status} /> },
         { header: 'Actions', accessor: (r) => (
           <div className="flex gap-2">
             {r.status === 'DRAFT'  && <button onClick={() => action(r.id, 'post')} className="btn-link">Post</button>}
+            {r.status === 'POSTED' && <button onClick={() => navigate(`/payments?bill=${r.id}`)} className="btn-link">Pay bill</button>}
             {r.status === 'POSTED' && <button onClick={() => action(r.id, 'void')} className="btn-link" style={{ color: '#dc2626' }}>Void</button>}
           </div>
         )},

@@ -54,12 +54,14 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-gray-600">Username</label>
+                <label htmlFor="login-username" className="block text-xs font-medium text-gray-600">Username</label>
                 <button type="button" tabIndex={-1} onClick={() => navigate('/forgot-password?what=username')} className="text-xs text-orange-700 hover:underline">
                   Forgot username?
                 </button>
               </div>
               <input
+                id="login-username"
+                autoComplete="username"
                 type="text"
                 required
                 value={username}
@@ -71,12 +73,14 @@ export default function Login() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-gray-600">Password</label>
+                <label htmlFor="login-password" className="block text-xs font-medium text-gray-600">Password</label>
                 <button type="button" tabIndex={-1} onClick={() => navigate('/forgot-password')} className="text-xs text-orange-700 hover:underline">
                   Forgot password?
                 </button>
               </div>
               <PasswordInput
+                id="login-password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

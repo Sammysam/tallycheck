@@ -201,7 +201,7 @@ export default function CompanySetup() {
       case 'website':
         return <input value={val('company.website')} onChange={set('company.website')} maxLength={120} placeholder="www.yourcompany.com" aria-label="Website" />;
       case 'tax':
-        return <input value={val('company.taxNumber')} onChange={set('company.taxNumber')} maxLength={60} placeholder="Tax / VAT / GST number" aria-label="Tax number" />;
+        return <input value={val('company.taxNumber')} onChange={set('company.taxNumber')} maxLength={60} placeholder={val('region.country') === 'US' ? 'EIN, e.g. 12-3456789' : 'Tax / VAT / GST number'} aria-label="Tax number" />;
       case 'payment':
         return <textarea rows={4} value={val('company.paymentInstructions')} onChange={set('company.paymentInstructions')} maxLength={2000} placeholder="Bank transfer to … account number …" aria-label="How customers pay you" />;
       case 'footer':
@@ -276,7 +276,11 @@ export default function CompanySetup() {
         {!loaded ? <p className="px-6 py-8 text-sm text-gray-500">Loading…</p> : (
           <form onSubmit={next} aria-label="Company setup" className="px-6 py-6">
             <h1 className="text-lg font-semibold text-gray-900">{step.title}</h1>
-            <p className="text-sm text-gray-600 mt-1 mb-4">{step.help}</p>
+            <p className="text-sm text-gray-600 mt-1 mb-4">
+              {step.id === 'tax' && val('region.country') === 'US'
+                ? 'Enter your EIN (Employer Identification Number) or state sales tax number to print it on invoices. Skip this if you have none yet.'
+                : step.help}
+            </p>
 
             <div ref={box}>
               {step.id === 'review' ? (

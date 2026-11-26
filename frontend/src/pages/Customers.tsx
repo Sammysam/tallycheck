@@ -4,6 +4,7 @@ import api from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
+import { toast } from '../lib/toast';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Customer { id: string; name: string; email: string; phone: string; address: string }
@@ -17,14 +18,23 @@ export default function Customers() {
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
   const [form, setForm] = useState({ name: '', email: '', phone: '', address: '' });
+  // The customer being edited (null = adding a new one).
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const load = () => api.get('/customers').then((r) => setRows(r.data));
   useEffect(() => { load(); }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.post('/customers', form);
+    if (editingId) {
+      await api.patch(`/customers/${editingId}`, form);
+      toast('Customer saved');
+    } else {
+      await api.post('/customers', form);
+      toast('Customer added');
+    }
     setShowForm(false);
+    setEditingId(null);
     setForm({ name: '', email: '', phone: '', address: '' });
     load();
   };
@@ -55,7 +65,7 @@ export default function Customers() {
             <input placeholder="Address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
             <div className="flex gap-2" style={{ gridColumn: '1 / -1' }}>
               <button type="submit" className="btn btn-primary">Save</button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
+              <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setForm({ name: '', email: '', phone: '', address: '' }); }} className="btn btn-secondary">Cancel</button>
             </div>
           </form>
         </div>
@@ -71,6 +81,7 @@ export default function Customers() {
             {hasPermission('invoices') && (
               <button onClick={() => navigate(`/customers/${r.id}/statement`)} className="btn-link text-xs">Statement</button>
             )}
+            <button onClick={() => { setForm({ name: r.name ?? '', email: r.email ?? '', phone: r.phone ?? '', address: r.address ?? '' }); setEditingId(r.id); setShowForm(true); window.scrollTo(0, 0); }} className="btn-link text-xs">Edit</button>
             <button onClick={() => remove(r)} className="btn-link text-xs" style={{ color: '#dc2626' }}>Delete</button>
           </span>
         )},

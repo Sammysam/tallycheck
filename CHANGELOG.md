@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- First-time-user fixes: "Receive payment" / "Pay bill" with the amount filled in, plain-word payment
+  forms and lists, editable customers and vendors, labelled bill dates, confirmations when posting,
+  a getting-started list and a backups-off notice on the dashboard, Sri Lankan payroll accounts hidden
+  for US companies, invoices starting at INV-0001 on a new install (D72).
 - Built-in 2026 state income tax for Utah (from 1 June 2026) and Massachusetts (with the 4% surtax) (D71).
 - State forms: per state and quarter, the figures for the withholding return and the unemployment
   wage report (with the 12th-of-the-month counts), leave programs and local taxes; the state's annual

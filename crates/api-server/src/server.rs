@@ -154,6 +154,7 @@ pub async fn start_with_shell(
         tracing::info!(added, "fresh install: default chart of accounts created");
     }
     bootstrap_admin_from_env(&db).await?;
+    payroll::us_setup::tidy_accounts_on_start(&db).await.context("tidying the chart of accounts")?;
 
     let listener = TcpListener::bind(config.bind).await.with_context(|| format!("binding {}", config.bind))?;
     let addr = listener.local_addr()?;

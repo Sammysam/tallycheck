@@ -84,16 +84,16 @@ export default function FirstRunSetup() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">Username</label>
-                <input type="text" required minLength={3} value={username} onChange={(e) => setUsername(e.target.value)} className={input} />
+                <label htmlFor="setup-username" className="block text-xs font-medium text-gray-600 mb-1.5">Username</label>
+                <input id="setup-username" autoComplete="username" type="text" required minLength={3} value={username} onChange={(e) => setUsername(e.target.value)} className={input} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">Password (at least 8 characters)</label>
-                <PasswordInput required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className={input} />
+                <label htmlFor="setup-password" className="block text-xs font-medium text-gray-600 mb-1.5">Password (at least 8 characters)</label>
+                <PasswordInput id="setup-password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className={input} />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1.5">Confirm password</label>
-                <PasswordInput required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} className={input} />
+                <label htmlFor="setup-confirm" className="block text-xs font-medium text-gray-600 mb-1.5">Confirm password</label>
+                <PasswordInput id="setup-confirm" autoComplete="new-password" required minLength={8} value={confirm} onChange={(e) => setConfirm(e.target.value)} className={input} />
               </div>
               <p className="text-xs text-gray-400">
                 This account can do everything, including payroll and user management. Keep the password safe. Next you get a recovery key in case you forget it. Tip: later, add a second administrator under Administration → Users, so someone can always reset passwords.

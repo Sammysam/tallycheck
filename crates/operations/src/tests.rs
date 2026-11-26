@@ -127,7 +127,7 @@ async fn invoice_lifecycle_posts_pays_and_balances() -> AppResult<()> {
     let s = shop().await?;
     let inv =
         invoices::create(&s.db, s.invoice(vec![("2.5", "1000.25", true), ("1", "0", false)]), Some("admin")).await?;
-    assert_eq!(inv.invoice_number, "INV-9000");
+    assert_eq!(inv.invoice_number, "INV-0001");
     assert_eq!(inv.total_amount, m("2500.63"));
     assert_eq!(inv.due_date.as_deref(), Some("2026-05-01"));
     let created = inv.to_json(View::Created);
@@ -342,7 +342,7 @@ async fn search_matches_number_po_bill_to_and_customer_name() -> AppResult<()> {
     assert_eq!(invoices::find_all(&s.db, &find("walk"), &ADMIN()).await?.1, 1);
     assert_eq!(invoices::find_all(&s.db, &find("ACME"), &ADMIN()).await?.1, 1);
     assert_eq!(invoices::find_all(&s.db, &find("po-77"), &ADMIN()).await?.1, 1);
-    assert_eq!(invoices::find_all(&s.db, &find("INV-900"), &ADMIN()).await?.1, 2);
+    assert_eq!(invoices::find_all(&s.db, &find("INV-000"), &ADMIN()).await?.1, 2);
     Ok(())
 }
 

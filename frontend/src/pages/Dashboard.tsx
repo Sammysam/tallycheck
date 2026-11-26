@@ -54,7 +54,15 @@ function Panel({ title, note, children, className = '' }: { title: string; note?
 }
 
 export default function Dashboard() {
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
+  // D72: an administrator is told when automatic backups are off (null = unknown / not asked).
+  const [backupsOff, setBackupsOff] = useState<null | { passwordSet: boolean }>(null);
+  useEffect(() => {
+    if (user?.role !== 'Admin') return;
+    api.get('/system/backup')
+      .then((r) => setBackupsOff(r.data?.settings?.enabled ? null : { passwordSet: !!r.data?.passwordSet }))
+      .catch(() => setBackupsOff(null));
+  }, [user?.role]);
   // The year-to-date figures are company-wide reporting data, so they follow
   // the reports permission — a user without it never sees or fetches them.
   const showOverview = hasPermission('reports');
@@ -114,11 +122,20 @@ export default function Dashboard() {
   useEffect(() => { if (showOverview) loadMetrics(); }, [showOverview]);
 
   const peak = Math.max(1, ...months.flatMap((m) => [m.revenue, m.expenses]));
+  // Nothing recorded yet this year: a first-steps card instead of an empty chart scale.
+  const empty = !loading && months.every((m) => m.revenue === 0 && m.expenses === 0) && (ar?.total ?? 0) === 0 && (ap?.total ?? 0) === 0;
+  const backupNotice = backupsOff && (
+    <div className="mb-3 px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-md flex items-center justify-between gap-3" role="status">
+      <span>Automatic backups are off — your books are not being backed up. {backupsOff.passwordSet ? 'Turn them on' : 'Set a backup password and turn them on'} under Settings → Backup &amp; restore.</span>
+      <Link to="/settings?tab=backup" className="btn btn-secondary whitespace-nowrap">Set up backups</Link>
+    </div>
+  );
 
   if (!showOverview) {
     return (
       <div>
         <PageHeader title="Dashboard" />
+        {backupNotice}
         <p className="text-sm text-gray-600">Use the menu bar, the toolbar or the navigation pane to open a screen.</p>
       </div>
     );
@@ -127,6 +144,18 @@ export default function Dashboard() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle={`Financial year from ${yearStart}. Press F5 to refresh.`} />
+      {backupNotice}
+      {empty && (
+        <div className="mb-3 px-4 py-3 bg-white border border-[#e0e0e0] rounded-md text-sm" aria-label="Getting started">
+          <p className="font-semibold text-gray-800 mb-1">Getting started</p>
+          <ol className="list-decimal pl-5 space-y-0.5 text-gray-700">
+            <li>Add your <Link to="/customers" className="btn-link">customers</Link> and <Link to="/vendors" className="btn-link">vendors</Link>.</li>
+            <li>Add the <Link to="/items" className="btn-link">products and services</Link> you sell.</li>
+            <li>Create your first <Link to="/invoices" className="btn-link">invoice</Link>, post it, then record the payment when it comes in.</li>
+            <li>Enter the <Link to="/bills" className="btn-link">bills</Link> you have to pay. Your figures appear here as you go.</li>
+          </ol>
+        </div>
+      )}
 
       {/* Key figures */}
       <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-2 mb-3">
@@ -148,7 +177,7 @@ export default function Dashboard() {
 
       {!loading && (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-          <Panel title="Revenue and expenses" note={`By month from ${yearStart} · highest ${compact(peak)} ${region().currency}`} className="xl:col-span-2">
+          <Panel title="Revenue and expenses" note={empty ? `By month from ${yearStart} · nothing recorded yet` : `By month from ${yearStart} · highest ${compact(peak)} ${region().currency}`} className="xl:col-span-2">
             <div className="flex items-center gap-4 text-xs text-gray-600 mb-2">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-orange-500" />Revenue</span>
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-slate-400" />Expenses</span>

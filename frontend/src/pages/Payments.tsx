@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { useCommand } from '../lib/commands';
@@ -7,15 +7,28 @@ import Pagination from '../components/Pagination';
 import StatusBadge from '../components/StatusBadge';
 import { taxOf, useTaxCodes } from '../lib/taxes';
 import { money, moneyIn } from '../lib/money';
-import { region } from '../lib/region';
+import { fmtDate, region, todayIso } from '../lib/region';
+import { useSearchParams } from 'react-router-dom';
+import { toast } from '../lib/toast';
 import Dialog from '../components/desktop/Dialog';
 import TxnLink from '../components/TxnLink';
 
 interface Payment {
   id: string; paymentNumber: string; type: string; date: string; amount: number; paymentMethod: string; status: string;
   withholdingAmount?: string; currency?: string | null; exchangeRate?: number; baseAmount?: string; exchangeDifference?: string;
-  payableAccountId?: string | null;
+  payableAccountId?: string | null; invoiceId?: string | null; billId?: string | null;
 }
+
+/** An invoice or bill as the payments list names it. */
+interface DocRow { id: string; invoiceNumber?: string; billNumber?: string; billToName?: string | null; customer?: { name?: string } | null; vendor?: { name?: string } | null }
+
+/** An open invoice or bill with what is still owed on it. */
+interface OpenDoc { id: string; totalAmount: number | string; amountPaid?: number | string; amountCredited?: number | string }
+
+/** Payment types and methods in plain words. */
+const TYPE_LABEL: Record<string, string> = { AR: 'From a customer', AP: 'To a vendor' };
+const METHOD_LABEL: Record<string, string> = { BANK_TRANSFER: 'Bank transfer', CASH: 'Cash', CHECK: 'Check' };
+const blankForm = () => ({ type: 'AR', invoiceId: '', billId: '', payableAccountId: '', date: todayIso(), amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
 
 /** D33: liabilities split as the balance sheet reads them. */
 const NON_CURRENT = ['non_current_liability', 'long_term_liability', 'long_term_loan', 'non_current'];
@@ -34,7 +47,13 @@ export default function Payments() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ type: 'AR', invoiceId: '', billId: '', payableAccountId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
+  const [form, setForm] = useState(blankForm);
+  // Every invoice and bill (paid ones too), to say on the list what each payment was for.
+  const [allInvoices, setAllInvoices] = useState<DocRow[]>([]);
+  const [allBills, setAllBills] = useState<DocRow[]>([]);
+  const [params] = useSearchParams();
+  // The invoice / bill to open the form for, from the address (read once).
+  const wanted = useRef({ invoice: params.get('invoice'), bill: params.get('bill') });
   const [error, setError] = useState('');
   const [voiding, setVoiding] = useState<Payment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -45,7 +64,9 @@ export default function Payments() {
   // D30: the chosen document's currency; a foreign one is paid at the day's rate.
   const chosenDoc = form.type === 'AR' ? invoices.find((i) => i.id === form.invoiceId) : bills.find((b) => b.id === form.billId);
   const isAccount = form.type === 'ACCOUNT';
-  const bankAccounts = accounts.filter((a) => a.type === 'ASSET');
+  // Money accounts only: cash and bank (10xx) or accounts named or typed as bank / cash.
+  const bankAccounts = accounts.filter((a) => a.type === 'ASSET' && a.isActive !== false
+    && (String(a.code).startsWith('10') || /bank|cash|petty|paypal|stripe|clearing/i.test(`${a.name} ${a.subtype ?? ''}`)));
   const liabilities = accounts.filter((a) => a.type === 'LIABILITY' && !a.currency);
   // D34: a payable account paid from a USD account is entered in USD at the day's rate.
   const bankCurrency: string = accounts.find((a) => a.id === form.paymentAccountId)?.currency ?? '';
@@ -53,7 +74,9 @@ export default function Payments() {
   const chooseDoc = (field: 'invoiceId' | 'billId', id: string) => {
     const doc = (field === 'invoiceId' ? invoices : bills).find((d) => d.id === id);
     const cur = doc?.currency ?? '';
-    setForm({ ...form, [field]: id, exchangeRate: cur ? String(region().lastRates[cur] ?? doc?.exchangeRate ?? '') : '' });
+    // What is still owed on it, as the amount to receive / pay.
+    const left = doc ? Number(doc.totalAmount) - Number(doc.amountPaid ?? 0) - Number(doc.amountCredited ?? 0) : 0;
+    setForm({ ...form, [field]: id, amount: doc && left > 0 ? left.toFixed(2) : form.amount, exchangeRate: cur ? String(region().lastRates[cur] ?? doc?.exchangeRate ?? '') : '' });
   };
 
   const chooseWithholding = (codeId: string) => {
@@ -84,8 +107,32 @@ export default function Payments() {
 
   useEffect(() => { load(); }, [page]);
   const loadDocuments = () => {
-    api.get('/invoices', { params: { limit: 100 } }).then((r) => setInvoices((r.data.data ?? r.data).filter((i: any) => i.status === 'POSTED')));
-    api.get('/bills',    { params: { limit: 100 } }).then((r) => setBills((r.data.data ?? r.data).filter((b: any) => b.status === 'POSTED')));
+    // "Receive payment" on an invoice / "Pay bill" on a bill opens the form for that document.
+    const openFor = (kind: 'invoice' | 'bill', docs: OpenDoc[]) => {
+      const id = wanted.current[kind];
+      if (!id) return;
+      wanted.current[kind] = null;
+      const doc = docs.find((d) => d.id === id);
+      if (doc) {
+        const left = Number(doc.totalAmount) - Number(doc.amountPaid ?? 0) - Number(doc.amountCredited ?? 0);
+        setForm({ ...blankForm(), type: kind === 'invoice' ? 'AR' : 'AP', invoiceId: kind === 'invoice' ? id : '', billId: kind === 'bill' ? id : '', amount: left > 0 ? left.toFixed(2) : '' });
+        setShowForm(true);
+      }
+    };
+    api.get('/invoices', { params: { limit: 100 } }).then((r) => {
+      const all = r.data.data ?? r.data;
+      setAllInvoices(all);
+      const posted = all.filter((i: any) => i.status === 'POSTED');
+      setInvoices(posted);
+      openFor('invoice', posted);
+    });
+    api.get('/bills',    { params: { limit: 100 } }).then((r) => {
+      const all = r.data.data ?? r.data;
+      setAllBills(all);
+      const open = all.filter((b: any) => b.status === 'POSTED');
+      setBills(open);
+      openFor('bill', open);
+    });
   };
 
   // Reverses the payment in the ledger; its invoice or bill is owed again (D18).
@@ -111,6 +158,14 @@ export default function Payments() {
     loadDocuments();
   }, []);
 
+
+  /** What a payment was for: the invoice / bill number and who. */
+  const forWhat = (r: Payment) => {
+    if (r.invoiceId) { const d = allInvoices.find((x) => x.id === r.invoiceId); return d ? `${d.invoiceNumber} · ${d.customer?.name || d.billToName || 'customer'}` : 'Invoice'; }
+    if (r.billId) { const d = allBills.find((x) => x.id === r.billId); return d ? `${d.billNumber} · ${d.vendor?.name ?? 'vendor'}` : 'Bill'; }
+    return '';
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -129,7 +184,9 @@ export default function Payments() {
       };
       await api.post('/payments', payload);
       setShowForm(false);
-      setForm({ type: 'AR', invoiceId: '', billId: '', payableAccountId: '', date: '', amount: '', paymentMethod: 'BANK_TRANSFER', paymentAccountId: '', notes: '', withholdingTaxCodeId: '', withholdingAmount: '', exchangeRate: '' });
+      setForm(blankForm());
+      toast('Payment recorded');
+      loadDocuments();
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to record payment');
@@ -150,9 +207,9 @@ export default function Payments() {
           <form onSubmit={submit} className="space-y-3">
             <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, invoiceId: '', billId: '' })}>
-                <option value="AR">AR — Customer Payment</option>
-                <option value="AP">AP — Vendor Payment</option>
-                <option value="ACCOUNT">Payable account — pay a liability</option>
+                <option value="AR">Money received from a customer (invoice)</option>
+                <option value="AP">Money paid to a vendor (bill)</option>
+                <option value="ACCOUNT">Pay a liability account (e.g. a loan or tax)</option>
               </select>
               {isAccount
                 ? <select required value={form.payableAccountId} onChange={(e) => setForm({ ...form, payableAccountId: e.target.value })} aria-label="Payable account">
@@ -166,7 +223,7 @@ export default function Payments() {
                   </select>
                 : form.type === 'AR'
                 ? <select required value={form.invoiceId} onChange={(e) => chooseDoc('invoiceId', e.target.value)}>
-                    <option value="">Select Posted Invoice</option>
+                    <option value="">Which invoice is being paid?</option>
                     {invoices.map((i) => (
                       <option key={i.id} value={i.id}>
                         {i.invoiceNumber} — {i.customer?.name || i.billToName || 'one-off'} · balance {fmt(Number(i.totalAmount) - Number(i.amountPaid ?? 0) - Number(i.amountCredited ?? 0))}
@@ -174,23 +231,27 @@ export default function Payments() {
                     ))}
                   </select>
                 : <select required value={form.billId} onChange={(e) => chooseDoc('billId', e.target.value)}>
-                    <option value="">Select Posted Bill</option>
+                    <option value="">Which bill are you paying?</option>
                     {bills.map((b) => <option key={b.id} value={b.id}>{b.billNumber} — {b.vendor?.name}</option>)}
                   </select>
               }
             </div>
             <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-              <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-              <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-              <select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })}>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Date</span>
+                <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} aria-label="Payment date" /></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Amount</span>
+                <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} aria-label="Amount" /></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">How</span>
+              <select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} aria-label="Payment method">
                 <option value="BANK_TRANSFER">Bank Transfer</option>
                 <option value="CASH">Cash</option>
                 <option value="CHECK">Check</option>
-              </select>
-              <select required value={form.paymentAccountId} onChange={(e) => setForm({ ...form, paymentAccountId: e.target.value })}>
-                <option value="">Bank / Cash Account</option>
+              </select></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Into / out of which account</span>
+              <select required value={form.paymentAccountId} onChange={(e) => setForm({ ...form, paymentAccountId: e.target.value })} aria-label="Bank or cash account">
+                <option value="">Choose a bank or cash account</option>
                 {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}{a.currency ? ` (${a.currency})` : ''}</option>)}
-              </select>
+              </select></label>
             </div>
             {docCurrency && (
               <div className="form-grid items-end" style={{ gridTemplateColumns: '1fr 2fr' }}>
@@ -244,13 +305,14 @@ export default function Payments() {
       <Table data={rows} columns={[
         { header: '#',      accessor: (r) => <TxnLink entryId={(r as { journalEntryId?: string }).journalEntryId}>{r.paymentNumber}</TxnLink> },
         { header: 'Type',   accessor: (r) => {
-          if (!r.payableAccountId) return r.type;
+          if (!r.payableAccountId) return TYPE_LABEL[r.type] ?? r.type;
           const a = accounts.find((x) => x.id === r.payableAccountId);
           return <span title="Paid a payable account">AP · {a ? `${a.code} ${a.name}` : 'payable account'}</span>;
         } },
-        { header: 'Date',   accessor: 'date' },
+        { header: 'For',    accessor: (r) => forWhat(r) },
+        { header: 'Date',   accessor: (r) => fmtDate(r.date) },
         { header: 'Amount', accessor: (r) => moneyIn(Number(r.amount), r.currency) },
-        { header: 'Method', accessor: 'paymentMethod' },
+        { header: 'Method', accessor: (r) => METHOD_LABEL[r.paymentMethod] ?? r.paymentMethod },
         { header: 'Withheld', accessor: (r) => (Number(r.withholdingAmount ?? 0) ? moneyIn(Number(r.withholdingAmount), r.currency) : '') },
         { header: 'In the books', accessor: (r) => (r.currency || Number(r.exchangeRate ?? 1) !== 1 ? `${money(Number(r.baseAmount))} @ ${r.exchangeRate}` : '') },
         { header: 'Exchange', accessor: (r) => (Number(r.exchangeDifference ?? 0) ? money(-Number(r.exchangeDifference) * (r.type === 'AR' ? 1 : -1)) : '') },

@@ -190,6 +190,7 @@ export default function Invoices() {
     if (!window.confirm(warn)) return;
     try {
       await api.patch(`/invoices/${r.id}/status`, { status });
+      toast(status === 'POSTED' ? `${r.invoiceNumber} posted to the books` : status === 'VOID' ? `${r.invoiceNumber} voided` : `${r.invoiceNumber} is a draft again`);
       load();
     } catch (err: any) {
       alert(errMsg(err, 'Failed to change status'));
@@ -207,7 +208,11 @@ export default function Invoices() {
   };
 
   const action = async (id: string, ep: string) => {
-    try { await api.post(`/invoices/${id}/${ep}`); load(); }
+    try {
+      await api.post(`/invoices/${id}/${ep}`);
+      toast(ep === 'post' ? 'Invoice posted to the books' : ep === 'void' ? 'Invoice voided' : 'Done');
+      load();
+    }
     catch (err: any) { alert(errMsg(err, 'Action failed')); }
   };
 
@@ -456,7 +461,7 @@ export default function Invoices() {
             }},
             { header: 'Customer', accessor: (r) => r.customer?.name || r.billToName || '—' },
             { header: 'Date',     accessor: 'date' },
-            { header: 'Due',      accessor: (r) => r.dueDate ?? '—' },
+            { header: 'Due',      accessor: (r) => (r.dueDate ? fmtDate(r.dueDate) : '—') },
             { header: 'Amount',   accessor: (r) => moneyIn(Number(r.totalAmount), r.currency) },
             { header: 'Paid',     accessor: (r) => (Number(r.amountPaid ?? 0) > 0 ? moneyIn(Number(r.amountPaid), r.currency) : '—') },
             { header: 'Balance',  accessor: (r) => (r.status === 'VOID' ? '—' : moneyIn(balanceOf(r), r.currency)) },
@@ -483,6 +488,7 @@ export default function Invoices() {
                 { label: 'Copy',     onSelect: () => duplicate(r.id) },
                 ...(r.status !== 'VOID' ? [{ label: 'Make recurring', onSelect: () => { setRecurringFrom(r); window.scrollTo(0, 0); } }] : []),
                 ...(r.status === 'DRAFT'  ? [{ label: 'Post',   onSelect: () => action(r.id, 'post') }] : []),
+                ...(r.status === 'POSTED' ? [{ label: 'Receive payment', onSelect: () => navigate(`/payments?invoice=${r.id}`) }] : []),
                 ...(r.status === 'POSTED' ? [{ label: 'Void',   onSelect: () => action(r.id, 'void'), danger: true }] : []),
                 ...(r.status === 'DRAFT' && user?.role === 'Admin' ? [{ label: 'Delete', onSelect: () => remove(r), danger: true }] : []),
               ]} />

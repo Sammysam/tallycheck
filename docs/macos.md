@@ -9,7 +9,7 @@ is the same program as on Windows: the same screens, the same server and the sam
 | Data folder | `%LOCALAPPDATA%\TallyCheckData` | `~/Library/Application Support/TallyCheckData` |
 | Secret keys (sign-in key, file-encryption key, connector keys) | DPAPI | AES-256-GCM under a key in the user's **login Keychain** ("TallyCheck data protection") |
 | Forgot password | recovery key, or Windows sign-in | recovery key only |
-| Backups by default | `Documents\Cenango Backups` | `~/Documents/Cenango Backups` |
+| Backups by default | `Documents\TallyCheck Backups` | `~/Documents/TallyCheck Backups` |
 | Claude connector | `tallycheck-mcp.exe` next to the app | `TallyCheck.app/Contents/MacOS/tallycheck-mcp` |
 | In-app updates | yes | **not yet**: download the new .dmg (the update feed has no Mac entry) |
 

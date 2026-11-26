@@ -23,7 +23,7 @@ script adds `com.apple.application-identifier` and `com.apple.developer.team-ide
 
 ## Open items (must be done and tested on a Mac before submitting)
 
-1. **Backup folder.** A sandboxed app cannot write to `~/Documents/Cenango Backups` by itself.
+1. **Backup folder.** A sandboxed app cannot write to `~/Documents/TallyCheck Backups` by itself.
    The backup settings must let the person pick the folder (open panel), keep a security-scoped
    bookmark of it, and open the bookmark before each backup, including scheduled ones. Restore
    and imports already go through a picked file.

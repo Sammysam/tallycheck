@@ -1056,6 +1056,26 @@ recommendations without answering each one individually; revisit any of them on 
   (`PayContext.fica_ytd`, 6.2% / 1.45% of the year-to-date wages). Oregon stays a company rule:
   its 2026 formula (150-206-436, Rev. 12-31-25) adds $263 a year under $50,000 that its own
   tables do not.
+- **D72 First-time-user fixes** (2026-11-27).
+  Fixes from a first-time-user test of a fresh install. When payroll becomes US, the untouched
+  Sri Lankan payroll accounts the baseline seeds (2210–2250, 6110, 6120: seeded name, never
+  posted to) are switched off, so they leave the reports and account lists; they come back when
+  payroll returns to Sri Lanka (`payroll::us_setup::tidy_country_accounts`, also run at start-up
+  for a company already on US payroll). A new company's first invoice is INV-0001 (migration
+  `20261127000006` resets the reference's seeded INV-9000 counter only while no invoice exists).
+  The default backup folder is `Documents\TallyCheck Backups` (earlier installs keep the folder
+  they saved). Creating the first administrator counts as that person's first sign-in on the
+  Users screen. Screens: a posted invoice's menu has "Receive payment" and a posted bill "Pay
+  bill", which open the payment form for that document with the amount still owed; the payment
+  form uses plain words, starts on today's date, fills in the amount when a document is chosen
+  and lists only bank and cash accounts; the payments list says what each payment was for and
+  shows types and methods in words; bill dates are labelled and the bills list shows the due date;
+  invoice and bill due dates follow the company's date style; posting, voiding and recording
+  payments confirm with a message; customers and vendors can be edited from their lists; the
+  Balance Sheet shows one Total Assets and "Total liabilities and equity"; the company setup's
+  tax-number step asks a US company for its EIN; the dashboard tells an administrator when
+  automatic backups are off and shows a getting-started list until anything is recorded; the
+  first-run and sign-in labels are linked to their fields.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

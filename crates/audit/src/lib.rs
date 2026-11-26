@@ -173,11 +173,13 @@ pub struct LastSignIn {
     pub at: String,
 }
 
-/// D36: each user's most recent successful sign-in, from the log.
+/// D36: each user's most recent successful sign-in, from the log. D72: creating the first
+/// administrator signs that person in too, so it counts.
 pub async fn last_sign_ins(db: &Db) -> AppResult<Vec<LastSignIn>> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         r#"SELECT "userId", MAX("createdAt") FROM "audit_logs"
-           WHERE "userId" IS NOT NULL AND "action" = 'Logged in' GROUP BY "userId""#,
+           WHERE "userId" IS NOT NULL AND "action" IN ('Logged in', 'Created the first administrator')
+           GROUP BY "userId""#,
     )
     .fetch_all(db.read())
     .await?;

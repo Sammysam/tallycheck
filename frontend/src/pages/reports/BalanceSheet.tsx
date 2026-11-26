@@ -77,7 +77,6 @@ export default function BalanceSheet() {
               compareHeader={compareHeader}
               rows={[
                 ...sectionRows('Assets', data.assets, data.totalAssets, dates, cmp(before?.assets, before?.totalAssets)),
-                { key: 'grand-assets', label: 'TOTAL ASSETS', amount: Number(data.totalAssets), compare: was(before?.totalAssets), total: true },
               ]}
             />
           </div>
@@ -95,7 +94,7 @@ export default function BalanceSheet() {
               rows={[
                 ...sectionRows('Equity', data.equity, data.totalEquity, dates, cmp(before?.equity, before?.totalEquity)),
                 { key: 'retained', label: 'Retained Earnings', amount: Number(data.retainedEarnings), compare: was(before?.retainedEarnings) },
-                { key: 'grand-le', label: 'TOTAL L + E', amount: Number(data.totalLiabilitiesAndEquity), compare: was(before?.totalLiabilitiesAndEquity), total: true },
+                { key: 'grand-le', label: 'Total liabilities and equity', amount: Number(data.totalLiabilitiesAndEquity), compare: was(before?.totalLiabilitiesAndEquity), total: true },
               ]}
             />
             <p className={`text-xs px-1 ${data.balanced ? 'text-green-700' : 'text-red-600'}`}>

@@ -264,7 +264,8 @@ async fn seeds_match_reference_migrations() -> AppResult<()> {
 
     let inv: i64 =
         sqlx::query_scalar(r#"SELECT "value" FROM "counters" WHERE "key" = 'INV'"#).fetch_one(db.read()).await?;
-    assert_eq!(inv, 8999);
+    // D72: the reference seeded 8999 (INV-9000); a fresh install starts at INV-0001.
+    assert_eq!(inv, 0);
 
     let settings = settings::find_all(&db).await?;
     // D25: the seeded customer details are blanked on a fresh install.

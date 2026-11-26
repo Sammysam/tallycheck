@@ -123,7 +123,7 @@ fn read_tools() -> Vec<Value> {
             }),
             &[],
         ),
-        tool("get_invoice", "One invoice in full (lines, tax, payments), by its number such as INV-9004 or a PO number.", json!({ "number": { "type": "string" } }), &["number"]),
+        tool("get_invoice", "One invoice in full (lines, tax, payments), by its number such as INV-0004 or a PO number.", json!({ "number": { "type": "string" } }), &["number"]),
         tool("list_bills", "Vendor bills, newest first.", json!({ "limit": { "type": "integer", "minimum": 1, "maximum": 100 } }), &[]),
         tool("list_payments", "Payments received and made, newest first.", json!({ "limit": { "type": "integer", "minimum": 1, "maximum": 100 } }), &[]),
         tool("list_expenses", "Expenses paid on the spot, newest first.", json!({ "limit": { "type": "integer", "minimum": 1, "maximum": 100 } }), &[]),

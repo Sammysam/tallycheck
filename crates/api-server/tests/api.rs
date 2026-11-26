@@ -684,7 +684,7 @@ async fn invoice_to_payment_flow_with_bills_and_expenses() -> TestResult {
         )
         .await?;
     assert_eq!(inv.status, StatusCode::CREATED);
-    assert_eq!(inv.body["invoiceNumber"], "INV-9000");
+    assert_eq!(inv.body["invoiceNumber"], "INV-0001");
     assert_eq!(inv.body["dueDate"], "2026-05-01");
     assert_eq!(inv.body["lines"][0]["amount"], json!(2500.63));
     assert!(inv.body.get("customer").is_none());

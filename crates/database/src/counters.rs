@@ -1,4 +1,4 @@
-//! Document number sequences (reference `CounterService`): `JE-000001`, `INV-9000`, …
+//! Document number sequences (reference `CounterService`): `JE-000001`, `INV-0001`, …
 //!
 //! The counter is incremented inside the caller's write transaction, so a posting that fails
 //! and rolls back also gives its number back — numbers never skip because of an error (the
@@ -48,8 +48,8 @@ mod tests {
 
         let mut tx = db.begin().await?;
         assert_eq!(next_formatted(&mut tx, "JE", 6).await?, "JE-000003");
-        // Seeded by the baseline migration: invoices start at INV-9000, 4 digits.
-        assert_eq!(next_formatted(&mut tx, "INV", 4).await?, "INV-9000");
+        // D72: a new company's invoices start at INV-0001 (4 digits).
+        assert_eq!(next_formatted(&mut tx, "INV", 4).await?, "INV-0001");
         tx.commit().await?;
         Ok(())
     }

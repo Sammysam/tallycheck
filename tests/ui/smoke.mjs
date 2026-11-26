@@ -497,7 +497,7 @@ try {
     if (r.status !== 201) throw new Error('create returned ' + r.status);
     await go('/invoices');
     await quietDialogs();
-    await waitFor(`document.body.innerText.includes('INV-9000')`, 'invoice row');
+    await waitFor(`document.body.innerText.includes('INV-0001')`, 'invoice row');
     await evaluate(`(() => {
       const sel = [...document.querySelectorAll('select')].find((x) => x.title.startsWith('Change the status'));
       sel.value = 'POSTED'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
@@ -506,7 +506,7 @@ try {
     mkdirSync(dl, { recursive: true });
     await send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dl });
     await go('/invoices');
-    await evaluate(`(() => { const row = [...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes('INV-9000'));
+    await evaluate(`(() => { const row = [...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes('INV-0001'));
       const b = [...row.querySelectorAll('button')].find((x) => x.textContent.includes('⋮') || x.getAttribute('aria-label'));
       b.click(); return true; })()`);
     await waitFor(`[...document.querySelectorAll('button,[role=menuitem]')].some((x) => x.textContent.trim() === 'Download')`, 'action menu');
@@ -528,8 +528,8 @@ try {
     await go('/payments');
     await quietDialogs();
     await clickText('+ Record Payment');
-    await waitFor(`[...(document.querySelectorAll('form select')[1]?.options ?? [])].some((o) => o.textContent.includes('INV-9000'))`, 'invoice option');
-    await pick(1, 'INV-9000');
+    await waitFor(`[...(document.querySelectorAll('form select')[1]?.options ?? [])].some((o) => o.textContent.includes('INV-0001'))`, 'invoice option');
+    await pick(1, 'INV-0001');
     await type('input[placeholder="Amount"]', '2500.63');
     await pick(3, '1000');
     await fillDates('2026-04-25');
@@ -660,13 +660,13 @@ try {
     await waitFor(`[...document.querySelectorAll('a.report-link')].some((a) => a.textContent.includes('4000 Revenue'))`, 'revenue link');
     await evaluate(`[...document.querySelectorAll('a.report-link')].find((a) => a.textContent.includes('4000 Revenue')).click()`);
     await waitFor(`location.pathname.startsWith('/ledger/account/') && location.search.includes('dateFrom=')`, 'account activity page');
-    await waitFor(`document.querySelector('[data-testid=closing-balance]')?.innerText.includes('2,500.63') && document.body.innerText.includes('INV-9000')`, 'revenue entries');
+    await waitFor(`document.querySelector('[data-testid=closing-balance]')?.innerText.includes('2,500.63') && document.body.innerText.includes('INV-0001')`, 'revenue entries');
     await shot('18b-account-activity');
 
     await go('/customers');
     await rowAction('Acme Ltd', 'Statement');
     await waitFor(`location.pathname.endsWith('/statement') && document.body.innerText.includes('STATEMENT OF ACCOUNT')`, 'statement page');
-    await waitFor(`['INV-9000', 'PAY-000001'].every((t) => document.body.innerText.includes(t)) && document.querySelector('[data-testid=amount-due]').innerText.includes('0.00')`, 'statement lines, nothing due');
+    await waitFor(`['INV-0001', 'PAY-000001'].every((t) => document.body.innerText.includes(t)) && document.querySelector('[data-testid=amount-due]').innerText.includes('0.00')`, 'statement lines, nothing due');
     await shot('18c-statement');
 
     const dl = join(SHOTS, 'downloads');
@@ -682,7 +682,7 @@ try {
     await sleep(300);
     const text = readFileSync(join(dl, csv), 'utf8');
     if (!csv.startsWith('Customer Statement ') || !text.startsWith('\ufeff')) throw new Error('unexpected file ' + csv);
-    if (!text.includes('INV-9000') || !text.includes('2500.63') || text.includes('LKR')) throw new Error('CSV content:\n' + text.slice(0, 400));
+    if (!text.includes('INV-0001') || !text.includes('2500.63') || text.includes('LKR')) throw new Error('CSV content:\n' + text.slice(0, 400));
   });
 
   await check('Cash flow ends at the cash balance; P&L compares with last year (D24)', async () => {
@@ -914,7 +914,7 @@ try {
     await waitFor(`!!document.querySelector('[role=dialog]')?.innerText.includes('PAY-000001')`, 'confirm dialog');
     await clickText('Void payment');
     await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('PAY-000001') && tr.innerText.includes('VOID'))`, 'payment marked VOID');
-    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-9000');
+    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-0001');
     if (inv.status !== 'POSTED' || inv.amountPaid !== '0.00') throw new Error(`invoice is ${inv.status} with ${inv.amountPaid} paid`);
     await shot('27-payment-void');
   });
@@ -926,14 +926,14 @@ try {
     };
     await go('/credit-notes');
     await clickText('+ New Credit Note');
-    await waitFor(`[...(document.querySelectorAll('form select')[0]?.options ?? [])].some((o) => o.textContent.includes('INV-9000'))`, 'invoice option');
-    await pick(0, 'INV-9000');
+    await waitFor(`[...(document.querySelectorAll('form select')[0]?.options ?? [])].some((o) => o.textContent.includes('INV-0001'))`, 'invoice option');
+    await pick(0, 'INV-0001');
     await waitFor(`document.querySelector('input[placeholder=Amount]').value === '2500.63'`, 'amount defaults to what is owed');
     await setAmount('500');
     await type('input[placeholder^="e.g. 10%"]', 'Discount for late delivery');
     await clickText('Save Note');
-    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('CN-000001') && tr.innerText.includes('INV-9000'))`, 'credit note row');
-    const inv = async () => (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-9000');
+    await waitFor(`[...document.querySelectorAll('tr')].some((tr) => tr.innerText.includes('CN-000001') && tr.innerText.includes('INV-0001'))`, 'credit note row');
+    const inv = async () => (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-0001');
     if ((await inv()).amountCredited !== '500.00') throw new Error('invoice not credited');
     const ar = (await api('GET', '/api/reports/ar-aging')).body.grandTotal;
     if (ar !== 2000.63) throw new Error('AR ageing shows ' + ar);
@@ -1205,7 +1205,7 @@ try {
     await clickText('Lock');
     await waitFor(`document.querySelector('[data-testid=lock-status]')?.innerText.includes('30 April 2026')`, 'locked');
     const cash = (await api('GET', '/api/accounts')).body.find((a) => a.code === '1000').id;
-    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-9000');
+    const inv = (await api('GET', '/api/invoices')).body.data.find((i) => i.invoiceNumber === 'INV-0001');
     const late = await api('POST', '/api/payments', { type: 'AR', invoiceId: inv.id, date: '2026-04-30', amount: 1, paymentMethod: 'CASH', paymentAccountId: cash });
     if (late.status !== 400 || !String(late.body.message).startsWith('The books are locked up to and including 2026-04-30'))
       throw new Error(`payment on the lock date answered ${late.status} ${JSON.stringify(late.body)}`);

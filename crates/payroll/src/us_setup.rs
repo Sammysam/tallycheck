@@ -205,6 +205,7 @@ pub async fn update_settings(db: &Db, p: UsSettingsPatch) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     let mut put: Vec<(&str, String)> = Vec::new();
     let opt = |v: Option<String>| v.unwrap_or_default();
+    let country_changed = p.country.is_some();
     if let Some(v) = p.country {
         put.push(("payroll.country", v));
     }
@@ -245,13 +246,60 @@ pub async fn update_settings(db: &Db, p: UsSettingsPatch) -> AppResult<Value> {
         }
         database::settings::upsert(&mut tx, &crate::us_runs::setting_key(r.key), id.as_deref().unwrap_or("")).await?;
     }
-    if load_settings(&mut tx).await?.country == "US" {
+    let country = load_settings(&mut tx).await?.country;
+    if country == "US" {
         check_currency(&mut tx).await?;
         crate::us_runs::ensure_accounts(&mut tx).await?;
+    }
+    if country_changed {
+        tidy_country_accounts(&mut tx, &country).await?;
     }
     let out = settings_json(&mut tx).await?;
     tx.commit().await?;
     Ok(out)
+}
+
+/// D72: the Sri Lankan payroll accounts the baseline seeds on every install (code, name).
+const LK_PAYROLL_ACCOUNTS: &[(&str, &str)] = &[
+    ("2210", "EPF Payable"),
+    ("2220", "ETF Payable"),
+    ("2230", "PAYE Payable"),
+    ("2240", "Stamp Duty Payable"),
+    ("2250", "Staff Welfare Fund"),
+    ("6110", "EPF & ETF Employer Contributions"),
+    ("6120", "Staff Welfare Expense"),
+];
+
+/// D72: a US company does not need the Sri Lankan payroll accounts: those still untouched (their
+/// seeded name, never posted to) are switched off when payroll is US, so they leave the reports
+/// and account lists, and switched on again when payroll goes back to Sri Lanka. Accounts that
+/// were renamed or used are left as they are.
+pub async fn tidy_country_accounts(conn: &mut SqliteConnection, country: &str) -> AppResult<()> {
+    let active = i64::from(country != "US");
+    for (code, name) in LK_PAYROLL_ACCOUNTS {
+        sqlx::query(
+            r#"UPDATE "accounts" SET "isActive" = ?3, "updatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+               WHERE "code" = ?1 AND "name" = ?2 AND "isActive" <> ?3
+                 AND NOT EXISTS (SELECT 1 FROM "journal_lines" l WHERE l."accountId" = "accounts"."id")"#,
+        )
+        .bind(code)
+        .bind(name)
+        .bind(active)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+/// D72: at start-up, a company whose payroll is already US gets the same tidy-up (only ever
+/// switching accounts off here, never on).
+pub async fn tidy_accounts_on_start(db: &Db) -> AppResult<()> {
+    let mut tx = db.begin().await?;
+    if load_settings(&mut tx).await?.country == "US" {
+        tidy_country_accounts(&mut tx, "US").await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 // ─── Employee pay and Form W-4 ──────────────────────────────────────────────
