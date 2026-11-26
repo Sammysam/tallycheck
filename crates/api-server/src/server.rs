@@ -117,7 +117,7 @@ pub async fn start_with_updater(
     updater: Option<std::sync::Arc<dyn crate::updates::Updater>>,
     channel: crate::updates::UpdateChannel,
 ) -> anyhow::Result<ServerHandle> {
-    start_with_shell(config, updater, channel, None).await
+    start_with_shell(config, updater, channel, None, None).await
 }
 
 /// [`start_with_updater`], plus the desktop shell's Windows verification for password recovery
@@ -127,6 +127,7 @@ pub async fn start_with_shell(
     updater: Option<std::sync::Arc<dyn crate::updates::Updater>>,
     channel: crate::updates::UpdateChannel,
     verifier: Option<std::sync::Arc<dyn crate::local_verify::WindowsVerifier>>,
+    picker: Option<std::sync::Arc<dyn crate::folder_pick::FolderPicker>>,
 ) -> anyhow::Result<ServerHandle> {
     config.check_local_data_dir()?;
     std::fs::create_dir_all(&config.data_dir).context("creating the data folder")?;
@@ -160,7 +161,8 @@ pub async fn start_with_shell(
         .with_data_dir(config.data_dir.clone())
         .with_lan_policy(config.lan_allowed.clone(), config.lan_host_names.clone())
         .with_updater(updater, channel)
-        .with_windows_verifier(verifier);
+        .with_windows_verifier(verifier)
+        .with_folder_picker(picker);
     let frontend = resolve_frontend_dir(config.frontend_dir.as_deref());
     match &frontend {
         Some(d) => tracing::info!("serving frontend from {}", d.display()),

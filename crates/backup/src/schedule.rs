@@ -1,9 +1,9 @@
-//! Daily backups: settings in `<data_dir>/backup-settings.json`, the outcome of the last
+//! Automatic backups: settings in `<data_dir>/backup-settings.json`, the outcome of the last
 //! attempt in `<data_dir>/backup-status.json`.
 //!
-//! An office PC is not always on at a fixed hour, so "daily" means: whenever the app is
-//! running, check every hour and back up if the last successful backup is more than a day old
-//! (and right after start if one is overdue). Old scheduled backups beyond `keep` are deleted,
+//! An office PC is not always on at a fixed hour, so "every N days" (D62; 1 = daily) means:
+//! whenever the app is running, check every hour and back up if the last successful backup is
+//! more than N days old (and right after start if one is overdue). Old scheduled backups beyond `keep` are deleted,
 //! newest kept; files made by hand are never deleted.
 
 use crate::create::{create_backup, BackupInfo, EXTENSION, FILE_PREFIX};
@@ -27,11 +27,22 @@ pub struct Settings {
     pub folder: Option<String>,
     /// How many scheduled backups to keep.
     pub keep: u32,
+    /// D62: back up when the last backup is this many days old (1–30). Settings saved before
+    /// this existed mean daily.
+    #[serde(default = "one_day")]
+    pub every_days: u32,
 }
+
+fn one_day() -> u32 {
+    1
+}
+
+/// The longest gap between automatic backups that can be chosen.
+pub const MAX_EVERY_DAYS: u32 = 30;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: false, folder: None, keep: 14 }
+        Settings { enabled: false, folder: None, keep: 14, every_days: 1 }
     }
 }
 
@@ -88,9 +99,26 @@ pub fn record(data_dir: &Path, outcome: &Result<BackupInfo, String>) {
     save_status(data_dir, &s);
 }
 
-fn older_than_a_day(iso: &Option<String>) -> bool {
+fn older_than(iso: &Option<String>, days: u32) -> bool {
     let Some(t) = iso.as_deref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) else { return true };
-    chrono::Utc::now().signed_duration_since(t) > chrono::Duration::hours(24)
+    chrono::Utc::now().signed_duration_since(t) > chrono::Duration::hours(24 * i64::from(days.clamp(1, MAX_EVERY_DAYS)))
+}
+
+/// When the next automatic backup is due (ISO time; it is made at the first hourly check after
+/// it, while the app runs): `None` when automatic backups are off, "now" when one is overdue.
+pub fn next_due(settings: &Settings, status: &Status) -> Option<String> {
+    if !settings.enabled {
+        return None;
+    }
+    let last = status.last_success_at.as_deref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok());
+    let due = last.map(|t| {
+        t.with_timezone(&chrono::Utc)
+            + chrono::Duration::hours(24 * i64::from(settings.every_days.clamp(1, MAX_EVERY_DAYS)))
+    });
+    match due {
+        Some(d) if d > chrono::Utc::now() => Some(d.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+        _ => Some("now".into()),
+    }
 }
 
 /// Deletes the oldest scheduled backups beyond `keep`.
@@ -140,7 +168,7 @@ pub const NETWORK_FOLDER_REFUSED: &str = "Scheduled backup skipped: the backup f
 pub async fn run_if_due(db: &Db, data_dir: &Path) -> Option<BackupResult<BackupInfo>> {
     let settings = load_settings(data_dir);
     let folder = settings.folder.clone().filter(|f| !f.trim().is_empty())?;
-    if !settings.enabled || !older_than_a_day(&load_status(data_dir).last_success_at) {
+    if !settings.enabled || !older_than(&load_status(data_dir).last_success_at, settings.every_days) {
         return None;
     }
     if is_unc_path(&folder) {
@@ -205,12 +233,36 @@ mod unc_tests {
         }
     }
 
+    #[test]
+    fn backups_are_due_after_the_chosen_number_of_days() {
+        let day_ago = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+        let status = Status { last_success_at: Some(day_ago.clone()), ..Status::default() };
+        let mut settings = Settings { enabled: true, folder: Some("D:/b".into()), keep: 3, every_days: 3 };
+        assert!(!older_than(&Some(day_ago.clone()), 3), "a day-old backup is not due on a 3-day gap");
+        let next = next_due(&settings, &status).expect("on");
+        let next = chrono::DateTime::parse_from_rfc3339(&next).expect("a time");
+        let left = next.with_timezone(&chrono::Utc) - chrono::Utc::now();
+        assert!(left > chrono::Duration::hours(46) && left < chrono::Duration::hours(48), "{left}");
+        settings.every_days = 1;
+        assert!(older_than(&Some(day_ago), 1));
+        assert_eq!(next_due(&settings, &status).as_deref(), Some("now"));
+        assert_eq!(next_due(&settings, &Status::default()).as_deref(), Some("now"), "never backed up");
+        settings.enabled = false;
+        assert_eq!(next_due(&settings, &status), None);
+        // Settings saved before the gap existed mean daily.
+        let old: Settings = serde_json::from_str(r#"{"enabled":true,"folder":"D:/b","keep":5}"#).expect("old settings");
+        assert_eq!(old.every_days, 1);
+    }
+
     #[tokio::test]
     async fn a_network_folder_saved_earlier_is_not_used() {
         let dir = tempfile::tempdir().expect("temp dir");
         let db = Db::open(&dir.path().join("accounting.db")).await.expect("db");
-        save_settings(dir.path(), &Settings { enabled: true, folder: Some(r"\\server\share".into()), keep: 3 })
-            .expect("settings");
+        save_settings(
+            dir.path(),
+            &Settings { enabled: true, folder: Some(r"\\server\share".into()), keep: 3, every_days: 1 },
+        )
+        .expect("settings");
         match run_if_due(&db, dir.path()).await {
             Some(Err(crate::BackupError::Refused(m))) => assert_eq!(m, NETWORK_FOLDER_REFUSED),
             other => panic!("expected a refusal, got {other:?}"),

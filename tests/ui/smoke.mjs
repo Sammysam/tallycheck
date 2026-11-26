@@ -890,6 +890,24 @@ try {
     await shot('26-backup');
   });
 
+  // D62: automatic backups every N days, with a clear warning while they are off.
+  await check('Automatic backups: off is warned about, every 3 days can be saved', async () => {
+    await waitFor(`document.getElementById('status-card').innerText.includes('Automatic backups are off')`, 'off warning');
+    const folder = join(SHOTS, 'backups');
+    await evaluate(`document.querySelector('button[role=switch][aria-label="Automatic backups"]').click(); true`);
+    await evaluate(`(() => {
+      const set = (sel, v) => { const el = document.querySelector(sel);
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v);
+        el.dispatchEvent(new Event('input', { bubbles: true })); };
+      set('input[aria-label="Back up every (days)"]', '3');
+      set('input[aria-label="Automatic backup folder"]', ${JSON.stringify(folder)});
+      return true; })()`);
+    await clickText('Save automatic backup settings');
+    await waitFor(`document.getElementById('dl-msg').textContent.includes('every 3 days')`, 'saved');
+    await waitFor(`document.getElementById('status-card').innerText.includes('Automatic backup: every 3 days')`, 'status shows the gap');
+    await shot('26b-automatic-backup');
+  });
+
   await check('Payments page voids a payment and the invoice is owed again (D18)', async () => {
     await go('/payments');
     await rowAction('PAY-000001', 'Void');

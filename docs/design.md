@@ -818,6 +818,23 @@ recommendations without answering each one individually; revisit any of them on 
   `POST …/{id}/resume`. Screens: "Make recurring" in an invoice's ⋮ menu, a notice on Invoices
   while made drafts wait, Transactions → Recurring Invoices. Not yet: recurring bills and
   expenses, posting automatically, e-mailing them.
+- **D62 Automatic backups every N days and Choose folder** (2026-11-25; chosen: build both, and
+  "clear" means an easy off switch with a warning).
+  The automatic backup setting gains `everyDays` (1–30, default 1; settings saved earlier mean
+  daily): while the app runs it checks every hour and makes a full backup when the last
+  successful one is older than that many days (soon after start-up if one is overdue); copies
+  beyond "keep" are still deleted, manual backups never. `GET /api/system/backup` adds
+  `nextBackupDue` (ISO time, "now" when overdue, null when off) and `canChooseFolder`;
+  `PUT /api/system/backup/settings` takes `everyDays`. **Choose folder…**: `POST
+  /api/system/backup/choose-folder {start?}` (Administrator on this PC, like every backup
+  route) asks the desktop shell to open the system's own folder window over TallyCheck
+  (`api_server::folder_pick::FolderPicker`, implemented in `src-tauri/src/folder_pick.rs` with
+  `tauri-plugin-dialog`; the page still has no Tauri IPC) and answers `{folder}` or `null`; a
+  network folder is refused as when typed; without the desktop shell (a browser, the headless
+  server) it answers 400 and the screen offers typing only. Settings → Backup: an On / Off
+  switch, "Back up every __ days", the folder with Choose folder… (also for Back up now), and a
+  warning while automatic backups are off ("Automatic backups are off — your books are not
+  being backed up automatically"); the Admin Centre backup card warns too.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

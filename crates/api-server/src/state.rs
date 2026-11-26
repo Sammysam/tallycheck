@@ -29,6 +29,8 @@ pub struct AppState {
     pub update_channel: crate::updates::UpdateChannel,
     /// D49: the desktop shell's Windows verification; `None` when the server runs on its own.
     pub windows_verifier: Option<Arc<dyn crate::local_verify::WindowsVerifier>>,
+    /// D62: the desktop shell's folder window for backups; `None` when the server runs on its own.
+    pub folder_picker: Option<Arc<dyn crate::folder_pick::FolderPicker>>,
 }
 
 impl AppState {
@@ -47,6 +49,7 @@ impl AppState {
             updater: None,
             update_channel: crate::updates::UpdateChannel::Direct,
             windows_verifier: None,
+            folder_picker: None,
         }
     }
 
@@ -67,6 +70,11 @@ impl AppState {
 
     pub fn with_windows_verifier(mut self, verifier: Option<Arc<dyn crate::local_verify::WindowsVerifier>>) -> Self {
         self.windows_verifier = verifier;
+        self
+    }
+
+    pub fn with_folder_picker(mut self, picker: Option<Arc<dyn crate::folder_pick::FolderPicker>>) -> Self {
+        self.folder_picker = picker;
         self
     }
 

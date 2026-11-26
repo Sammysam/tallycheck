@@ -18,7 +18,7 @@ const TABS = [
   { id: 'region', label: 'Region & currency', icon: Globe2, help: 'Country, currency, how amounts are written and when the financial year starts.' },
   { id: 'documents', label: 'Invoices & documents', icon: FileText, help: 'What prints on invoices and statements: payment details, footer and signatory.' },
   { id: 'closing', label: 'Closing', icon: CalendarCheck, help: 'Lock a closed period so nothing more is posted to it.' },
-  { id: 'backup', label: 'Backup & restore', icon: HardDrive, help: 'Encrypted backups, the daily backup, and restoring from a backup.' },
+  { id: 'backup', label: 'Backup & restore', icon: HardDrive, help: 'Encrypted backups, automatic backups every few days, and restoring from a backup.' },
   { id: 'integrations', label: 'Integrations', icon: Plug, help: 'Shopify, WooCommerce, PayPal and Stripe: orders arrive as draft invoices, payments as lines to match.' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];

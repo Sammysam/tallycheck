@@ -106,6 +106,8 @@ pub async fn status(State(s): State<AppState>, _a: LocalAdmin) -> AppResult<Json
         "passwordSet": password_set,
         "settings": schedule::load_settings(dir),
         "status": schedule::load_status(dir),
+        "nextBackupDue": schedule::next_due(&schedule::load_settings(dir), &schedule::load_status(dir)),
+        "canChooseFolder": s.folder_picker.is_some(),
         "stagedRestore": staged_manifest(dir),
         "defaultFolder": default_folder(),
         "dataFolder": dir.to_string_lossy(),
@@ -151,13 +153,39 @@ pub async fn update_settings(State(s): State<AppState>, _a: LocalAdmin, body: Js
         settings.keep =
             keep.ok_or_else(|| AppError::validation(vec!["keep must be a whole number from 1 to 365".into()]))? as u32;
     }
+    if let Some(v) = b.get("everyDays") {
+        let days = v.as_u64().filter(|d| (1..=u64::from(schedule::MAX_EVERY_DAYS)).contains(d));
+        settings.every_days = days.ok_or_else(|| {
+            AppError::validation(vec![format!(
+                "everyDays must be a whole number from 1 to {}",
+                schedule::MAX_EVERY_DAYS
+            )])
+        })? as u32;
+    }
     if settings.enabled {
-        let folder =
-            settings.folder.clone().ok_or_else(|| AppError::bad_request("Choose a folder for the daily backups"))?;
+        let folder = settings
+            .folder
+            .clone()
+            .ok_or_else(|| AppError::bad_request("Choose a folder for the automatic backups"))?;
         std::fs::create_dir_all(&folder).map_err(|e| AppError::bad_request(format!("Cannot use that folder: {e}")))?;
     }
     schedule::save_settings(dir, &settings).map_err(AppError::internal)?;
     Ok(Json(json!(settings)))
+}
+
+/// D62: opens the system's folder window on the main PC (desktop app only) and answers the
+/// chosen folder, or `null` when the person closed it. A network folder is refused as when typed.
+pub async fn choose_folder(State(s): State<AppState>, _a: LocalAdmin, body: JsonBody) -> AppResult<Json<Value>> {
+    let picker = s.folder_picker.clone().ok_or_else(|| {
+        AppError::bad_request("Choosing a folder works in the TallyCheck desktop app; type the folder instead")
+    })?;
+    let start = text(&body.object(), "start").filter(|f| !is_unc_path(f) && Path::new(f).is_dir());
+    let chosen =
+        picker.pick("Choose a folder for TallyCheck backups".into(), start).await.map_err(AppError::bad_request)?;
+    if let Some(f) = &chosen {
+        local_only(f)?;
+    }
+    Ok(Json(json!({ "folder": chosen })))
 }
 
 pub async fn run(State(s): State<AppState>, _a: LocalAdmin, body: JsonBody) -> AppResult<(StatusCode, Json<Value>)> {

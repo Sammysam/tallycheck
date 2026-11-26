@@ -210,6 +210,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/system/backup/password", post(system::set_password))
         .route("/system/backup/settings", axum::routing::put(system::update_settings))
         .route("/system/backup/run", post(system::run))
+        .route("/system/backup/choose-folder", post(system::choose_folder))
         .route("/system/restore/verify", post(system::verify))
         .route("/system/restore/stage", post(system::stage).delete(system::cancel))
         .fallback(unknown_route)

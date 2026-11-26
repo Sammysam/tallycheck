@@ -5886,3 +5886,48 @@ async fn recurring_invoices_make_one_draft_per_date_and_catch_up_missed_dates() 
     }
     Ok(())
 }
+
+/// D62: automatic backups every N days (1–30), the next due time, a clear "off", and "Choose
+/// folder…" only with the desktop app's folder window.
+#[tokio::test]
+async fn automatic_backups_every_n_days_and_the_folder_window() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let folder = tempfile::tempdir()?;
+    let path = folder.path().to_string_lossy().to_string();
+    let saved = app
+        .local(
+            Method::PUT,
+            "/api/system/backup/settings",
+            &admin,
+            Some(json!({"enabled": true, "folder": path, "keep": 5, "everyDays": 3})),
+        )
+        .await?;
+    assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
+    assert_eq!(saved.body["everyDays"], json!(3));
+    let st = app.local(Method::GET, "/api/system/backup", &admin, None).await?;
+    assert_eq!(st.body["settings"]["everyDays"], json!(3));
+    assert_eq!(st.body["nextBackupDue"], "now", "never backed up, so one is due");
+    assert_eq!(st.body["canChooseFolder"], json!(false), "no desktop shell in tests");
+    for bad in [json!(0), json!(31), json!(2.5), json!("3")] {
+        let r = app.local(Method::PUT, "/api/system/backup/settings", &admin, Some(json!({"everyDays": bad}))).await?;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "everyDays {bad}");
+    }
+    let off = app.local(Method::PUT, "/api/system/backup/settings", &admin, Some(json!({"enabled": false}))).await?;
+    assert_eq!(off.body["enabled"], json!(false));
+    assert_eq!(off.body["everyDays"], json!(3), "turning off keeps the gap");
+    let st = app.local(Method::GET, "/api/system/backup", &admin, None).await?;
+    assert_eq!(st.body["nextBackupDue"], Value::Null);
+
+    let pick = app.local(Method::POST, "/api/system/backup/choose-folder", &admin, Some(json!({}))).await?;
+    assert_nest_error(
+        &pick,
+        400,
+        json!("Choosing a folder works in the TallyCheck desktop app; type the folder instead"),
+        "/api/system/backup/choose-folder",
+    );
+    let accountant = app.signed_in("acc1", "Accountant").await?;
+    let r = app.local(Method::POST, "/api/system/backup/choose-folder", &accountant, Some(json!({}))).await?;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    Ok(())
+}

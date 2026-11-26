@@ -8,6 +8,9 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Automatic backups every few days: choose "Back up every __ days" (1 to 30), pick the folder
+  with Windows' own folder window (Choose folder…), and turn automatic backups on or off with
+  one switch; TallyCheck warns while they are off (D62).
 - Recurring invoices: "Make recurring" on any invoice repeats it every week, month, quarter or
   year. Each date makes a draft invoice to check and post; dates missed while TallyCheck was
   closed are made when it next opens, each with its own date. Pause, resume, change or stop

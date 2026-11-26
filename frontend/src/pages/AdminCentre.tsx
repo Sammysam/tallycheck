@@ -15,7 +15,7 @@ import { fmtDate } from '../lib/region';
 
 interface UserRow { id: string; isActive: boolean; isTwoFactorEnabled: boolean; role: { name: string } | null }
 interface LogRow { id: string; username: string | null; action: string; createdAt: string }
-interface Backup { passwordSet: boolean; settings: { enabled: boolean }; status: { lastSuccessAt?: string | null; lastError?: string | null } }
+interface Backup { passwordSet: boolean; settings: { enabled: boolean; everyDays?: number }; status: { lastSuccessAt?: string | null; lastError?: string | null } }
 
 type Tone = 'ok' | 'warn' | 'info';
 const TONE: Record<Tone, string> = { ok: 'text-green-700', warn: 'text-amber-700', info: 'text-gray-600' };
@@ -75,7 +75,9 @@ export default function AdminCentre() {
 
   const b = backup && backup !== 'unavailable' ? backup : null;
   const lastBackup = b?.status.lastSuccessAt;
-  const backupStale = !lastBackup || backupAge > 26;
+  // D62: late after the chosen gap (plus slack for the hourly check); off counts as a warning.
+  const backupEvery = b?.settings.everyDays || 1;
+  const backupStale = !lastBackup || backupAge > backupEvery * 24 + 2 || !b?.settings.enabled;
 
   const quick: [string, ReactNode, string][] = [
     ['New user', <UserPlus size={16} />, '/users'],
@@ -98,7 +100,7 @@ export default function AdminCentre() {
         <Tile to="/settings?tab=backup" icon={<HardDrive size={14} />} title="Backups"
           value={backup === 'unavailable' ? 'Main PC only' : !b ? '…' : lastBackup ? ago(lastBackup) : 'Never'}
           tone={backup === 'unavailable' ? 'info' : !b ? 'info' : !b.passwordSet || backupStale ? 'warn' : 'ok'}
-          note={backup === 'unavailable' ? 'Open on the main PC as an Administrator' : !b ? '' : !b.passwordSet ? 'Set a backup password' : b.settings.enabled ? 'Daily backup is on' : 'Daily backup is off'} />
+          note={backup === 'unavailable' ? 'Open on the main PC as an Administrator' : !b ? '' : !b.passwordSet ? 'Set a backup password' : b.settings.enabled ? `Automatic backup every ${backupEvery === 1 ? 'day' : `${backupEvery} days`}` : 'Automatic backups are off'} />
         <Tile to="/settings?tab=closing" icon={<CalendarCheck size={14} />} title="Books locked up to"
           value={lock === undefined ? '…' : lock ? fmtDate(lock) : 'Not locked'} tone={lock ? 'ok' : 'info'}
           note={lock ? 'Nothing can be posted on or before this date' : 'Lock each month once it is closed'} />

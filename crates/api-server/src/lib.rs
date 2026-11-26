@@ -8,6 +8,7 @@
 pub mod body;
 pub mod errors;
 pub mod extract;
+pub mod folder_pick;
 pub mod local_verify;
 pub mod middleware;
 pub mod recurring_runner;

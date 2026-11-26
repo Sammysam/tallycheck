@@ -181,7 +181,12 @@ async fn scheduled_backups_need_a_password_and_keep_the_newest() -> BackupResult
     let dest = tempfile::tempdir()?;
     schedule::save_settings(
         i.data(),
-        &schedule::Settings { enabled: true, folder: Some(dest.path().to_string_lossy().into()), keep: 2 },
+        &schedule::Settings {
+            enabled: true,
+            folder: Some(dest.path().to_string_lossy().into()),
+            keep: 2,
+            every_days: 1,
+        },
     )?;
     assert!(matches!(schedule::run_if_due(&i.db, i.data()).await, Some(Err(_))), "no password yet");
     assert!(schedule::load_status(i.data()).last_error.is_some());

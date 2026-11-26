@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { AlertTriangle, CheckCircle2, HardDrive } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FolderOpen, HardDrive } from 'lucide-react';
 import api, { errMsg } from '../../api/client';
 import PasswordInput from '../PasswordInput';
 
@@ -10,7 +10,11 @@ import PasswordInput from '../PasswordInput';
 
 interface Status {
   passwordSet: boolean;
-  settings: { enabled: boolean; folder: string | null; keep: number };
+  settings: { enabled: boolean; folder: string | null; keep: number; everyDays: number };
+  /** D62: ISO time the next automatic backup is due, "now" when overdue, null when off. */
+  nextBackupDue: string | null;
+  /** D62: the desktop app can open the system's folder window. */
+  canChooseFolder: boolean;
   status: { lastAttemptAt?: string | null; lastSuccessAt?: string | null; lastFile?: string | null; lastError?: string | null };
   stagedRestore: { createdAt: string } | null;
   defaultFolder: string | null;
@@ -47,7 +51,7 @@ export default function BackupPanel() {
   const [pwMsg, setPwMsg] = useState<Msg>(null);
   const [folder, setFolder] = useState('');
   const [bkMsg, setBkMsg] = useState<Msg>(null);
-  const [daily, setDaily] = useState({ enabled: false, folder: '', keep: 14 });
+  const [daily, setDaily] = useState({ enabled: false, folder: '', keep: 14, everyDays: 1 });
   const [dlMsg, setDlMsg] = useState<Msg>(null);
   const [rs, setRs] = useState({ file: '', password: '', confirm: '' });
   const [rsMsg, setRsMsg] = useState<Msg>(null);
@@ -57,7 +61,7 @@ export default function BackupPanel() {
     const st: Status = r.data;
     setS(st);
     setFolder((f) => f || st.settings.folder || st.defaultFolder || '');
-    setDaily({ enabled: st.settings.enabled, folder: st.settings.folder || st.defaultFolder || '', keep: st.settings.keep });
+    setDaily({ enabled: st.settings.enabled, folder: st.settings.folder || st.defaultFolder || '', keep: st.settings.keep, everyDays: st.settings.everyDays || 1 });
   }).catch((e) => setLoadError(errMsg(e, 'Backup is not available'))), []);
   useEffect(() => { load(); }, [load]);
 
@@ -74,6 +78,17 @@ export default function BackupPanel() {
     }
   };
 
+  /** D62: the system's own folder window (desktop app); returns the folder, or null if closed. */
+  const chooseFolder = async (current: string, set: (m: Msg) => void): Promise<string | null> => {
+    try {
+      const { data } = await api.post('/system/backup/choose-folder', { start: current || undefined });
+      return data.folder ?? null;
+    } catch (e) {
+      set({ text: errMsg(e, 'Could not open the folder window'), ok: false });
+      return null;
+    }
+  };
+
   if (loadError) {
     return (
       <div className="card text-sm text-gray-700">
@@ -85,21 +100,29 @@ export default function BackupPanel() {
   if (!s) return <p className="text-sm text-gray-500">Loading…</p>;
 
   const lastOk = s.status.lastSuccessAt;
-  const stale = ageHours(lastOk) > 26;
+  const every = s.settings.everyDays || 1;
+  const autoOff = !s.settings.enabled;
+  // Late when older than the chosen gap plus a little slack (the check runs hourly).
+  const stale = ageHours(lastOk) > every * 24 + 2;
+  const warn = !s.passwordSet || stale || autoOff;
+  const days = (n: number) => (n === 1 ? 'day' : `${n} days`);
 
   return (
     <div className="space-y-4" style={{ maxWidth: 820 }}>
-      <div className={`rounded-md border px-4 py-3 flex items-start gap-3 ${!s.passwordSet || stale ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`} id="status-card">
-        {!s.passwordSet || stale ? <AlertTriangle size={18} className="text-amber-600 mt-0.5" /> : <CheckCircle2 size={18} className="text-green-600 mt-0.5" />}
+      <div className={`rounded-md border px-4 py-3 flex items-start gap-3 ${warn ? 'border-amber-200 bg-amber-50' : 'border-green-200 bg-green-50'}`} id="status-card">
+        {warn ? <AlertTriangle size={18} className="text-amber-600 mt-0.5" /> : <CheckCircle2 size={18} className="text-green-600 mt-0.5" />}
         <div className="text-sm">
           <p className="font-medium text-gray-900">
             {!s.passwordSet ? 'Backups are off until you set a backup password.'
               : !lastOk ? 'No backup has been made yet.'
-                : stale ? `The last backup was ${when(lastOk)} — more than a day ago.`
+                : stale ? `The last backup was ${when(lastOk)} — more than ${days(every)} ago.`
                   : `Last backup ${when(lastOk)}.`}
           </p>
           <p className="text-xs text-gray-600 mt-0.5">
-            Daily backup: {s.settings.enabled ? `on, into ${s.settings.folder}` : 'off'} · Data folder: {s.dataFolder}
+            {autoOff
+              ? <strong className="text-amber-800">Automatic backups are off — your books are not being backed up automatically. </strong>
+              : <>Automatic backup: every {days(every)}, into {s.settings.folder}{s.nextBackupDue && s.nextBackupDue !== 'now' ? `, next after ${when(s.nextBackupDue)}` : s.nextBackupDue === 'now' ? ', due now' : ''} · </>}
+            Data folder: {s.dataFolder}
             {s.status.lastError && <><br /><span className="text-red-700">Last problem ({when(s.status.lastAttemptAt)}): {s.status.lastError}</span></>}
           </p>
         </div>
@@ -140,7 +163,15 @@ export default function BackupPanel() {
 
       <Card id="backup-card" title="Back up now" help="One encrypted file with the whole database and every employee photo, document and payslip. It is checked after writing.">
         <label className="text-xs font-medium text-gray-600 block">Folder
-          <input id="bk-folder" className="mt-1" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="e.g. a USB drive, E:\\Backups" />
+          <span className="mt-1 flex gap-2">
+            <input id="bk-folder" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="e.g. a USB drive, E:\\Backups" />
+            {s.canChooseFolder && (
+              <button type="button" className="btn btn-secondary whitespace-nowrap inline-flex items-center gap-1.5" disabled={busy !== ''}
+                onClick={async () => { const f = await chooseFolder(folder, setBkMsg); if (f) setFolder(f); }}>
+                <FolderOpen size={14} /> Choose folder…
+              </button>
+            )}
+          </span>
         </label>
         <button id="bk-run" className="btn btn-primary mt-3 inline-flex items-center gap-1.5" disabled={busy === 'bk' || !s.passwordSet}
           onClick={() => act('bk', setBkMsg, 'Backing up and checking the backup…', async () => {
@@ -152,23 +183,50 @@ export default function BackupPanel() {
         <Note id="bk-msg" msg={bkMsg} />
       </Card>
 
-      <Card id="daily-card" title="Daily backup" help="While the app is running it backs up once a day into this folder (subfolder “scheduled”) and keeps the newest copies.">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={daily.enabled} onChange={(e) => setDaily({ ...daily, enabled: e.target.checked })} aria-label="Make a daily backup" /> Make a daily backup
+      <Card id="daily-card" title="Automatic backup" help="While TallyCheck is open it makes a full backup into this folder (subfolder “scheduled”) whenever the last one is older than the days you choose, and keeps the newest copies. If the PC was off, the backup is made soon after TallyCheck opens.">
+        <label className="flex items-center gap-3 text-sm cursor-pointer select-none">
+          <button type="button" role="switch" aria-checked={daily.enabled} aria-label="Automatic backups"
+            onClick={() => setDaily({ ...daily, enabled: !daily.enabled })}
+            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors ${daily.enabled ? 'bg-green-600' : 'bg-gray-300'}`}>
+            <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${daily.enabled ? 'left-[18px]' : 'left-0.5'}`} />
+          </button>
+          <span className="font-medium">{daily.enabled ? 'On' : 'Off'}</span>
+          {!daily.enabled && <span className="text-xs text-amber-700">Turn on so a copy of the books is made automatically.</span>}
         </label>
-        <div className="grid gap-3 mt-2" style={{ gridTemplateColumns: '1fr 120px' }}>
+        <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: '150px 1fr 120px' }}>
+          <label className="text-xs font-medium text-gray-600">Back up every
+            <span className="mt-1 flex items-center gap-2">
+              <input type="number" min={1} max={30} value={daily.everyDays} aria-label="Back up every (days)" style={{ width: 70 }}
+                onChange={(e) => setDaily({ ...daily, everyDays: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })} />
+              <span className="text-gray-700">{daily.everyDays === 1 ? 'day' : 'days'}</span>
+            </span>
+          </label>
           <label className="text-xs font-medium text-gray-600">Folder
-            <input className="mt-1" value={daily.folder} onChange={(e) => setDaily({ ...daily, folder: e.target.value })} aria-label="Daily backup folder" />
+            <span className="mt-1 flex gap-2">
+              <input value={daily.folder} onChange={(e) => setDaily({ ...daily, folder: e.target.value })} aria-label="Automatic backup folder" />
+              {s.canChooseFolder && (
+                <button type="button" className="btn btn-secondary whitespace-nowrap inline-flex items-center gap-1.5" disabled={busy !== ''}
+                  onClick={async () => { const f = await chooseFolder(daily.folder, setDlMsg); if (f) setDaily((d) => ({ ...d, folder: f })); }}>
+                  <FolderOpen size={14} /> Choose folder…
+                </button>
+              )}
+            </span>
           </label>
           <label className="text-xs font-medium text-gray-600">Keep (copies)
             <input className="mt-1" type="number" min={1} max={365} value={daily.keep} onChange={(e) => setDaily({ ...daily, keep: Number(e.target.value) })} aria-label="Copies to keep" />
           </label>
         </div>
+        <p className="text-xs text-gray-500 mt-2">
+          Older automatic copies beyond {daily.keep} are deleted, newest kept. Backups made with “Back up now” are never deleted.
+          A folder on another computer (\\server\share) is not allowed; a USB drive or a second disk is a good choice.
+        </p>
         <button className="btn btn-secondary mt-3" disabled={busy === 'dl'}
           onClick={() => act('dl', setDlMsg, 'Saving…', async () => {
-            await api.put('/system/backup/settings', { enabled: daily.enabled, folder: daily.folder, keep: daily.keep });
-            return 'Saved.';
-          })}>Save daily backup settings</button>
+            await api.put('/system/backup/settings', { enabled: daily.enabled, folder: daily.folder, keep: daily.keep, everyDays: daily.everyDays });
+            return daily.enabled
+              ? `Saved. TallyCheck backs up every ${daily.everyDays === 1 ? 'day' : `${daily.everyDays} days`} while it is open.`
+              : 'Saved. Automatic backups are off.';
+          })}>Save automatic backup settings</button>
         <Note id="dl-msg" msg={dlMsg} />
       </Card>
 

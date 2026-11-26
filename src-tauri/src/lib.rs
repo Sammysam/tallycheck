@@ -3,6 +3,7 @@
 //! no capabilities are granted to remote URLs — so the frontend runs exactly as in a browser.
 //! Updates (D45) run here too and reach the page only through the server's own API.
 
+mod folder_pick;
 #[cfg(not(feature = "store"))]
 mod updates;
 #[cfg(windows)]
@@ -49,7 +50,11 @@ fn start_server(app: &tauri::App) -> anyhow::Result<String> {
         Some(std::sync::Arc::new(windows_verify::WindowsSignIn { app: app.handle().clone() }));
     #[cfg(not(windows))]
     let verifier: Option<std::sync::Arc<dyn api_server::local_verify::WindowsVerifier>> = None;
-    let handle = tauri::async_runtime::block_on(api_server::start_with_shell(&config, updater, channel, verifier))?;
+    // D62: "Choose folder…" for backups opens the system's folder window over this one.
+    let picker: Option<std::sync::Arc<dyn api_server::folder_pick::FolderPicker>> =
+        Some(std::sync::Arc::new(folder_pick::SystemFolderPicker { app: app.handle().clone() }));
+    let handle =
+        tauri::async_runtime::block_on(api_server::start_with_shell(&config, updater, channel, verifier, picker))?;
     // Always open the loopback address, even when LAN access binds 0.0.0.0.
     let url = format!("http://127.0.0.1:{}/", handle.addr.port());
     app.manage(Server(Mutex::new(Some(handle))));
@@ -107,7 +112,7 @@ fn same_origin_navigation(to: &tauri::Url, home: &tauri::Url) -> bool {
 }
 
 pub fn run() {
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(not(feature = "store"))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let app = builder
