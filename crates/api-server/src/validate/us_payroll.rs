@@ -19,6 +19,23 @@ use serde_json::{Map, Value};
 
 const AMOUNT: &[Rule] = &[Rule::IsMoneyNumber, Rule::MinZero];
 
+/// D67: leave programs the employee is exempt from, e.g. `["WA_CARES"]`.
+fn leave_exempt(v: Option<&Value>) -> Result<Vec<String>, AppError> {
+    let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Vec::new()) };
+    let bad = || AppError::bad_request("leaveExempt must be a list of leave programs, like [\"WA_CARES\"]");
+    let mut out: Vec<String> = Vec::new();
+    for x in v.as_array().ok_or_else(bad)? {
+        let id = x.as_str().map(|s| s.trim().to_ascii_uppercase()).ok_or_else(bad)?;
+        if !payroll::us_leave::is_program(&id) {
+            return Err(bad());
+        }
+        if !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
 /// A state form's status code or table letter (D66).
 fn is_state_code(s: &str) -> bool {
     (1..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
@@ -140,6 +157,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         }
     }
     let others = other_work_states(v.input.get("otherWorkStates"))?;
+    let leave_exempt = leave_exempt(v.input.get("leaveExempt"))?;
     v.field("workState", false, &[Rule::IsString, WORK_STATE])
         .field(
             "residentState",
@@ -203,6 +221,7 @@ pub fn tax(body: Map<String, Value>) -> Result<UsTax, AppError> {
         state_elected_rate: percent(&m, "stateElectedRate")?,
         state_annual_deduction: amount("stateAnnualDeduction")?,
         state_code: opt_string(&m, "stateCode"),
+        leave_exempt,
         state_allowances: m.get("stateAllowances").and_then(Value::as_i64).unwrap_or(0),
         state_extra_withholding: amount("stateExtraWithholding")?,
         state_exempt: flag("stateExempt"),
@@ -341,15 +360,32 @@ pub fn remit(body: Map<String, Value>) -> Result<Remit, AppError> {
         .field("date", false, &[Rule::IsDateFormat])
         .field("amount", true, &[Rule::IsMoneyNumber, Rule::MinNum(0.01, "0.01")])
         .field("reference", true, &[Rule::IsString, Rule::MaxLength(100)])
-        .field("state", true, &[Rule::IsString, STATE]);
+        .field("state", true, &[Rule::IsString, STATE])
+        .field(
+            "program",
+            true,
+            &[
+                Rule::IsString,
+                Rule::Matches(
+                    |s| payroll::us_leave::is_program(&s.to_ascii_uppercase()),
+                    "program must be a leave program, like CA_SDI",
+                ),
+            ],
+        );
     let m = v.finish()?;
+    let kind = opt_string(&m, "type").unwrap_or_default();
+    // D67: a leave payment names its program (kept where per-state payments keep the state).
+    let program = opt_string(&m, "program").map(|s| s.to_ascii_uppercase());
+    if program.is_some() && kind != "STATE_LEAVE" {
+        return Err(AppError::bad_request("program only applies to a STATE_LEAVE payment"));
+    }
     Ok(Remit {
-        kind: opt_string(&m, "type").unwrap_or_default(),
+        state: if kind == "STATE_LEAVE" { program } else { opt_string(&m, "state").map(|s| s.to_ascii_uppercase()) },
+        kind,
         payment_account_id: opt_string(&m, "paymentAccountId").unwrap_or_default(),
         date: opt_string(&m, "date").unwrap_or_default(),
         amount: money(&m, "amount")?,
         reference: opt_string(&m, "reference"),
-        state: opt_string(&m, "state").map(|s| s.to_ascii_uppercase()),
     })
 }
 
@@ -380,14 +416,17 @@ pub fn report_period(
 /// `PUT /payroll/us/states/:state`: the company's details in that state.
 pub fn registration(state: String, body: Map<String, Value>) -> Result<Registration, AppError> {
     let mut v = Validator::new(body);
-    to_number(&mut v, &["sutaRate", "sutaWageBase"]);
+    to_number(&mut v, &["sutaRate", "sutaWageBase", "employees"]);
     trim_or_null(&mut v, &["withholdingAccountNo", "unemploymentAccountNo"]);
+    let leave_options = leave_options(v.input.get("leaveOptions"))?;
     v.field("withholdingAccountNo", true, &[Rule::IsString, Rule::MaxLength(40)])
         .field("unemploymentAccountNo", true, &[Rule::IsString, Rule::MaxLength(40)])
         .field("sutaRate", true, &[Rule::IsFiniteNumber, Rule::MinZero, Rule::MaxNum(100.0, "100")])
         .field("sutaWageBase", true, AMOUNT)
         .field("stateTaxAccountId", true, &[Rule::IsUuid])
-        .field("sutaAccountId", true, &[Rule::IsUuid]);
+        .field("sutaAccountId", true, &[Rule::IsUuid])
+        .field("employees", true, &[Rule::IsInt, Rule::MinZero, Rule::MaxNum(10_000_000.0, "10000000")])
+        .field("leaveAccountId", true, &[Rule::IsUuid]);
     let m = v.finish()?;
     Ok(Registration {
         state,
@@ -397,7 +436,48 @@ pub fn registration(state: String, body: Map<String, Value>) -> Result<Registrat
         suta_wage_base: money(&m, "sutaWageBase")?,
         state_tax_account_id: opt_string(&m, "stateTaxAccountId"),
         suta_account_id: opt_string(&m, "sutaAccountId"),
+        employees: m.get("employees").and_then(Value::as_i64),
+        leave_options,
+        leave_account_id: opt_string(&m, "leaveAccountId"),
     })
+}
+
+/// D67: `{"NJ_TDI": {"employerRate": 0.5}, "NY_DBL": {"off": true}, "MN_PL": {"small": true}}`
+/// (rates in percent, kept in ppm).
+fn leave_options(v: Option<&Value>) -> Result<Value, AppError> {
+    let bad = |m: &str| AppError::bad_request(m.to_string());
+    let mut out = serde_json::Map::new();
+    let Some(v) = v.filter(|v| !v.is_null()) else { return Ok(Value::Object(out)) };
+    let o = v.as_object().ok_or_else(|| bad("leaveOptions must be an object"))?;
+    for (id, x) in o {
+        if !payroll::us_leave::is_program(id) {
+            return Err(bad(&format!("leaveOptions: {id} is not a leave program")));
+        }
+        let x = x.as_object().ok_or_else(|| bad("leaveOptions entries must be objects"))?;
+        let mut item = serde_json::Map::new();
+        for flag in ["off", "small"] {
+            match x.get(flag) {
+                None | Some(Value::Null) => {}
+                Some(Value::Bool(b)) => {
+                    item.insert(flag.into(), Value::Bool(*b));
+                }
+                _ => return Err(bad(&format!("leaveOptions.{id}.{flag} must be true or false"))),
+            }
+        }
+        match x.get("employerRate") {
+            None | Some(Value::Null) => {}
+            Some(r) => {
+                let pct = r.as_f64().filter(|p| p.is_finite() && (0.0..=100.0).contains(p)).ok_or_else(|| {
+                    bad(&format!("leaveOptions.{id}.employerRate must be a percentage from 0 to 100"))
+                })?;
+                let ppm = percent_to_ppm(&js_string(pct))
+                    .ok_or_else(|| bad(&format!("leaveOptions.{id}.employerRate must have at most 4 decimals")))?;
+                item.insert("employerRate".into(), Value::from(ppm));
+            }
+        }
+        out.insert(id.clone(), Value::Object(item));
+    }
+    Ok(Value::Object(out))
 }
 
 /// `POST /payroll/us/reciprocity`: `{workState, residentState}`.

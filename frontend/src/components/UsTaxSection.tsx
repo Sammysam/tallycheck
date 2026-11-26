@@ -11,7 +11,7 @@ const AMOUNTS = ['annualSalary', 'hourlyRate', 'dependentsCredit', 'otherIncome'
 export default function UsTaxSection({ employeeId }: { employeeId: string }) {
   const [tax, setTax] = useState<UsTax | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
-  const [flags, setFlags] = useState({ multipleJobs: false, exemptFromWithholding: false, stateExempt: false });
+  const [flags, setFlags] = useState({ multipleJobs: false, exemptFromWithholding: false, stateExempt: false, waCaresExempt: false });
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -42,7 +42,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
     };
     for (const k of AMOUNTS) f[k] = t[k] ? String(t[k]) : '';
     setForm(f);
-    setFlags({ multipleJobs: t.multipleJobs, exemptFromWithholding: t.exemptFromWithholding, stateExempt: t.stateExempt });
+    setFlags({ multipleJobs: t.multipleJobs, exemptFromWithholding: t.exemptFromWithholding, stateExempt: t.stateExempt, waCaresExempt: (t.leaveExempt ?? []).includes('WA_CARES') });
     setOthers((t.otherWorkStates ?? []).map((o) => ({ state: o.state, percent: String(o.percent) })));
   };
 
@@ -76,6 +76,7 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
         stateElectedRate: (form.stateElectedRate ?? '') === '' ? null : Number(form.stateElectedRate),
         stateAnnualDeduction: num(form.stateAnnualDeduction ?? ''),
         stateCode: (form.stateCode ?? '') === '' ? null : form.stateCode,
+        leaveExempt: flags.waCaresExempt ? ['WA_CARES'] : [],
         ...flags,
       };
       for (const k of AMOUNTS) body[k] = num(form[k] ?? '');
@@ -267,6 +268,12 @@ export default function UsTaxSection({ employeeId }: { employeeId: string }) {
           <Money label="Extra state withholding $ per paycheck" k="stateExtraWithholding" form={form} set={set} />
         </div>
         {stateForm?.hint && <p className="text-xs text-gray-500 mb-2">{stateForm.hint}</p>}
+        {form.workState === 'WA' && (
+          <label className="flex items-center gap-2 text-sm mb-2">
+            <input type="checkbox" checked={flags.waCaresExempt} onChange={(e) => { setSaved(false); setFlags({ ...flags, waCaresExempt: e.target.checked }); }} aria-label="WA Cares exemption" />
+            Approved WA Cares exemption (no WA Cares premium)
+          </label>
+        )}
         <label className="flex items-center gap-2 text-sm mb-4">
           <input type="checkbox" checked={flags.stateExempt} onChange={(e) => { setSaved(false); setFlags({ ...flags, stateExempt: e.target.checked }); }} />
           Exempt from state income tax withholding

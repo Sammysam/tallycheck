@@ -8,6 +8,10 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- State disability and paid leave contributions built in for 2026: California SDI, Colorado,
+  Connecticut, DC, Delaware, Hawaii, Maine, Minnesota, New Jersey, New York, Washington Paid
+  Leave and WA Cares, with each state's caps and small-employer rules, their own line on the
+  pay run, posting and payments per program (D67).
 - Built-in 2026 state income tax for Alabama, Arkansas, California, Connecticut, Maine,
   Maryland (with county tax), New Jersey, New York State and Wisconsin, each worked out with
   the state's own formula, and the state form's code (A4 status, CT-W4 code, NJ-W4 rate

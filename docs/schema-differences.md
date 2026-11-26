@@ -127,6 +127,10 @@ rules live in code (`payroll::us_state_packs`), not in the database.
 
 D65 adds `employee_us_tax.stateAnnualDeduction` (exemption dollars on the state certificate).
 D66 adds `employee_us_tax.stateCode` (the state form's status code, rate letter or Maryland county).
+D67 adds leave-program columns: `us_state_registrations.employees` / `leaveOptions` / `leaveAccountId`,
+`employee_us_tax.leaveExempt`, `us_payroll_lines.leavePlan` / `leaveYtd` / `leave` / `leaveEmployee` /
+`leaveEmployer`, `us_payroll_runs.leaveEmployeeTotal` / `leaveEmployerTotal`, and rebuilds
+`us_payroll_remittances` so its type may be `STATE_LEAVE`.
 
 ## Seeds
 

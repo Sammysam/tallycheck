@@ -268,6 +268,11 @@ pub struct Registration {
     pub suta_wage_base: Option<Money>,
     pub state_tax_account_id: Option<String>,
     pub suta_account_id: Option<String>,
+    /// D67: headcount for the leave programs' small-employer rules, options per program and
+    /// an optional payable account for the state's programs.
+    pub employees: Option<i64>,
+    pub leave_options: Value,
+    pub leave_account_id: Option<String>,
 }
 
 fn registration_from_row(r: &SqliteRow) -> AppResult<Registration> {
@@ -279,6 +284,9 @@ fn registration_from_row(r: &SqliteRow) -> AppResult<Registration> {
         suta_wage_base: r.try_get::<Option<i64>, _>("sutaWageBase")?.map(Money::from_cents),
         state_tax_account_id: r.try_get("stateTaxAccountId")?,
         suta_account_id: r.try_get("sutaAccountId")?,
+        employees: r.try_get("employees")?,
+        leave_options: crate::us_setup::json_col(r, "leaveOptions")?,
+        leave_account_id: r.try_get("leaveAccountId")?,
     })
 }
 
@@ -292,8 +300,26 @@ impl Registration {
             "sutaWageBase": self.suta_wage_base.map(Money::to_json_number),
             "stateTaxAccountId": self.state_tax_account_id,
             "sutaAccountId": self.suta_account_id,
+            "employees": self.employees,
+            "leaveOptions": leave_options_json(&self.leave_options),
+            "leaveAccountId": self.leave_account_id,
         })
     }
+}
+
+/// Leave options as the API shows them: rates as percentages.
+fn leave_options_json(v: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    if let Some(o) = v.as_object() {
+        for (id, x) in o {
+            let mut item = x.clone();
+            if let Some(rate) = x["employerRate"].as_i64() {
+                item["employerRate"] = crate::us_setup::ppm_to_percent(rate);
+            }
+            out.insert(id.clone(), item);
+        }
+    }
+    Value::Object(out)
 }
 
 pub async fn registration(conn: &mut SqliteConnection, state: &str) -> AppResult<Option<Registration>> {
@@ -344,14 +370,18 @@ pub async fn put_registration(db: &Db, r: Registration) -> AppResult<Value> {
     let mut tx = db.begin().await?;
     check_payable(&mut tx, &r.state_tax_account_id, "state income tax").await?;
     check_payable(&mut tx, &r.suta_account_id, "unemployment").await?;
+    check_payable(&mut tx, &r.leave_account_id, "disability and paid leave").await?;
     let now = now_iso();
     sqlx::query(
         r#"INSERT INTO "us_state_registrations" ("state","withholdingAccountNo","unemploymentAccountNo","sutaRate","sutaWageBase",
-             "stateTaxAccountId","sutaAccountId","createdAt","updatedAt") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8)
+             "stateTaxAccountId","sutaAccountId","employees","leaveOptions","leaveAccountId","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?9,?10,?11,?8,?8)
            ON CONFLICT ("state") DO UPDATE SET "withholdingAccountNo" = excluded."withholdingAccountNo",
              "unemploymentAccountNo" = excluded."unemploymentAccountNo", "sutaRate" = excluded."sutaRate",
              "sutaWageBase" = excluded."sutaWageBase", "stateTaxAccountId" = excluded."stateTaxAccountId",
-             "sutaAccountId" = excluded."sutaAccountId", "updatedAt" = excluded."updatedAt""#,
+             "sutaAccountId" = excluded."sutaAccountId", "employees" = excluded."employees",
+             "leaveOptions" = excluded."leaveOptions", "leaveAccountId" = excluded."leaveAccountId",
+             "updatedAt" = excluded."updatedAt""#,
     )
     .bind(&r.state)
     .bind(&r.withholding_account_no)
@@ -361,6 +391,9 @@ pub async fn put_registration(db: &Db, r: Registration) -> AppResult<Value> {
     .bind(&r.state_tax_account_id)
     .bind(&r.suta_account_id)
     .bind(&now)
+    .bind(r.employees)
+    .bind(r.leave_options.to_string())
+    .bind(&r.leave_account_id)
     .execute(&mut *tx)
     .await?;
     let saved = registration(&mut tx, &r.state).await?.ok_or_else(|| AppError::internal("registration missing"))?;

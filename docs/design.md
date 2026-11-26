@@ -948,6 +948,36 @@ recommendations without answering each one individually; revisit any of them on 
   (no 2026 withholding method published). Known limits: New Jersey and Pennsylvania tax some
   section 125 amounts the app takes off state wages; Maryland's 401(k) treatment follows the
   federal one as the guide says in general terms.
+- **D67 State disability and paid leave** (2026-11-27, step 4 of the US state payroll plan).
+  `payroll::us_leave` builds in the 2026 state disability and paid family / medical leave
+  programs from each program's own publications (`GET /payroll/us/leave-programs` lists them
+  with their sources): California SDI 1.3% (no limit; 401(k) counts, section 125 does not),
+  Colorado FAMLI 0.44% + 0.44% (no employer share at 9 or fewer employees), Connecticut Paid
+  Leave 0.5%, DC Paid Family Leave 0.75% employer only, Delaware Paid Leave 0.4% + 0.4% (10–24
+  employees parental 0.16% + 0.16%; under 10 none), Hawaii TDI 0.5% of weekly wages up to
+  $1,500.21 (never more than half the insurer's premium when the company enters it), Maine PFML
+  0.5% + 0.5% (under 15 employees employee only), Minnesota Paid Leave 0.44% + 0.44% (small
+  employer designation 0.22% employer) to $185,000, New Jersey TDI 0.19% and FLI 0.23% to
+  $171,100 plus employer TDI at the company's assigned rate (0.5% if none) to $44,800, New York
+  Paid Family Leave 0.432% up to $411.91 a year and disability 0.5% up to $0.60 a week, WA Cares
+  0.58% (no limit; employee exemptions) and Washington Paid Leave 1.13% (employee 71.43%, the
+  premium and the employee share each rounded, employer = the difference; under 50 employees no
+  employer share) to $184,500. A program applies to the state the employee mainly works in; wages
+  are gross less the 401(k) / section 125 amounts the program leaves out; yearly limits count the
+  employee's other posted runs this year; amounts half-up to the cent per paycheck. State
+  registrations gain `employees` (for the small-employer rules; not given = a large employer),
+  `leaveOptions` per program (`off` — a private plan, an employer paying the employee share, or
+  New York disability not collected; `employerRate` for New Jersey TDI and Hawaii's premium;
+  `small` for Minnesota) and `leaveAccountId`; employees gain `leaveExempt` (e.g. WA_CARES). Pay
+  lines keep each program's parameters (`leavePlan`), the year-to-date figures counted and the
+  contributions (`leave`, `leaveEmployee`, `leaveEmployer`); the employee's share comes off net
+  pay and the employer's is an employer tax. Posting credits each program to the state's
+  registration account or 2380 State Disability and Paid Leave Payable (added only when a run
+  first has contributions), kept as `stateLeave:CA_SDI`; payments use type `STATE_LEAVE` with a
+  `program` (one program, or every program when neither program nor amount is given). The
+  remittances table is rebuilt to allow the new type. Not built in: Oregon, Massachusetts and
+  Rhode Island (their 2026 pages could not be read directly), Maryland (contributions start in
+  2027); an employer paying the employee's share is not worked out (switch the program off).
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

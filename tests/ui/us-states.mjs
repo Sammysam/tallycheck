@@ -172,6 +172,9 @@ try {
     await setValue('input[aria-label="SUTA rate"]', '3');
     await setValue('input[aria-label="SUTA wage base"]', '43300');
     await setValue('input[aria-label="Withholding account no."]', 'NJ-1');
+    // D67: New Jersey's disability and family leave programs, with the employer TDI rate.
+    await waitFor(`document.body.innerText.includes('Disability and paid leave in NJ') && document.body.innerText.includes('New Jersey FLI')`, 'NJ leave programs');
+    await setValue('input[aria-label="NJ_TDI rate"]', '0.8');
     await clickText('Save NJ');
     await waitFor(`document.body.innerText.includes('SUTA 3% on the first')`, 'NJ saved');
     await setValue('select[aria-label="Home state"]', 'PA');
@@ -203,6 +206,7 @@ try {
     if (p.status !== 201) throw new Error(JSON.stringify(p));
     await go(`/payroll/us/${runId}`);
     await waitFor(`document.body.innerText.includes('PA 61.40')`, 'per-state tax under the total');
+    await waitFor(`document.body.innerText.includes('New Jersey TDI') && document.body.innerText.includes('employer 16.00')`, 'NJ TDI with the employer rate on the line');
     await waitFor(`document.body.innerText.includes('State income tax — PA')`, 'taxes table per state');
     await evaluate(`(() => { const s = [...document.querySelectorAll('select')].find((x) => [...x.options].some((o) => o.value === 'STATE_INCOME_TAX'));
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, 'STATE_INCOME_TAX'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);

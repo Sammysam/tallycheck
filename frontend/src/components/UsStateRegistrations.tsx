@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
-import { US_STATES, usd, type UsStateRegistration, type UsStatesOverview } from '../lib/usPayroll';
+import { LEAVE_CHOICES, US_STATES, usd, type LeaveOption, type LeaveProgram, type UsStateRegistration, type UsStatesOverview } from '../lib/usPayroll';
 
 /**
  * D63: the states the company is registered in for payroll (account numbers, the unemployment
@@ -10,7 +10,10 @@ import { US_STATES, usd, type UsStateRegistration, type UsStatesOverview } from 
 
 interface LedgerAccount { id: string; code: string; name: string; type: string; currency: string | null }
 
-type Draft = { withholdingAccountNo: string; unemploymentAccountNo: string; sutaRate: string; sutaWageBase: string; stateTaxAccountId: string; sutaAccountId: string };
+type Draft = {
+  withholdingAccountNo: string; unemploymentAccountNo: string; sutaRate: string; sutaWageBase: string; stateTaxAccountId: string; sutaAccountId: string;
+  employees: string; leaveAccountId: string; leaveOptions: Record<string, LeaveOption>;
+};
 
 const draftOf = (r?: UsStateRegistration): Draft => ({
   withholdingAccountNo: r?.withholdingAccountNo ?? '',
@@ -19,6 +22,9 @@ const draftOf = (r?: UsStateRegistration): Draft => ({
   sutaWageBase: r?.sutaWageBase == null ? '' : String(r.sutaWageBase),
   stateTaxAccountId: r?.stateTaxAccountId ?? '',
   sutaAccountId: r?.sutaAccountId ?? '',
+  employees: r?.employees == null ? '' : String(r.employees),
+  leaveAccountId: r?.leaveAccountId ?? '',
+  leaveOptions: r?.leaveOptions ?? {},
 });
 
 export default function UsStateRegistrations({ accounts }: { accounts: LedgerAccount[] }) {
@@ -29,6 +35,7 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
   const [saveError, setSaveError] = useState('');
   const [addState, setAddState] = useState('');
   const [pair, setPair] = useState({ workState: '', residentState: '' });
+  const [programs, setPrograms] = useState<LeaveProgram[]>([]);
 
   const load = useCallback(
     () => api.get<UsStatesOverview>('/payroll/us/states').then((r) => { setData(r.data); setError(''); })
@@ -36,6 +43,7 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
     [],
   );
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.get<LeaveProgram[]>('/payroll/us/leave-programs').then((r) => setPrograms(r.data)).catch(() => setPrograms([])); }, []);
 
   const open = (state: string) => {
     setEditing(state);
@@ -55,6 +63,9 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
         sutaWageBase: draft.sutaWageBase.trim() === '' ? null : Number(draft.sutaWageBase),
         stateTaxAccountId: draft.stateTaxAccountId || null,
         sutaAccountId: draft.sutaAccountId || null,
+        employees: draft.employees.trim() === '' ? null : Number(draft.employees),
+        leaveAccountId: draft.leaveAccountId || null,
+        leaveOptions: draft.leaveOptions,
       });
       setEditing(null);
       await load();
@@ -101,6 +112,11 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
     return a ? `${a.code} ${a.name}` : null;
   };
   const set = (k: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setDraft({ ...draft, [k]: e.target.value });
+  const setOption = (id: string, change: LeaveOption) => {
+    const next = { ...(draft.leaveOptions[id] ?? {}), ...change };
+    setDraft({ ...draft, leaveOptions: { ...draft.leaveOptions, [id]: next } });
+  };
+  const statePrograms = programs.filter((p) => p.state === editing);
 
   return (
     <div className="card mb-5" aria-label="States you are registered in">
@@ -174,6 +190,42 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
                 {liabilities.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
               </select></label>
           </div>
+          {statePrograms.length > 0 && (
+            <div className="mb-3" aria-label="Disability and paid leave">
+              <p className="text-xs font-semibold text-gray-700 mb-1">Disability and paid leave in {editing}</p>
+              <div className="form-grid mb-2" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                <label className="block"><span className="text-xs font-medium text-gray-500">Employees (for small-employer rules; blank = treated as large)</span>
+                  <input type="number" min="0" step="1" value={draft.employees} onChange={set('employees')} aria-label="Employees" /></label>
+                <label className="block"><span className="text-xs font-medium text-gray-500">{editing} contributions owed to (optional)</span>
+                  <select value={draft.leaveAccountId} onChange={set('leaveAccountId')}>
+                    <option value="">The disability and paid leave account</option>
+                    {liabilities.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
+                  </select></label>
+                <span />
+              </div>
+              {statePrograms.map((p) => {
+                const choice = LEAVE_CHOICES[p.id];
+                const o = draft.leaveOptions[p.id] ?? {};
+                return (
+                  <div key={p.id} className="border-t border-gray-100 py-2">
+                    <div className="text-sm text-gray-800">{p.name}</div>
+                    <div className="text-xs text-gray-400 mb-1">{p.source}</div>
+                    <div className="flex flex-wrap items-center gap-4 text-sm">
+                      {choice?.rate && (
+                        <label className="flex items-center gap-2"><span className="text-xs text-gray-500">{choice.rate}</span>
+                          <input type="number" min="0" max="100" step="0.0001" style={{ width: '7rem' }} value={o.employerRate ?? ''}
+                            onChange={(e) => setOption(p.id, { employerRate: e.target.value === '' ? undefined : Number(e.target.value) })} aria-label={`${p.id} rate`} /></label>
+                      )}
+                      {choice?.small && (
+                        <label className="flex items-center gap-2"><input type="checkbox" checked={!!o.small} onChange={(e) => setOption(p.id, { small: e.target.checked })} />{choice.small}</label>
+                      )}
+                      <label className="flex items-center gap-2"><input type="checkbox" checked={!!o.off} onChange={(e) => setOption(p.id, { off: e.target.checked })} aria-label={`${p.id} off`} />{choice?.off ?? 'Not withheld'}</label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {saveError && <p className="text-sm text-red-600 mb-2">{saveError}</p>}
           <div className="flex gap-2">
             <button type="submit" className="btn btn-primary">Save {editing}</button>

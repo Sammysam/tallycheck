@@ -4355,7 +4355,8 @@ async fn us_payroll_state_income_tax_rules() -> TestResult {
     let preview = |body: Value| app.call(Method::POST, "/api/payroll/us/preview", Some(&admin), Some(body));
     let p = preview(json!({"employeeId": co, "payDate": "2026-11-06"})).await?.body;
     assert_eq!(p["stateTax"], json!({"state": "CO", "configured": true, "wages": 2000, "tax": 69.23}));
-    assert_eq!(p["taxes"]["netPay"], json!(1621.62));
+    // D67: less Colorado FAMLI 0.44% × 2,000 = 8.80.
+    assert_eq!(p["taxes"]["netPay"], json!(1612.82));
     let p = preview(json!({"employeeId": ga, "hours": 80, "payDate": "2026-11-06"})).await?.body;
     assert_eq!(p["stateTax"]["configured"], json!(false));
     assert!(p["notes"].as_array().is_some_and(|n| n
@@ -4383,7 +4384,7 @@ async fn us_payroll_state_income_tax_rules() -> TestResult {
     assert_eq!(us_line(&r.body, "US-OR")["stateTaxConfigured"], json!(true));
     assert_eq!(us_line(&r.body, "US-TX")["stateIncomeTax"], json!(0));
     assert_eq!(r.body["stateIncomeTaxTotal"], json!(126.25));
-    assert_eq!(us_line(&r.body, "US-CO")["netPay"], json!(1621.62));
+    assert_eq!(us_line(&r.body, "US-CO")["netPay"], json!(1612.82), "less Colorado FAMLI 8.80");
     assert_eq!(us_balance(&app, &admin, "2370").await?, json!(126.25));
 
     let dep = json!({"type": "STATE_INCOME_TAX", "paymentAccountId": cash, "date": "2026-11-15"});
@@ -6296,5 +6297,93 @@ async fn us_payroll_state_formulas() -> TestResult {
     let ca = rules.body.as_array().and_then(|a| a.iter().find(|r| r["state"] == "CA")).cloned().unwrap_or_default();
     assert_eq!(ca["kind"], json!("BUILT_IN"), "{ca}");
     assert!(ca["source"].as_str().unwrap_or_default().contains("Method B"), "{ca}");
+    Ok(())
+}
+
+/// D67: disability and paid leave contributions through a pay run (biweekly $52,000, gross
+/// 2,000.00):
+///   WA (60 employees): Paid Leave 22.60 = employee 16.14 + employer 6.46; WA Cares 11.60
+///   WA with a WA Cares exemption: Paid Leave only
+///   NJ (employer TDI rate 0.8%): TDI 3.80 + employer 16.00; FLI 4.60
+///   CA: SDI 26.00
+///   NY (disability contributions not collected): Paid Family Leave 8.64
+#[tokio::test]
+async fn us_payroll_leave_programs() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let cash = us_company(&app, &admin, json!({})).await?;
+    let programs = app.call(Method::GET, "/api/payroll/us/leave-programs", Some(&admin), None).await?;
+    assert!(programs.body.as_array().is_some_and(|a| a.iter().any(|p| p["id"] == "WA_PFML")), "{}", programs.body);
+    for (st, body) in [
+        ("WA", json!({"employees": 60})),
+        ("NJ", json!({"leaveOptions": {"NJ_TDI": {"employerRate": 0.8}}})),
+        ("NY", json!({"leaveOptions": {"NY_DBL": {"off": true}}})),
+    ] {
+        let r = us_send(&app, Method::PUT, format!("/api/payroll/us/states/{st}"), &admin, Some(body)).await?;
+        assert_eq!(r.status, StatusCode::OK, "{st}: {}", r.body);
+    }
+    let bad = us_send(
+        &app,
+        Method::PUT,
+        "/api/payroll/us/states/NJ".into(),
+        &admin,
+        Some(json!({"leaveOptions": {"XX": {}}})),
+    )
+    .await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST, "{}", bad.body);
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    let tax = |extra: Value| merged(&salary, extra);
+    for (code, extra) in [
+        ("US-WA", json!({"workState": "WA"})),
+        ("US-WX", json!({"workState": "WA", "leaveExempt": ["wa_cares"]})),
+        ("US-NJ", json!({"workState": "NJ"})),
+        ("US-CA", json!({"workState": "CA"})),
+        ("US-NY", json!({"workState": "NY"})),
+    ] {
+        us_employee(&app, &admin, code, json!({}), tax(extra)).await?;
+    }
+
+    let body = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let r = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let leave = |code: &str| -> Vec<(String, Value, Value)> {
+        us_line(&r.body, code)["leave"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|c| (c["id"].as_str().unwrap_or("").to_string(), c["employee"].clone(), c["employer"].clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let p = |id: &str, ee: Value, er: Value| (id.to_string(), ee, er);
+    assert_eq!(leave("US-WA"), vec![p("WA_CARES", json!(11.6), json!(0)), p("WA_PFML", json!(16.14), json!(6.46))]);
+    assert_eq!(leave("US-WX"), vec![p("WA_PFML", json!(16.14), json!(6.46))]);
+    assert_eq!(leave("US-NJ"), vec![p("NJ_FLI", json!(4.6), json!(0)), p("NJ_TDI", json!(3.8), json!(16))]);
+    assert_eq!(leave("US-CA"), vec![p("CA_SDI", json!(26), json!(0))]);
+    assert_eq!(leave("US-NY"), vec![p("NY_PFL", json!(8.64), json!(0))]);
+    // The employee's share comes off net pay.
+    let ca = us_line(&r.body, "US-CA");
+    assert_eq!(ca["leaveEmployee"], json!(26));
+    // Employee 16.14 + 16.14 + 11.60 + 3.80 + 4.60 + 26 + 8.64 = 86.92; employer 6.46 + 6.46 + 16.
+    assert_eq!(r.body["leaveEmployeeTotal"], json!(86.92));
+    assert_eq!(r.body["leaveEmployerTotal"], json!(28.92));
+    assert_eq!(us_balance(&app, &admin, "2380").await?, json!(115.84), "added when first needed");
+
+    let remit = |body: Value| us_send(&app, Method::POST, format!("{run_url}/remit"), &admin, Some(body));
+    let base = json!({"type": "STATE_LEAVE", "paymentAccountId": cash, "date": "2026-11-15"});
+    let r = remit(merged(&base, json!({"amount": 5}))).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "an amount needs the program when several are owed: {}", r.body);
+    let r = remit(merged(&base, json!({"program": "wa_pfml"}))).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2380").await?, json!(70.64));
+    let r = remit(merged(&base, json!({"program": "OR_PL"}))).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "unknown program: {}", r.body);
+    let r = remit(base.clone()).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "no program and no amount clears every program: {}", r.body);
+    assert_eq!(us_balance(&app, &admin, "2380").await?, json!(0));
     Ok(())
 }

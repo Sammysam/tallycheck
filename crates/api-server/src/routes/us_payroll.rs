@@ -201,6 +201,11 @@ pub async fn states(State(s): State<AppState>, _a: Authorized<perm::Payroll>) ->
     Ok(Json(payroll::us_states::overview(&s.db).await?))
 }
 
+/// D67: the built-in disability and paid leave programs with their 2026 sources.
+pub async fn leave_programs(_a: Authorized<perm::Payroll>) -> AppResult<Json<Value>> {
+    Ok(Json(payroll::us_leave::catalog()))
+}
+
 pub async fn state_put(
     State(s): State<AppState>,
     _a: Authorized<perm::Payroll>,

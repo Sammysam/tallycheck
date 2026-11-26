@@ -7,7 +7,7 @@ export type PayFrequency = 'WEEKLY' | 'BIWEEKLY' | 'SEMIMONTHLY' | 'MONTHLY';
 export type UsRunStatus = 'DRAFT' | 'POSTED' | 'PAID' | 'VOID';
 export type UsRemitType =
   | 'FORM_941' | 'FEDERAL_INCOME_TAX' | 'SOCIAL_SECURITY' | 'MEDICARE' | 'FUTA' | 'SUTA' | 'RETIREMENT_401K' | 'SECTION_125'
-  | 'STATE_INCOME_TAX';
+  | 'STATE_INCOME_TAX' | 'STATE_LEAVE';
 
 export interface UsSettings {
   country: 'LK' | 'US';
@@ -63,6 +63,8 @@ export interface UsTax {
   stateAnnualDeduction: number;
   /** D66: the state form's status code or rate-table letter (null = from the filing status). */
   stateCode: string | null;
+  /** D67: leave programs the employee is exempt from (e.g. WA_CARES). */
+  leaveExempt: string[];
   stateAllowances: number;
   stateExtraWithholding: number;
   stateExempt: boolean;
@@ -156,6 +158,8 @@ export interface UsRun {
   sutaTotal: number;
   netPayTotal: number;
   employerTaxesTotal: number;
+  leaveEmployeeTotal?: number;
+  leaveEmployerTotal?: number;
   stateIncomeTaxTotal: number;
   journalEntryId: string | null;
   paymentJournalEntryId: string | null;
@@ -167,6 +171,9 @@ export interface UsRun {
 
 export interface UsLine extends UsTaxFigures {
   id: string;
+  /** D67: disability / paid leave contributions. */
+  leave?: LeaveContribution[];
+  leaveEmployee?: number;
   employeeId: string | null;
   employeeCode: string;
   employeeName: string;
@@ -206,7 +213,38 @@ export interface UsStateRegistration {
   sutaWageBase: number | null;
   stateTaxAccountId: string | null;
   sutaAccountId: string | null;
+  /** D67: headcount for the leave programs' small-employer rules (null = not given). */
+  employees: number | null;
+  leaveOptions: Record<string, LeaveOption>;
+  leaveAccountId: string | null;
 }
+
+/** D67: a company's choice for one disability / paid leave program (rates in percent). */
+export interface LeaveOption { off?: boolean; employerRate?: number; small?: boolean }
+
+/** D67: a built-in disability / paid leave program. */
+export interface LeaveProgram { id: string; state: string; name: string; from: string; source: string }
+
+/** D67: one program's contribution on a paycheck. */
+export interface LeaveContribution { id: string; state: string; name: string; wages: number; employee: number; employer: number }
+
+/** D67: what the company may set per program (the rest is built in). */
+export const LEAVE_CHOICES: Record<string, { rate?: string; small?: string; off: string }> = {
+  NJ_TDI: { rate: 'Employer TDI rate % (from your rate notice; 0.5 for new employers)', off: 'An approved private plan covers TDI' },
+  NJ_FLI: { off: 'An approved private plan covers FLI' },
+  HI_TDI: { rate: "Insurer's premium rate % (employees pay at most half)", off: 'Employer pays the whole premium (nothing deducted)' },
+  NY_DBL: { off: 'Do not deduct the employee share (0.5%, up to $0.60 a week)' },
+  NY_PFL: { off: 'Employer pays Paid Family Leave (nothing deducted)' },
+  MN_PL: { small: 'DEED gave us the small employer premium rate', off: 'Approved private plan' },
+  CA_SDI: { off: 'Approved voluntary plan (VPDI)' },
+  CO_FAMLI: { off: 'Approved private plan' },
+  CT_PL: { off: 'Approved private plan' },
+  DE_PL: { off: 'Approved private plan' },
+  ME_PFML: { off: 'Approved private plan' },
+  WA_PFML: { off: 'Approved voluntary plan' },
+  WA_CARES: { off: 'Not withheld (all employees exempt)' },
+  DC_PFL: { off: 'Not covered (e.g. a federal employer)' },
+};
 
 export interface UsStatesOverview {
   registrations: UsStateRegistration[];
@@ -244,6 +282,7 @@ export const US_REMIT_LABEL: Record<UsRemitType, string> = {
   RETIREMENT_401K: '401(k)',
   SECTION_125: 'Section 125',
   STATE_INCOME_TAX: 'State income tax',
+  STATE_LEAVE: 'State disability / paid leave',
 };
 
 export const US_RUN_STATUS_HELP: Record<UsRunStatus, string> = {

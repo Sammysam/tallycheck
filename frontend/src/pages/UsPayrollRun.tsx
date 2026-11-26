@@ -113,7 +113,10 @@ export default function UsPayrollRun() {
   }
 
   const isDraft = run.status === 'DRAFT';
-  const perState = remitForm.type === 'SUTA' || remitForm.type === 'STATE_INCOME_TAX';
+  // For STATE_LEAVE the "state" is the program (e.g. CA_SDI).
+  const perState = remitForm.type === 'SUTA' || remitForm.type === 'STATE_INCOME_TAX' || remitForm.type === 'STATE_LEAVE';
+  const leaveName = (programId: string) => run?.lines.flatMap((l) => l.leave ?? []).find((c) => c.id === programId)?.name ?? programId;
+  const where = (type: string, st: string) => (type === 'STATE_LEAVE' ? leaveName(st) : st);
   const remitStates = run ? run.taxes.filter((t) => t.type === remitForm.type && t.state && t.outstanding > 0).map((t) => t.state as string) : [];
   const live = run.status === 'POSTED' || run.status === 'PAID';
   const inRun = new Set(run.lines.map((l) => l.employeeId));
@@ -218,7 +221,7 @@ export default function UsPayrollRun() {
               <tbody>
                 {run.taxes.filter((t) => t.total > 0).map((t) => (
                   <tr key={`${t.type}-${t.state ?? ''}`} className="border-t border-gray-100">
-                    <td className="py-1">{US_REMIT_LABEL[t.type]}{t.state ? ` — ${t.state}` : ''}</td>
+                    <td className="py-1">{t.type === 'STATE_LEAVE' && t.state ? leaveName(t.state) : `${US_REMIT_LABEL[t.type]}${t.state ? ` — ${t.state}` : ''}`}</td>
                     <td className="py-1 text-right">{amt(t.total)}</td>
                     <td className="py-1 text-right">{amt(t.remitted)}</td>
                     <td className={`py-1 text-right ${t.outstanding > 0 ? 'font-medium text-amber-700' : 'text-gray-400'}`}>{amt(t.outstanding)}</td>
@@ -235,7 +238,7 @@ export default function UsPayrollRun() {
                   date: remitForm.date,
                   amount: remitForm.type === 'FORM_941' || remitForm.amount.trim() === '' ? undefined : Number(remitForm.amount),
                   reference: remitForm.reference.trim() || null,
-                  ...(perState && remitForm.state ? { state: remitForm.state } : {}),
+                  ...(perState && remitForm.state ? (remitForm.type === 'STATE_LEAVE' ? { program: remitForm.state } : { state: remitForm.state }) : {}),
                 }).then(() => setRemitForm({ ...remitForm, amount: '', reference: '', state: '' })), 'Could not record the payment');
               }}>
               <label className="block" style={{ gridColumn: '1 / -1' }}>
@@ -246,10 +249,10 @@ export default function UsPayrollRun() {
               </label>
               {perState && remitStates.length > 0 && (
                 <label className="block" style={{ gridColumn: '1 / -1' }}>
-                  <span className="text-xs font-medium text-gray-500">State</span>
+                  <span className="text-xs font-medium text-gray-500">{remitForm.type === 'STATE_LEAVE' ? 'Program' : 'State'}</span>
                   <select value={remitForm.state} onChange={(e) => setRemitForm({ ...remitForm, state: e.target.value })} aria-label="State for this payment">
-                    <option value="">{remitStates.length > 1 ? `Every state (${remitStates.join(', ')})` : remitStates[0]}</option>
-                    {remitStates.length > 1 && remitStates.map((st) => <option key={st} value={st}>{st}</option>)}
+                    <option value="">{remitStates.length > 1 ? `Every ${remitForm.type === 'STATE_LEAVE' ? 'program' : 'state'} (${remitStates.map((st) => where(remitForm.type, st)).join(', ')})` : where(remitForm.type, remitStates[0])}</option>
+                    {remitStates.length > 1 && remitStates.map((st) => <option key={st} value={st}>{where(remitForm.type, st)}</option>)}
                   </select>
                 </label>
               )}
@@ -334,13 +337,13 @@ export default function UsPayrollRun() {
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 uppercase tracking-wide">
               <Th left>Employee</Th><Th>Regular</Th><Th>Extra pay</Th><Th>Gross</Th>
-              <Th>Pre-tax</Th><Th>Federal tax</Th><Th>State tax</Th><Th>Soc. sec.</Th><Th>Medicare</Th><Th strong>Net</Th>
+              <Th>Pre-tax</Th><Th>Federal tax</Th><Th>State tax</Th><Th>Leave / SDI</Th><Th>Soc. sec.</Th><Th>Medicare</Th><Th strong>Net</Th>
               <Th>Employer tax</Th><Th />
             </tr>
           </thead>
           <tbody>
             {run.lines.length === 0 && (
-              <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No employees in this run.</td></tr>
+              <tr><td colSpan={13} className="px-4 py-8 text-center text-gray-400">No employees in this run.</td></tr>
             )}
             {run.lines.map((l) => (
               <tr key={l.id} className="border-b border-gray-100 hover:bg-blue-50/40">
@@ -362,6 +365,12 @@ export default function UsPayrollRun() {
                   {l.stateTaxConfigured ? amt(l.stateIncomeTax) : <span className="text-amber-700" title={`No ${l.workState} rule yet`}>{l.workState}?</span>}
                   {l.stateTaxes && (l.stateTaxes.length > 1 || (l.stateTaxes[0] && l.stateTaxes[0].state !== l.workState)) && (
                     <div className="text-gray-400 whitespace-nowrap">{l.stateTaxes.map((st) => `${st.state} ${amt(st.tax)}`).join(' · ')}</div>
+                  )}
+                </Td>
+                <Td muted={!l.leaveEmployee}>
+                  {amt(l.leaveEmployee ?? 0)}
+                  {(l.leave ?? []).length > 0 && (
+                    <div className="text-gray-400 whitespace-nowrap">{(l.leave ?? []).map((c) => `${c.name} ${amt(c.employee)}${c.employer ? ` + employer ${amt(c.employer)}` : ''}`).join(' · ')}</div>
                   )}
                 </Td>
                 <Td>{amt(ss(l))}</Td>
@@ -392,6 +401,7 @@ export default function UsPayrollRun() {
                 <Td>{amt(run.pretax401kTotal + run.pretaxSection125Total)}</Td>
                 <Td>{amt(run.federalIncomeTaxTotal)}</Td>
                 <Td>{amt(run.stateIncomeTaxTotal)}</Td>
+                <Td>{amt(run.leaveEmployeeTotal ?? 0)}</Td>
                 <Td>{amt(run.socialSecurityEmployeeTotal)}</Td>
                 <Td>{amt(run.medicareEmployeeTotal + run.additionalMedicareTotal)}</Td>
                 <Td strong>{amt(run.netPayTotal)}</Td>
@@ -403,7 +413,7 @@ export default function UsPayrollRun() {
         </table>
       </div>
       <p className="text-xs text-gray-500 mt-2">
-        Extra pay is overtime (time and a half), bonus and other earnings. Employer tax is the company's social security and Medicare shares, FUTA and state unemployment. State tax follows each state's rule in US payroll settings ("XX?" = no rule yet; posting waits for it). Local income tax is not included. Someone working in several states shows each state's tax under the total.
+        Extra pay is overtime (time and a half), bonus and other earnings. Employer tax is the company's social security and Medicare shares, FUTA, state unemployment and its share of state disability / paid leave. Leave / SDI is the employee's share of the state's disability and paid leave programs (built in for 2026). State tax follows each state's rule in US payroll settings ("XX?" = no rule yet; posting waits for it). Local income tax is not included. Someone working in several states shows each state's tax under the total.
       </p>
 
       {run.remittances.length > 0 && (
