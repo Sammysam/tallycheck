@@ -158,6 +158,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/us/reports/941", get(us::report_941))
         .route("/payroll/us/reports/940", get(us::report_940))
         .route("/payroll/us/reports/w2", get(us::report_w2))
+        .route("/payroll/us/reports/state", get(us::report_state))
+        .route("/payroll/us/reports/state-annual", get(us::report_state_annual))
         .route("/payroll/us/state-taxes", get(us::state_taxes))
         .route("/payroll/us/states", get(us::states))
         .route("/payroll/us/leave-programs", get(us::leave_programs))

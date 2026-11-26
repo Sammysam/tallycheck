@@ -266,6 +266,22 @@ try {
     await waitFor(`document.body.innerText.includes('Yonkers (nonresident earnings tax)') && document.body.innerText.includes('$10.00')`, 'Yonkers in the preview');
     await shot('05-local');
   });
+
+  await check('state forms: the NJ quarter shows the withholding and unemployment figures', async () => {
+    // D70: the posted November run's NJ unemployment wages for the employee.
+    await go('/payroll/us/forms');
+    await waitFor(`[...(document.querySelector('select[aria-label="State forms"]')?.options ?? [])].some((o) => o.value === 'NJ')`, 'state list');
+    await setValue('select[aria-label="State forms"]', 'NJ');
+    await evaluate(`(() => { const s = [...document.querySelectorAll('select')].find((x) => [...x.options].some((o) => o.value === '4' && o.textContent === 'Q4'));
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, '4'); s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await evaluate(`(() => { const i = [...document.querySelectorAll('input[type=number]')].find((x) => x.min === '2000');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '2026'); i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await waitFor(`document.body.innerText.includes('NJ — Q4 2026') && document.body.innerText.includes('Unemployment wage report') && document.body.innerText.includes('Annual reconciliation')`, 'NJ quarter shown');
+    const t = await pageText();
+    if (!t.includes('Income tax withholding return')) throw new Error('withholding return missing');
+    if (!t.includes('Employees on the payroll for the pay period including the 12th')) throw new Error('12th counts missing');
+    await shot('06-state-forms');
+  });
 } catch (e) {
   failures.push('harness');
   results.push(`FAIL  harness: ${e.message}`);

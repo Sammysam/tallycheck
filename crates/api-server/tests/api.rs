@@ -6562,3 +6562,117 @@ async fn us_payroll_local_taxes() -> TestResult {
     assert_eq!(us_balance(&app, &admin, "2390").await?, json!(0));
     Ok(())
 }
+
+/// D70: state forms from a posted run (biweekly $52,000, gross 2,000.00, period 2–15 November,
+/// paid 20 November 2026):
+///   CA: unemployment 3.4% + ETT 0.1% = 70.00 on 2,000 taxable; SDI 26.00 (W-2 box 14)
+///   NJ: unemployment 56.00 + employee UI 8.50; TDI 3.80 + employer 10.00, FLI 4.60
+///   OH: Columbus 2.5% = 50.00 (W-2 boxes 18-20)
+#[tokio::test]
+async fn us_payroll_state_forms() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    us_company(&app, &admin, json!({})).await?;
+    for (st, body) in [
+        (
+            "CA",
+            json!({"sutaRate": 3.4, "sutaWageBase": 7000, "withholdingAccountNo": "CA-123", "sutaSurcharges": [{"name": "ETT", "rate": 0.1}]}),
+        ),
+        ("NJ", json!({"sutaRate": 2.8, "sutaWageBase": 44800, "unemploymentAccountNo": "NJ-9"})),
+        ("OH", json!({"sutaRate": 2.7, "sutaWageBase": 9000})),
+    ] {
+        let r = us_send(&app, Method::PUT, format!("/api/payroll/us/states/{st}"), &admin, Some(body)).await?;
+        assert_eq!(r.status, StatusCode::OK, "{st}: {}", r.body);
+    }
+    let r = us_send(
+        &app,
+        Method::PUT,
+        "/api/payroll/us/localities/OH-COLUMBUS".into(),
+        &admin,
+        Some(json!({"name": "Columbus (OH) municipal income tax", "state": "OH", "method": "PERCENT", "residentRate": 2.5, "nonresidentRate": 2.5})),
+    )
+    .await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let salary = json!({"payType": "SALARY", "annualSalary": 52000});
+    for (code, extra) in [
+        ("US-CA", json!({"workState": "CA"})),
+        ("US-NJ", json!({"workState": "NJ"})),
+        ("US-OH", json!({"workState": "OH", "localTaxes": [{"code": "OH-COLUMBUS"}]})),
+    ] {
+        us_employee(&app, &admin, code, json!({}), merged(&salary, extra)).await?;
+    }
+    let body = json!({"periodStart": "2026-11-02", "periodEnd": "2026-11-15", "payDate": "2026-11-20"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let posted = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert_eq!(posted.status, StatusCode::CREATED, "{}", posted.body);
+    let ca_tax = us_line(&posted.body, "US-CA")["stateIncomeTax"].clone();
+
+    let q = |st: &str| {
+        us_send(
+            &app,
+            Method::GET,
+            format!("/api/payroll/us/reports/state?state={st}&year=2026&quarter=4"),
+            &admin,
+            None,
+        )
+    };
+    let ca = q("CA").await?;
+    assert_eq!(ca.status, StatusCode::OK, "{}", ca.body);
+    assert_eq!(ca.body["accountNumbers"]["withholdingAccountNo"], json!("CA-123"));
+    assert_eq!(ca.body["withholding"]["withheld"], ca_tax);
+    assert_eq!(ca.body["withholding"]["months"][1]["withheld"], ca_tax, "November");
+    assert_eq!(ca.body["withholding"]["employees"], json!(1));
+    let u = &ca.body["unemployment"];
+    assert_eq!((&u["grossWages"], &u["taxableWages"], &u["excessWages"]), (&json!(2000), &json!(2000), &json!(0)));
+    assert_eq!(u["employerContributions"], json!(70));
+    assert_eq!(u["ratesUsed"], json!([{"rate": 3.4, "surcharges": 0.1}]));
+    let on12: Vec<i64> = u["employeesOnThe12th"]
+        .as_array()
+        .ok_or("12th")?
+        .iter()
+        .map(|x| x["employees"].as_i64().unwrap_or(-1))
+        .collect();
+    assert_eq!(on12, vec![0, 1, 0], "only the November period includes the 12th");
+    assert_eq!(ca.body["leave"][0]["employee"], json!(26));
+
+    let nj = q("NJ").await?;
+    assert_eq!(nj.body["accountNumbers"]["unemploymentAccountNo"], json!("NJ-9"));
+    assert_eq!(nj.body["unemployment"]["employerContributions"], json!(56));
+    assert_eq!(nj.body["unemployment"]["employeeContributions"], json!(8.5));
+    let leave: Vec<(String, Value, Value)> = nj.body["leave"]
+        .as_array()
+        .ok_or("leave")?
+        .iter()
+        .map(|x| (x["id"].as_str().unwrap_or("").to_string(), x["employee"].clone(), x["employer"].clone()))
+        .collect();
+    assert_eq!(leave, vec![("NJ_FLI".into(), json!(4.6), json!(0)), ("NJ_TDI".into(), json!(3.8), json!(10))]);
+    let oh = q("OH").await?;
+    assert_eq!(oh.body["local"][0]["employee"], json!(50));
+    let bad = q("XX").await?;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+    let annual =
+        app.call(Method::GET, "/api/payroll/us/reports/state-annual?state=CA&year=2026", Some(&admin), None).await?;
+    assert_eq!(annual.status, StatusCode::OK, "{}", annual.body);
+    assert_eq!(annual.body["totals"]["withheld"], ca_tax);
+    assert_eq!(annual.body["quarters"][3]["unemploymentContributions"], json!(70));
+    assert_eq!(annual.body["w2"]["forms"], json!(1));
+    assert_eq!(annual.body["balanced"], json!(true));
+
+    let w2 = app.call(Method::GET, "/api/payroll/us/reports/w2?year=2026", Some(&admin), None).await?;
+    let row = |code: &str| {
+        w2.body["employees"]
+            .as_array()
+            .and_then(|a| a.iter().find(|e| e["employeeCode"] == code))
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert_eq!(row("US-CA")["box14"], json!([{"label": "California SDI", "amount": 26}]));
+    assert_eq!(
+        row("US-OH")["locals"],
+        json!([{"code": "OH-COLUMBUS", "state": "OH", "box18": 2000, "box19": 50, "box20": "Columbus (OH) municipal income tax"}])
+    );
+    Ok(())
+}

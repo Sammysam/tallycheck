@@ -177,6 +177,28 @@ pub async fn report_941(
     Ok(Json(us_reports::form_941(&s.db, year, quarter).await?))
 }
 
+/// D70: one state's quarter (withholding return, unemployment wage report, leave, local).
+pub async fn report_state(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Query(q): Params,
+) -> AppResult<Json<Value>> {
+    let (year, quarter) = dto::report_period(&q, true)?;
+    let state = q.get("state").map(String::as_str).unwrap_or_default();
+    Ok(Json(us_reports::state_quarter(&s.db, state, year, quarter).await?))
+}
+
+/// D70: one state's annual reconciliation.
+pub async fn report_state_annual(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Query(q): Params,
+) -> AppResult<Json<Value>> {
+    let (year, _) = dto::report_period(&q, false)?;
+    let state = q.get("state").map(String::as_str).unwrap_or_default();
+    Ok(Json(us_reports::state_annual(&s.db, state, year).await?))
+}
+
 pub async fn report_940(
     State(s): State<AppState>,
     _a: Authorized<perm::Payroll>,

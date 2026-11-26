@@ -19,6 +19,17 @@
 //!   security tax, 5 Medicare wages, 6 Medicare tax (with Additional Medicare), 12 code D 401(k).
 //!   Boxes 15–17: each state's wages and the state income tax withheld for it (D63: one row per
 //!   state in `states`; the box fields show the work state, or else the state with the most wages).
+//!   D70: box 14 lists the employee's state disability / paid leave contributions (CA SDI, NY PFL,
+//!   …) and `locals` boxes 18–20 (local wages, local tax, locality) per locality.
+//!
+//! D70, step 7 of the US state payroll plan: per state and quarter, the figures for the state's
+//! withholding return (tax withheld by month of the pay date, the wages it was withheld on,
+//! deposits), its unemployment wage report (each employee's gross wages, wages over the state's
+//! limit, taxable wages, the employer's contributions with the state's extra charges, employee
+//! unemployment contributions, employees on the payroll for the pay period including the 12th of
+//! each month), the disability / paid leave programs and the local taxes of that state; and the
+//! state's annual reconciliation (each quarter, and the W-2 state totals). Account numbers come
+//! from the state registration.
 
 use crate::us::PPM;
 use crate::us_setup::load_settings;
@@ -75,6 +86,16 @@ struct Paid {
     state_tax: i64,
     /// D63: each state's (state, wages, tax) on this line.
     states: Vec<(String, i64, i64)>,
+    /// D70: the run's period, the unemployment state and figures, leave and local amounts.
+    period_start: String,
+    period_end: String,
+    suta_state: String,
+    suta_wages: i64,
+    suta: i64,
+    suta_rate: Option<i64>,
+    suta_surcharge_rate: Option<i64>,
+    leave: Vec<crate::us_leave::Contribution>,
+    local: Vec<crate::us_leave::Contribution>,
 }
 
 impl Paid {
@@ -102,7 +123,10 @@ async fn paid_lines(conn: &mut SqliteConnection, from: &str, to: &str) -> AppRes
                   l."pretaxSection125", l."incomeTaxWages", l."federalIncomeTax", l."socialSecurityWages",
                   l."socialSecurityEmployee", l."socialSecurityEmployer", l."medicareWages", l."ytdMedicareWages",
                   l."medicareEmployee", l."additionalMedicare", l."medicareEmployer", l."futaWages", l."futa",
-                  l."stateIncomeTaxWages", l."stateIncomeTax", l."stateTaxes"
+                  l."stateIncomeTaxWages", l."stateIncomeTax", l."stateTaxes",
+                  r."periodStart", r."periodEnd",
+                  COALESCE(l."sutaState", json_extract(r."settingsSnapshot", '$.state'), l."workState") AS "sutaStateUsed",
+                  l."sutaWages", l."suta", l."sutaRateUsed", l."sutaSurchargeRate", l."leave", l."local"
            FROM "us_payroll_lines" l JOIN "us_payroll_runs" r ON r."id" = l."runId"
            WHERE r."status" IN ('POSTED','PAID') AND r."payDate" BETWEEN ?1 AND ?2
            ORDER BY r."payDate", r."runNumber", lower(l."employeeCode"), l."rowid""#,
@@ -158,9 +182,25 @@ async fn paid_lines(conn: &mut SqliteConnection, from: &str, to: &str) -> AppRes
                         parts
                     }
                 },
+                period_start: r.try_get("periodStart")?,
+                period_end: r.try_get("periodEnd")?,
+                suta_state: r.try_get("sutaStateUsed")?,
+                suta_wages: c("sutaWages")?,
+                suta: c("suta")?,
+                suta_rate: r.try_get("sutaRateUsed")?,
+                suta_surcharge_rate: r.try_get("sutaSurchargeRate")?,
+                leave: contributions(&r.try_get::<String, _>("leave")?),
+                local: contributions(&r.try_get::<String, _>("local")?),
             })
         })
         .collect()
+}
+
+fn contributions(text: &str) -> Vec<crate::us_leave::Contribution> {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|v| v.as_array().map(|a| a.iter().filter_map(crate::us_leave::Contribution::from_json).collect()))
+        .unwrap_or_default()
 }
 
 /// Tax paid over (remittances) of the given types, for the runs paid in the period.
@@ -374,6 +414,25 @@ pub async fn w2(db: &Db, year: i32) -> AppResult<Value> {
             .iter()
             .map(|(st, (wages, tax))| json!({"box15": st, "box16": m(*wages), "box17": m(*tax)}))
             .collect();
+        // D70: box 14 (state disability / paid leave the employee paid) and boxes 18-20 per locality.
+        let mut box14: BTreeMap<String, i64> = BTreeMap::new();
+        let mut locals: BTreeMap<String, (String, String, i64, i64)> = BTreeMap::new();
+        for p in &ps {
+            for c in p.leave.iter().filter(|c| c.employee > 0) {
+                *box14.entry(c.name.clone()).or_insert(0) += c.employee;
+            }
+            for c in p.local.iter().filter(|c| c.employee > 0) {
+                let e = locals.entry(c.id.clone()).or_insert((c.name.clone(), c.state.clone(), 0, 0));
+                e.2 += c.wages;
+                e.3 += c.employee;
+            }
+        }
+        let box14: Vec<Value> =
+            box14.iter().map(|(name, amount)| json!({"label": name, "amount": m(*amount)})).collect();
+        let locals: Vec<Value> = locals
+            .iter()
+            .map(|(code, (name, st, wages, tax))| json!({"code": code, "state": st, "box18": m(*wages), "box19": m(*tax), "box20": name}))
+            .collect();
         out.push(json!({
             "employeeId": last.employee_id,
             "employeeCode": last.code,
@@ -391,6 +450,8 @@ pub async fn w2(db: &Db, year: i32) -> AppResult<Value> {
             "box16": m(main.1),
             "box17": m(main.2),
             "states": states,
+            "box14": box14,
+            "locals": locals,
             "stateWagesTotal": m(s(&|p| p.state_wages)),
             "stateTaxTotal": m(s(&|p| p.state_tax)),
         }));
@@ -407,4 +468,219 @@ pub async fn w2(db: &Db, year: i32) -> AppResult<Value> {
         "box16": total("stateWagesTotal"), "box17": total("stateTaxTotal"),
     });
     Ok(json!({ "year": year, "employer": employer(&mut c).await?, "employees": out, "totals": totals }))
+}
+
+/// One employee's quarter on the unemployment report: (code, name, gross, taxable, employer, employee).
+type UiRow = (String, String, i64, i64, i64, i64);
+
+/// D70: the registration's account numbers for a state (blank when not registered).
+async fn state_numbers(conn: &mut SqliteConnection, state: &str) -> AppResult<Value> {
+    let reg = crate::us_states::registration(conn, state).await?;
+    Ok(json!({
+        "withholdingAccountNo": reg.as_ref().and_then(|r| r.withholding_account_no.clone()),
+        "unemploymentAccountNo": reg.as_ref().and_then(|r| r.unemployment_account_no.clone()),
+        "registered": reg.is_some(),
+    }))
+}
+
+/// Remittances for one state (or leave program / locality) of a type, for runs paid in the period.
+async fn deposits_for(conn: &mut SqliteConnection, from: &str, to: &str, kind: &str, key: &str) -> AppResult<i64> {
+    let total: i64 = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(x."amount"),0) FROM "us_payroll_remittances" x
+           JOIN "us_payroll_runs" r ON r."id" = x."runId"
+           WHERE r."status" IN ('POSTED','PAID') AND r."payDate" BETWEEN ?1 AND ?2 AND x."type" = ?3 AND x."state" = ?4"#,
+    )
+    .bind(from)
+    .bind(to)
+    .bind(kind)
+    .bind(key)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(total)
+}
+
+fn check_state(state: &str) -> AppResult<String> {
+    let st = state.trim().to_ascii_uppercase();
+    if !crate::us_setup::STATES.contains(&st.as_str()) {
+        return Err(AppError::bad_request("state must be a two-letter US state code, like CA"));
+    }
+    Ok(st)
+}
+
+/// Sums of (wages, employee, employer) by id for contributions of one state.
+fn by_id<'a>(
+    items: impl Iterator<Item = &'a crate::us_leave::Contribution>,
+    state: &str,
+) -> BTreeMap<String, (String, i64, i64, i64)> {
+    let mut out: BTreeMap<String, (String, i64, i64, i64)> = BTreeMap::new();
+    for c in items.filter(|c| c.state == state) {
+        let e = out.entry(c.id.clone()).or_insert((c.name.clone(), 0, 0, 0));
+        e.1 += c.wages;
+        e.2 += c.employee;
+        e.3 += c.employer;
+    }
+    out
+}
+
+/// `GET /payroll/us/reports/state?state&year&quarter`: one state's quarter.
+pub async fn state_quarter(db: &Db, state: &str, year: i32, quarter: u32) -> AppResult<Value> {
+    check_year(year)?;
+    let st = check_state(state)?;
+    let (from, to, _) = quarter_range(year, quarter)?;
+    let mut c = db.read().acquire().await?;
+    let lines = paid_lines(&mut c, &from, &to).await?;
+
+    // Withholding: tax and wages for this state by month of the pay date.
+    let first_month = (quarter - 1) * 3 + 1;
+    let mut months = Vec::new();
+    let mut withheld_total = 0;
+    let mut wages_total = 0;
+    let mut employees = std::collections::BTreeSet::new();
+    for mo in first_month..first_month + 3 {
+        let prefix = format!("{year}-{mo:02}");
+        let (mut wages, mut tax) = (0, 0);
+        for p in lines.iter().filter(|p| p.pay_date.starts_with(&prefix)) {
+            for (s, w, t) in p.states.iter().filter(|(s, _, _)| *s == st) {
+                let _ = s;
+                wages += w;
+                tax += t;
+                employees.insert(p.employee_key());
+            }
+        }
+        withheld_total += tax;
+        wages_total += wages;
+        months.push(json!({"month": prefix, "wages": m(wages), "withheld": m(tax)}));
+    }
+    let withholding = json!({
+        "months": months,
+        "wages": m(wages_total),
+        "withheld": m(withheld_total),
+        "employees": employees.len(),
+        "deposits": m(deposits_for(&mut c, &from, &to, "STATE_INCOME_TAX", &st).await?),
+    });
+
+    // Unemployment wage report: employees whose unemployment went to this state.
+    let ui: Vec<&Paid> = lines.iter().filter(|p| p.suta_state == st).collect();
+    let mut people: BTreeMap<String, UiRow> = BTreeMap::new();
+    for p in &ui {
+        let ee: i64 =
+            p.leave.iter().filter(|c| c.state == st && crate::us_leave::is_ui(&c.id)).map(|c| c.employee).sum();
+        let e = people.entry(p.employee_key()).or_insert((p.code.clone(), p.name.clone(), 0, 0, 0, 0));
+        e.2 += p.gross;
+        e.3 += p.suta_wages;
+        e.4 += p.suta;
+        e.5 += ee;
+    }
+    let rows: Vec<Value> = people
+        .values()
+        .map(|(code, name, gross, taxable, employer, employee)| {
+            json!({"employeeCode": code, "name": name, "grossWages": m(*gross), "excessWages": m((gross - taxable).max(0)),
+                   "taxableWages": m(*taxable), "employerContributions": m(*employer), "employeeContributions": m(*employee)})
+        })
+        .collect();
+    // Employees paid for a pay period that includes the 12th of each month.
+    let twelfths: Vec<Value> = (first_month..first_month + 3)
+        .map(|mo| {
+            let day = format!("{year}-{mo:02}-12");
+            let n = ui
+                .iter()
+                .filter(|p| p.period_start.as_str() <= day.as_str() && day.as_str() <= p.period_end.as_str())
+                .map(|p| p.employee_key())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
+            json!({"date": day, "employees": n})
+        })
+        .collect();
+    let rates: std::collections::BTreeSet<(i64, i64)> =
+        ui.iter().map(|p| (p.suta_rate.unwrap_or(0), p.suta_surcharge_rate.unwrap_or(0))).collect();
+    let sum = |f: &dyn Fn(&UiRow) -> i64| people.values().map(f).sum::<i64>();
+    let unemployment = json!({
+        "employees": rows,
+        "grossWages": m(sum(&|x| x.2)),
+        "excessWages": m(sum(&|x| (x.2 - x.3).max(0))),
+        "taxableWages": m(sum(&|x| x.3)),
+        "employerContributions": m(sum(&|x| x.4)),
+        "employeeContributions": m(sum(&|x| x.5)),
+        "ratesUsed": rates.iter().map(|(r, sc)| json!({"rate": crate::us_setup::ppm_to_percent(*r), "surcharges": crate::us_setup::ppm_to_percent(*sc)})).collect::<Vec<_>>(),
+        "employeesOnThe12th": twelfths,
+        "deposits": m(deposits_for(&mut c, &from, &to, "SUTA", &st).await?),
+    });
+
+    // Disability / paid leave programs and local taxes of this state.
+    let mut leave = Vec::new();
+    for (id, (name, wages, ee, er)) in by_id(lines.iter().flat_map(|p| p.leave.iter()), &st) {
+        if crate::us_leave::is_ui(&id) {
+            continue;
+        }
+        let paid = deposits_for(&mut c, &from, &to, "STATE_LEAVE", &id).await?;
+        leave.push(json!({"id": id, "name": name, "wages": m(wages), "employee": m(ee), "employer": m(er), "deposits": m(paid)}));
+    }
+    let mut local = Vec::new();
+    for (id, (name, wages, ee, er)) in by_id(lines.iter().flat_map(|p| p.local.iter()), &st) {
+        let paid = deposits_for(&mut c, &from, &to, "LOCAL_TAX", &id).await?;
+        local.push(json!({"code": id, "name": name, "wages": m(wages), "employee": m(ee), "employer": m(er), "deposits": m(paid)}));
+    }
+    Ok(json!({
+        "state": st,
+        "year": year,
+        "quarter": quarter,
+        "from": from,
+        "to": to,
+        "employer": employer(&mut c).await?,
+        "accountNumbers": state_numbers(&mut c, &st).await?,
+        "withholding": withholding,
+        "unemployment": unemployment,
+        "leave": leave,
+        "local": local,
+    }))
+}
+
+/// `GET /payroll/us/reports/state-annual?state&year`: the state's annual reconciliation.
+pub async fn state_annual(db: &Db, state: &str, year: i32) -> AppResult<Value> {
+    check_year(year)?;
+    let st = check_state(state)?;
+    let mut quarters = Vec::new();
+    let (mut withheld, mut wages, mut deposited, mut taxable, mut contributions) = (0, 0, 0, 0, 0);
+    for q in 1..=4 {
+        let r = state_quarter(db, &st, year, q).await?;
+        let cents = |v: &Value| Money::from_json(v).map(Money::cents).unwrap_or(0);
+        withheld += cents(&r["withholding"]["withheld"]);
+        wages += cents(&r["withholding"]["wages"]);
+        deposited += cents(&r["withholding"]["deposits"]);
+        taxable += cents(&r["unemployment"]["taxableWages"]);
+        contributions +=
+            cents(&r["unemployment"]["employerContributions"]) + cents(&r["unemployment"]["employeeContributions"]);
+        quarters.push(json!({
+            "quarter": q,
+            "wages": r["withholding"]["wages"],
+            "withheld": r["withholding"]["withheld"],
+            "deposits": r["withholding"]["deposits"],
+            "unemploymentTaxableWages": r["unemployment"]["taxableWages"],
+            "unemploymentContributions": m(cents(&r["unemployment"]["employerContributions"]) + cents(&r["unemployment"]["employeeContributions"])),
+        }));
+    }
+    // W-2s with a row for this state (boxes 15-17).
+    let w = w2(db, year).await?;
+    let (mut forms, mut w2_wages, mut w2_tax) = (0, 0, 0);
+    for e in w["employees"].as_array().into_iter().flatten() {
+        for row in e["states"].as_array().into_iter().flatten().filter(|r| r["box15"] == st.as_str()) {
+            forms += 1;
+            w2_wages += Money::from_json(&row["box16"]).map(Money::cents).unwrap_or(0);
+            w2_tax += Money::from_json(&row["box17"]).map(Money::cents).unwrap_or(0);
+        }
+    }
+    let mut c = db.read().acquire().await?;
+    Ok(json!({
+        "state": st,
+        "year": year,
+        "employer": employer(&mut c).await?,
+        "accountNumbers": state_numbers(&mut c, &st).await?,
+        "quarters": quarters,
+        "totals": {
+            "wages": m(wages), "withheld": m(withheld), "deposits": m(deposited),
+            "unemploymentTaxableWages": m(taxable), "unemploymentContributions": m(contributions),
+        },
+        "w2": {"forms": forms, "stateWages": m(w2_wages), "stateTax": m(w2_tax)},
+        "balanced": w2_tax == withheld,
+    }))
 }

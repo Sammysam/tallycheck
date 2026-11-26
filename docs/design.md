@@ -1025,6 +1025,22 @@ recommendations without answering each one individually; revisit any of them on 
   tax), kept as `localTax:NYC`; payments are type `LOCAL_TAX` with a `locality`. Not worked out:
   Ohio's 20-day rule and resident credits, Michigan's resident / work-city split, Yonkers'
   allocation by days worked, nonresident apportioning (the company sets the localities to match).
+- **D70 State forms** (2026-11-27, step 7 of the US state payroll plan).
+  `payroll::us_reports` gains per-state form figures from POSTED / PAID runs by pay date (nothing
+  is filed): `GET /payroll/us/reports/state?state&year&quarter` (permission `payroll`) — the
+  withholding return (the state's income tax withheld and the wages it was withheld on, by month
+  of the pay date, employees, deposits recorded for that state), the unemployment wage report
+  (each employee whose unemployment went to the state: gross wages, wages over the state's limit,
+  taxable wages, the employer's contributions including the registration's extra charges,
+  employee unemployment contributions, the rates used, employees paid for the pay period
+  including the 12th of each month, deposits), and that state's disability / paid leave programs
+  and local taxes (wages, employee, employer, deposits); the registration's withholding and
+  unemployment account numbers head it. `GET /payroll/us/reports/state-annual?state&year` — each
+  quarter, the year's totals and the W-2s with a row for the state (count, state wages and tax),
+  with `balanced` when the W-2 state tax equals the tax withheld. The W-2 figures gain `box14`
+  (the employee's disability / paid leave contributions by program, e.g. California SDI) and
+  `locals` (boxes 18–20 per locality). Screen: US payroll tax forms → State forms. State-specific
+  form layouts and electronic filing formats are not built (the figures are what each form asks).
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
-import { usd } from '../lib/usPayroll';
+import { US_STATES, usd } from '../lib/usPayroll';
 
 type Money = number;
 interface Employer { name: string | null; ein: string | null; state: string | null }
@@ -20,8 +20,28 @@ interface W2Row {
   employeeId: string | null; employeeCode: string; name: string; workState: string; paychecks: number;
   box1: Money; box2: Money; box3: Money; box4: Money; box5: Money; box6: Money; box12D: Money;
   box15: string; box16: Money; box17: Money;
+  box14?: { label: string; amount: Money }[];
+  locals?: { code: string; state: string; box18: Money; box19: Money; box20: string }[];
 }
 interface W2 { employees: W2Row[]; totals: Record<string, Money> }
+/** D70: one state's quarter and year. */
+interface Amounts { id?: string; code?: string; name: string; wages: Money; employee: Money; employer: Money; deposits: Money }
+interface StateQuarter {
+  state: string;
+  accountNumbers: { withholdingAccountNo: string | null; unemploymentAccountNo: string | null; registered: boolean };
+  withholding: { months: { month: string; wages: Money; withheld: Money }[]; wages: Money; withheld: Money; employees: number; deposits: Money };
+  unemployment: {
+    employees: { employeeCode: string; name: string; grossWages: Money; excessWages: Money; taxableWages: Money; employerContributions: Money; employeeContributions: Money }[];
+    grossWages: Money; excessWages: Money; taxableWages: Money; employerContributions: Money; employeeContributions: Money;
+    ratesUsed: { rate: number; surcharges: number }[]; employeesOnThe12th: { date: string; employees: number }[]; deposits: Money;
+  };
+  leave: Amounts[]; local: Amounts[];
+}
+interface StateAnnual {
+  quarters: { quarter: number; wages: Money; withheld: Money; deposits: Money; unemploymentTaxableWages: Money; unemploymentContributions: Money }[];
+  totals: { wages: Money; withheld: Money; deposits: Money; unemploymentTaxableWages: Money; unemploymentContributions: Money };
+  w2: { forms: number; stateWages: Money; stateTax: Money }; balanced: boolean;
+}
 
 const thisYear = new Date().getFullYear();
 const thisQuarter = Math.floor(new Date().getMonth() / 3) + 1;
@@ -38,6 +58,10 @@ export default function UsPayrollForms() {
   const [f941, setF941] = useState<F941 | null>(null);
   const [f940, setF940] = useState<F940 | null>(null);
   const [w2, setW2] = useState<W2 | null>(null);
+  const [state, setState] = useState('');
+  const [registered, setRegistered] = useState<string[]>([]);
+  const [sq, setSq] = useState<StateQuarter | null>(null);
+  const [sa, setSa] = useState<StateAnnual | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(
@@ -52,6 +76,21 @@ export default function UsPayrollForms() {
     [year, quarter],
   );
   useEffect(() => { load(); }, [load]);
+  // D70: the state forms, for a registered state (or the company's state).
+  useEffect(() => {
+    api.get<{ registrations: { state: string }[] }>('/payroll/us/states').then((r) => {
+      const list = r.data.registrations.map((x) => x.state);
+      setRegistered(list);
+      setState((cur) => cur || list[0] || '');
+    }).catch(() => setRegistered([]));
+  }, []);
+  useEffect(() => {
+    if (!state) return;
+    Promise.all([
+      api.get<StateQuarter>(`/payroll/us/reports/state?state=${state}&year=${year}&quarter=${quarter}`),
+      api.get<StateAnnual>(`/payroll/us/reports/state-annual?state=${state}&year=${year}`),
+    ]).then(([a, b]) => { setSq(a.data); setSa(b.data); }).catch((err) => setError(errMsg(err, 'Could not load the state figures')));
+  }, [state, year, quarter]);
 
   return (
     <div>
@@ -65,9 +104,17 @@ export default function UsPayrollForms() {
               <input type="number" min="2000" max="2100" value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: 100 }} />
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-gray-500">Quarter (941)</span>
+              <span className="text-xs font-medium text-gray-500">Quarter</span>
               <select value={quarter} onChange={(e) => setQuarter(Number(e.target.value))}>
                 {[1, 2, 3, 4].map((q) => <option key={q} value={q}>Q{q}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-gray-500">State forms</span>
+              <select value={state} onChange={(e) => setState(e.target.value)} aria-label="State forms">
+                <option value="">Choose a state</option>
+                {registered.map((st) => <option key={`r-${st}`} value={st}>{st}</option>)}
+                {US_STATES.filter((st) => !registered.includes(st)).map((st) => <option key={st} value={st}>{st}</option>)}
               </select>
             </label>
           </div>
@@ -129,6 +176,69 @@ export default function UsPayrollForms() {
         </div>
       )}
 
+      {sq && state && (
+        <div className="card mb-5" aria-label="State quarter">
+          <h2 className="text-sm font-semibold text-gray-700 mb-1">{state} — Q{quarter} {year}</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            {sq.accountNumbers.withholdingAccountNo ? `Withholding no. ${sq.accountNumbers.withholdingAccountNo}. ` : ''}
+            {sq.accountNumbers.unemploymentAccountNo ? `Unemployment no. ${sq.accountNumbers.unemploymentAccountNo}. ` : ''}
+            {!sq.accountNumbers.registered && 'Add your account numbers under US payroll settings → States you are registered in. '}
+            The figures for the state's quarterly returns; nothing is filed from here.
+          </p>
+          <h3 className="text-xs font-semibold text-gray-700 mb-1">Income tax withholding return</h3>
+          <table className="text-sm w-full mb-4"><tbody>
+            {sq.withholding.months.map((mo) => <Line key={mo.month} n="" label={`${monthName(mo.month)} — withheld (on wages ${usd(mo.wages)})`} v={usd(mo.withheld)} />)}
+            <Line n="" label={`Total withheld for the quarter (${sq.withholding.employees} employee${sq.withholding.employees === 1 ? '' : 's'}, wages ${usd(sq.withholding.wages)})`} v={usd(sq.withholding.withheld)} strong />
+            <Line n="" label="Paid to the state (recorded here)" v={usd(sq.withholding.deposits)} />
+          </tbody></table>
+          <h3 className="text-xs font-semibold text-gray-700 mb-1">Unemployment wage report</h3>
+          <div className="overflow-x-auto mb-2"><table className="min-w-full text-xs">
+            <thead><tr className="text-gray-500 uppercase tracking-wide border-b border-gray-200">
+              <th className="text-left px-2 py-2">Employee</th><th className="text-right px-2 py-2">Gross wages</th><th className="text-right px-2 py-2">Excess wages</th>
+              <th className="text-right px-2 py-2">Taxable wages</th><th className="text-right px-2 py-2">Employer contributions</th><th className="text-right px-2 py-2">Employee contributions</th>
+            </tr></thead>
+            <tbody>
+              {sq.unemployment.employees.length === 0 && <tr><td colSpan={6} className="px-2 py-4 text-center text-gray-400">No unemployment wages for {state} in the quarter.</td></tr>}
+              {sq.unemployment.employees.map((e) => (
+                <tr key={e.employeeCode} className="border-b border-gray-100">
+                  <td className="px-2 py-2">{e.name} <span className="text-gray-400 font-mono">{e.employeeCode}</span></td>
+                  {[e.grossWages, e.excessWages, e.taxableWages, e.employerContributions, e.employeeContributions].map((v, i) => <td key={i} className="px-2 py-2 text-right tabular-nums">{usd(v)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot><tr className="font-semibold text-gray-800"><td className="px-2 py-2">Totals</td>
+              {[sq.unemployment.grossWages, sq.unemployment.excessWages, sq.unemployment.taxableWages, sq.unemployment.employerContributions, sq.unemployment.employeeContributions].map((v, i) => <td key={i} className="px-2 py-2 text-right tabular-nums">{usd(v)}</td>)}
+            </tr></tfoot>
+          </table></div>
+          <p className="text-xs text-gray-500 mb-4">
+            Employees on the payroll for the pay period including the 12th: {sq.unemployment.employeesOnThe12th.map((x) => `${monthName(x.date.slice(0, 7))} ${x.employees}`).join(' · ')}.
+            {sq.unemployment.ratesUsed.length > 0 && ` Rate used: ${sq.unemployment.ratesUsed.map((r) => `${r.rate}%${r.surcharges ? ` + ${r.surcharges}% charges` : ''}`).join(', ')}.`}
+            {` Paid to the state (recorded here): ${usd(sq.unemployment.deposits)}.`}
+          </p>
+          {(sq.leave.length > 0 || sq.local.length > 0) && (
+            <>
+              <h3 className="text-xs font-semibold text-gray-700 mb-1">Disability / paid leave and local taxes</h3>
+              <table className="text-sm w-full mb-2"><tbody>
+                {[...sq.leave, ...sq.local].map((x) => (
+                  <Line key={x.id ?? x.code} n="" label={`${x.name} — wages ${usd(x.wages)}, employee ${usd(x.employee)}${x.employer ? `, employer ${usd(x.employer)}` : ''}; paid ${usd(x.deposits)}`} v={usd(x.employee + x.employer)} />
+                ))}
+              </tbody></table>
+            </>
+          )}
+          {sa && (
+            <>
+              <h3 className="text-xs font-semibold text-gray-700 mb-1 mt-3">Annual reconciliation — {year}</h3>
+              <table className="text-sm w-full"><tbody>
+                {sa.quarters.map((q) => <Line key={q.quarter} n={`Q${q.quarter}`} label={`Withheld (paid ${usd(q.deposits)}); unemployment ${usd(q.unemploymentContributions)} on ${usd(q.unemploymentTaxableWages)}`} v={usd(q.withheld)} />)}
+                <Line n="" label="Total withheld for the year" v={usd(sa.totals.withheld)} strong />
+                <Line n="" label={`W-2s with ${state} boxes 15–17: ${sa.w2.forms}, state wages ${usd(sa.w2.stateWages)}`} v={usd(sa.w2.stateTax)} />
+              </tbody></table>
+              <p className={`text-xs mt-1 ${sa.balanced ? 'text-gray-500' : 'text-amber-700'}`}>{sa.balanced ? 'The W-2 state tax agrees with the tax withheld.' : 'The W-2 state tax differs from the tax withheld — check the runs.'}</p>
+            </>
+          )}
+        </div>
+      )}
+
       {w2 && (
         <div className="card">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">W-2 figures — {year}</h2>
@@ -152,6 +262,8 @@ export default function UsPayrollForms() {
                     <td className="px-2 py-2">
                       <div className="font-medium text-gray-900">{e.name}</div>
                       <div className="text-gray-400 font-mono">{e.employeeCode} · {e.workState} · {e.paychecks} paycheck{e.paychecks === 1 ? '' : 's'}</div>
+                      {(e.box14 ?? []).length > 0 && <div className="text-gray-500">14: {(e.box14 ?? []).map((x) => `${x.label} ${usd(x.amount)}`).join(' · ')}</div>}
+                      {(e.locals ?? []).map((x) => <div key={x.code} className="text-gray-500">18–20: {usd(x.box18)} / {usd(x.box19)} / {x.box20}</div>)}
                     </td>
                     {[e.box1, e.box2, e.box3, e.box4, e.box5, e.box6, e.box12D].map((v, i) => (
                       <td key={i} className="px-2 py-2 text-right tabular-nums">{usd(v)}</td>
@@ -177,7 +289,7 @@ export default function UsPayrollForms() {
               )}
             </table>
           </div>
-          <p className="text-xs text-gray-500 mt-2">Box 15 is the employee's work state (add your state ID number on the form). Section 125 amounts are not wages on the W-2. Local tax boxes (18–20) are not covered.</p>
+          <p className="text-xs text-gray-500 mt-2">Box 15 is the employee's work state (add your state ID number on the form). Section 125 amounts are not wages on the W-2. Box 14 lists state disability and paid leave the employee paid; boxes 18–20 (local wages, local tax, locality) are shown under each employee.</p>
         </div>
       )}
     </div>

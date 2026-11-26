@@ -8,6 +8,9 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- State forms: per state and quarter, the figures for the withholding return and the unemployment
+  wage report (with the 12th-of-the-month counts), leave programs and local taxes; the state's annual
+  reconciliation; W-2 box 14 (state disability / paid leave) and boxes 18–20 (local) (D70).
 - Local taxes: a company's own city, county and school district taxes, plus built-in 2026 rules
   for New York City, Yonkers, Philadelphia, the Portland Metro and Multnomah taxes, Indiana's 92
   counties, Michigan cities, Ohio's largest cities, Louisville, Lexington, Alabama occupational
