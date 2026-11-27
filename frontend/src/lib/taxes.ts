@@ -19,6 +19,8 @@ export interface TaxCode {
   description: string | null;
   salesAccountId: string;
   purchaseAccountId: string;
+  /** D79: false = tax paid on purchases is part of the cost (US sales tax), not claimed back. */
+  purchaseTaxRecoverable: boolean;
   isActive: boolean;
   components: { taxCodeId: string; isCompound: boolean }[];
 }

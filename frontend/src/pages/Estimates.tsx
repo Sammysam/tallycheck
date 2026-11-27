@@ -220,7 +220,7 @@ export default function Estimates() {
               : '—' },
             { header: 'Amount', accessor: (r) => moneyIn(Number(r.totalAmount), r.currency) },
             { header: 'Status', accessor: (r) => (r.status === 'CONVERTED' || !mine(r)
-              ? <StatusBadge status={r.status} />
+              ? <StatusBadge status={r.status} label={STATUS_LABEL[r.status]} />
               : (
                 <select value={r.status} onChange={(e) => changeStatus(r, e.target.value)} aria-label={`Status of ${r.estimateNumber}`}
                   style={{ width: 110, height: '1.75rem', fontSize: '0.75rem' }}>

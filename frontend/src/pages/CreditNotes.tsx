@@ -70,6 +70,14 @@ const TEXT = {
   },
 } as const;
 
+/** M2: a note starts with a tax code only when every line of the document has that same code;
+ *  with mixed or untaxed lines it starts on "No tax" and the user chooses. */
+const sameTax = (lines?: DocLine[]) => {
+  const codes = new Set((lines ?? []).map((l) => l.taxCodeId ?? null));
+  const [only] = [...codes];
+  return codes.size === 1 && only ? only : null;
+};
+
 const emptyForm = () => ({ documentId: '', date: todayIso(), amount: '', reason: '', accountId: '', taxCodeId: '' });
 
 export default function CreditNotes({ kind }: { kind: Kind }) {
@@ -105,7 +113,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
               date: i.date,
               balance: Number(i.totalAmount) - Number(i.amountPaid ?? 0) - Number(i.amountCredited ?? 0),
               firstAccount: i.lines?.find((l) => l.accountId)?.accountId ?? null,
-              firstTax: i.lines?.find((l) => l.taxCodeId)?.taxCodeId ?? null,
+              firstTax: sameTax(i.lines),
               currency: i.currency ?? null,
             }))
             .filter((d: Doc) => (d.balance ?? 0) > 0),
@@ -123,7 +131,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
               date: b.date,
               balance: null,
               firstAccount: b.lines?.find((l) => l.accountId)?.accountId ?? null,
-              firstTax: b.lines?.find((l) => l.taxCodeId)?.taxCodeId ?? null,
+              firstTax: sameTax(b.lines),
               currency: b.currency ?? null,
             })),
         ),
@@ -250,7 +258,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
             </label>
             {taxCodes.length > 0 && (
               <label className="text-xs font-medium text-gray-600" style={{ gridColumn: '1 / -1' }}>
-                Tax (the amount includes it)
+                Tax (the amount includes it; choose one only if what is credited was taxed)
                 <select className="mt-1" value={form.taxCodeId} onChange={(e) => setForm({ ...form, taxCodeId: e.target.value })} aria-label="Tax">
                   <option value="">No tax</option>
                   {lineCodes(taxCodes, form.taxCodeId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

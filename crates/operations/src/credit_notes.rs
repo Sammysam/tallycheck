@@ -297,7 +297,11 @@ pub async fn create(db: &Db, dto: CreateNote, scope: &Scope) -> AppResult<Credit
         base_parts.push(crate::tax::TaxPart { amount: crate::fx::to_base(p.amount, t.rate)?, ..p.clone() });
     }
     let base_tax = base_parts.iter().try_fold(Money::ZERO, |s, p| s.checked_add(p.amount)).ok_or_else(overflow)?;
-    let net = base_amount.checked_sub(base_tax).ok_or_else(overflow)?;
+    let mut net = base_amount.checked_sub(base_tax).ok_or_else(overflow)?;
+    if kind != AR {
+        // D79: on a debit note, tax that was never claimed back comes off the cost.
+        net = net.checked_add(crate::tax::in_cost(&base_parts)?).ok_or_else(overflow)?;
+    }
     let number = counters::next_formatted(&mut tx, prefix, 6).await?;
     let id = new_id();
     let mut lines = if kind == AR {

@@ -17,6 +17,8 @@ interface Row {
   outputTax: number;
   purchasesNet: number;
   inputTax: number;
+  /** D79: tax paid on purchases that is part of the cost (US sales tax), never subtracted. */
+  taxInCosts: number;
 }
 interface Withheld { taxCodeId: string; name: string; rate: number | null; withheldByCustomers: number; withheldFromVendors: number }
 interface TaxReturnData {
@@ -57,7 +59,10 @@ export default function TaxReturn() {
         }
       />
       {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded">{error}</div>}
-      {data && (
+      {data && (() => {
+        const inCosts = data.totals.taxInCosts !== 0 || data.rows.some((r) => r.taxInCosts !== 0);
+        const claimed = data.totals.inputTax !== 0 || !inCosts;
+        return (
         <div className="space-y-3 max-w-5xl">
           <table className="report-table">
             <thead>
@@ -67,7 +72,8 @@ export default function TaxReturn() {
                 <th className="num">Sales (net)</th>
                 <th className="num">Tax on sales</th>
                 <th className="num">Purchases (net)</th>
-                <th className="num">Tax on purchases</th>
+                {claimed && <th className="num">Tax on purchases (claimed back)</th>}
+                {inCosts && <th className="num">Tax paid in costs</th>}
               </tr>
             </thead>
             <tbody>
@@ -78,18 +84,20 @@ export default function TaxReturn() {
                   <td className="num">{money(r.salesNet)}</td>
                   <td className="num">{money(r.outputTax)}</td>
                   <td className="num">{money(r.purchasesNet)}</td>
-                  <td className="num">{money(r.inputTax)}</td>
+                  {claimed && <td className="num">{money(r.inputTax)}</td>}
+                  {inCosts && <td className="num">{money(r.taxInCosts)}</td>}
                 </tr>
               ))}
               {data.rows.length === 0 && (
-                <tr><td colSpan={6} className="empty">No posted sales or purchases in this period.</td></tr>
+                <tr><td colSpan={7} className="empty">No posted sales or purchases in this period.</td></tr>
               )}
               <tr className="total">
                 <td colSpan={2}>Total</td>
                 <td className="num">{money(data.totals.salesNet)}</td>
                 <td className="num">{money(data.totals.outputTax)}</td>
                 <td className="num">{money(data.totals.purchasesNet)}</td>
-                <td className="num">{money(data.totals.inputTax)}</td>
+                {claimed && <td className="num">{money(data.totals.inputTax)}</td>}
+                {inCosts && <td className="num">{money(data.totals.taxInCosts)}</td>}
               </tr>
             </tbody>
           </table>
@@ -98,13 +106,19 @@ export default function TaxReturn() {
             <thead><tr><th>Summary</th><th className="num">Amount</th></tr></thead>
             <tbody>
               <tr><td>Tax charged on sales</td><td className="num">{money(data.totals.outputTax)}</td></tr>
-              <tr><td>Less tax paid on purchases</td><td className="num">{money(data.totals.inputTax)}</td></tr>
+              {claimed && <tr><td>Less tax paid on purchases (claimed back)</td><td className="num">{money(data.totals.inputTax)}</td></tr>}
               <tr className="total">
                 <td>{data.netTax >= 0 ? 'Tax to pay' : 'Tax to reclaim'}</td>
                 <td className="num" data-testid="net-tax">{money(Math.abs(data.netTax))}</td>
               </tr>
             </tbody>
           </table>
+          {inCosts && (
+            <p className="text-xs text-gray-500 max-w-xl">
+              Tax paid in costs ({money(data.totals.taxInCosts)}) is sales tax you paid to vendors. It is part of what
+              you bought and is not taken off the tax you owe.
+            </p>
+          )}
           {data.withholding.length > 0 && (
             <table className="report-table max-w-3xl">
               <thead>
@@ -138,7 +152,8 @@ export default function TaxReturn() {
             Check the figures against your country's return form before filing.
           </p>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

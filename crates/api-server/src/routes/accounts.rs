@@ -111,7 +111,7 @@ pub async fn seed(State(state): State<AppState>, _auth: Authorized<perm::Account
 /// home value already matches.
 pub async fn revalue(
     State(state): State<AppState>,
-    _auth: Authorized<perm::Ledger>,
+    _auth: Authorized<perm::LedgerPost>,
     Path(id): Path<String>,
     body: JsonBody,
 ) -> AppResult<axum::response::Response> {

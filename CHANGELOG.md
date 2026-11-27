@@ -7,6 +7,20 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+### Fixed (from a US CPA's review)
+- US sales tax paid to vendors is part of the cost: it is no longer posted to a tax receivable or
+  subtracted on the tax return. Each tax code says whether purchase tax can be claimed back (D79).
+- The built-in Viewer role is read-only: posting, reversing and reconciling need the new
+  "Post to the ledger" right, which every other role that could post keeps (D80).
+- Debit and credit notes no longer fill in a tax code the user did not choose (D81).
+- Quick start numbers equipment, stock and loans by kind (15xx, 12xx, 27xx), so the cash flow
+  never counts them as cash; account kinds are chosen from a list (D81).
+- The cash flow treats balances brought in from another system as opening cash (D81).
+- Trial balance with net balances and an "as of" date; balance sheet with profit inside total
+  equity; empty accounts hidden unless asked (D81).
+- New bills are due in 30 days unless changed; US employee forms without Sri Lankan fields;
+  "Paid from" lists only bank and cash accounts; smaller wording fixes (D81).
+
 ## [1.1.2] - 2026-11-27
 
 ### Added

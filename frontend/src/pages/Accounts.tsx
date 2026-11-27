@@ -6,21 +6,25 @@ import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import Dialog from '../components/desktop/Dialog';
 import { CURRENCIES } from '../lib/countries';
+import { useAuth } from '../contexts/AuthContext';
 import { region, todayIso } from '../lib/region';
 
 interface Account { id: string; code: string; name: string; type: string; subtype: string | null; currency?: string | null }
 
 const TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
 const SUBTYPES: Record<string, string[]> = {
-  ASSET: ['current_asset', 'fixed_asset', 'non_current_asset', 'bank'],
-  LIABILITY: ['current_liability', 'non_current_liability', 'long_term_loan'],
+  ASSET: ['bank', 'current_asset', 'inventory', 'fixed_asset', 'non_current_asset'],
+  LIABILITY: ['current_liability', 'long_term_liability', 'non_current_liability', 'long_term_loan'],
   EQUITY: ['equity'],
   REVENUE: ['operating_revenue', 'other_income'],
   EXPENSE: ['cogs', 'operating_expense', 'other_expense'],
 };
+const subtypeLabel = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
 const EMPTY = { code: '', name: '', type: 'ASSET', subtype: '', currency: '' };
 
 export default function Accounts() {
+  const canPost = useAuth().hasPermission('ledger:post');
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -107,14 +111,15 @@ export default function Accounts() {
             <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, subtype: '', currency: '' })} aria-label="Account type">
               {TYPES.map((t) => <option key={t}>{t}</option>)}
             </select>
-            <input list="account-subtypes" placeholder="Subtype (optional, e.g. current_asset)" value={form.subtype}
-              onChange={(e) => setForm({ ...form, subtype: e.target.value })} aria-label="Subtype" />
-            <datalist id="account-subtypes">
-              {(SUBTYPES[form.type] ?? []).map((s) => <option key={s} value={s} />)}
-            </datalist>
+            {/* M3: a list, not free text, so reports (cash flow, balance sheet) class the account correctly. */}
+            <select value={form.subtype} onChange={(e) => setForm({ ...form, subtype: e.target.value })} aria-label="Subtype">
+              <option value="">Kind of account (optional)</option>
+              {(SUBTYPES[form.type] ?? []).map((s) => <option key={s} value={s}>{subtypeLabel(s)}</option>)}
+              {form.subtype && !(SUBTYPES[form.type] ?? []).includes(form.subtype) && <option value={form.subtype}>{subtypeLabel(form.subtype)}</option>}
+            </select>
             {canHaveCurrency && (
               <label className="text-xs font-medium text-gray-600" style={{ gridColumn: '1 / -1' }}>
-                Currency — for a bank account kept in a foreign currency, such as a USD account
+                Currency — for a bank account kept in a foreign currency, such as a {home === 'USD' ? 'EUR' : 'USD'} account
                 <select className="mt-1" value={form.currency || home} onChange={(e) => setForm({ ...form, currency: e.target.value === home ? '' : e.target.value })} aria-label="Account currency">
                   <option value={home}>{home} (home)</option>
                   {CURRENCIES.filter((c) => c !== home).map((c) => <option key={c} value={c}>{c}</option>)}
@@ -142,7 +147,7 @@ export default function Accounts() {
           { header: '', accessor: (r) => (
             <span className="flex gap-3">
               <button onClick={() => openEdit(r)} className="btn-link text-xs">Edit</button>
-              {r.currency && (
+              {r.currency && canPost && (
                 <button onClick={() => { setRevaluing(r); setRevalMsg(''); setReval({ date: todayIso(), rate: '' }); }} className="btn-link text-xs">Revalue</button>
               )}
               <button onClick={() => remove(r)} className="btn-link text-xs" style={{ color: '#dc2626' }}>Delete</button>

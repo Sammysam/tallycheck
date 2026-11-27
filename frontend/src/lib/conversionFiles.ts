@@ -258,6 +258,13 @@ const RANGE: Record<AccountType, [number, number]> = {
   ASSET: [1000, 1999], LIABILITY: [2000, 2999], EQUITY: [3000, 3999], REVENUE: [4000, 4999], EXPENSE: [5000, 9999],
 };
 
+/** M3: a free code from `lo` to `hi`, stepping by 10 (then by 1). */
+export function freeCodeIn(lo: number, hi: number, taken: Set<string>): string {
+  for (let c = lo; c <= hi; c += 10) if (!taken.has(String(c))) return String(c);
+  for (let c = lo; c <= hi; c++) if (!taken.has(String(c))) return String(c);
+  return '';
+}
+
 /** A free code in the type's range (asset 1xxx … expense 5xxx–9xxx), stepping by 10. */
 export function freeCode(type: AccountType | '', taken: Set<string>): string {
   const [lo, hi] = RANGE[type || 'ASSET'];

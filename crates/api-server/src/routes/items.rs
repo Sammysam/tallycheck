@@ -142,7 +142,7 @@ pub async fn moves(
 
 pub async fn adjust(
     State(state): State<AppState>,
-    _auth: Authorized<perm::Ledger>,
+    _auth: Authorized<perm::LedgerPost>,
     Path(item): Path<String>,
     body: JsonBody,
 ) -> AppResult<Json<Value>> {

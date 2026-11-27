@@ -18,12 +18,12 @@ const colors: Record<string, [string, string]> = {
   ENDED:    ['bg-gray-100 text-gray-600 ring-gray-200',         'bg-gray-400'],
 };
 
-export default function StatusBadge({ status }: { status: string }) {
+export default function StatusBadge({ status, label }: { status: string; label?: string }) {
   const [pill, dot] = colors[status] ?? colors.DRAFT;
   return (
     <span className={`inline-flex items-center gap-1.5 px-1.5 py-px rounded-sm text-[11px] font-semibold ring-1 ring-inset ${pill}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-      {status}
+      {label ?? status}
     </span>
   );
 }

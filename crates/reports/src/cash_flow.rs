@@ -9,6 +9,10 @@
 //! Moves between two cash accounts have no other line and do not appear. Every entry counts,
 //! reversed or not (D1), so the closing cash equals the cash accounts' trial balance.
 //!
+//! M4: balances brought in from another system (the D59 conversion entry, source CONVERSION, and
+//! its reversal) are not money that came in or went out: when dated inside the period they are
+//! part of the opening cash (`broughtIn`), never a line of the statement.
+//!
 //! Sections follow the counter-account's type and (free-text) subtype:
 //! * Investing: asset accounts whose subtype marks them long-term — it contains "fixed",
 //!   "non_current", "noncurrent", "long_term" or "investment";
@@ -49,10 +53,14 @@ fn overflow() -> AppError {
     AppError::internal("cash flow overflow")
 }
 
-/// The default cash accounts: active asset accounts whose code starts with "10".
+/// The default cash accounts: active asset accounts whose code starts with "10" (unless their
+/// subtype says they are something else), and any marked as a bank account.
 pub async fn default_cash_accounts(conn: &mut SqliteConnection) -> AppResult<Vec<String>> {
     let ids: Vec<String> = sqlx::query_scalar(
-        r#"SELECT "id" FROM "accounts" WHERE "type" = 'ASSET' AND "isActive" = 1 AND "code" LIKE '10%' ORDER BY "code""#,
+        r#"SELECT "id" FROM "accounts" WHERE "type" = 'ASSET' AND "isActive" = 1
+             AND (("code" LIKE '10%' AND COALESCE("subtype", '') NOT IN ('fixed_asset', 'non_current_asset', 'inventory'))
+                  OR "subtype" = 'bank')
+           ORDER BY "code""#,
     )
     .fetch_all(&mut *conn)
     .await?;
@@ -81,8 +89,10 @@ pub async fn cash_flow(
     let from = (!date_from.is_empty()).then_some(date_from);
     let to = (!date_to.is_empty()).then_some(date_to);
 
-    // Cash at the start: every cash line dated before the period.
+    // Cash at the start: every cash line dated before the period, plus (M4) balances brought in
+    // during the period.
     let mut opening = Money::ZERO;
+    let mut brought_in = Money::ZERO;
     let mut closing_check = Money::ZERO;
     for a in &cash_accounts {
         let (d, c): (i64, i64) = sqlx::query_as(
@@ -95,6 +105,18 @@ pub async fn cash_flow(
         .fetch_one(&mut *conn)
         .await?;
         opening = opening.checked_add(Money::from_cents(d - c)).ok_or_else(overflow)?;
+        let (d, c): (i64, i64) = sqlx::query_as(
+            r#"SELECT COALESCE(SUM(l."debit"), 0), COALESCE(SUM(l."credit"), 0)
+               FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."journalEntryId"
+               WHERE l."accountId" = ?1 AND e."sourceType" = 'CONVERSION'
+                 AND (?2 IS NULL OR e."date" >= ?2) AND (?3 IS NULL OR e."date" <= ?3)"#,
+        )
+        .bind(&a.id)
+        .bind(from)
+        .bind(to)
+        .fetch_one(&mut *conn)
+        .await?;
+        brought_in = brought_in.checked_add(Money::from_cents(d - c)).ok_or_else(overflow)?;
         let (d, c): (i64, i64) = sqlx::query_as(
             r#"SELECT COALESCE(SUM(l."debit"), 0), COALESCE(SUM(l."credit"), 0)
                FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."journalEntryId"
@@ -114,6 +136,7 @@ pub async fn cash_flow(
         r#"SELECT l."accountId", l."debit", l."credit"
            FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."journalEntryId"
            WHERE (?1 IS NULL OR e."date" >= ?1) AND (?2 IS NULL OR e."date" <= ?2)
+             AND COALESCE(e."sourceType", '') <> 'CONVERSION'
              AND e."id" IN (SELECT "journalEntryId" FROM "journal_lines" WHERE "accountId" IN ({placeholders}))"#
     );
     let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql)).bind(from).bind(to);
@@ -155,6 +178,7 @@ pub async fn cash_flow(
     let operating = section_json(Section::Operating)?;
     let investing = section_json(Section::Investing)?;
     let financing = section_json(Section::Financing)?;
+    let opening = opening.checked_add(brought_in).ok_or_else(overflow)?;
     let closing = opening.checked_add(net).ok_or_else(overflow)?;
     if closing != closing_check {
         // Cannot happen while every entry balances; refuse rather than print a wrong statement.
@@ -165,6 +189,7 @@ pub async fn cash_flow(
         "dateTo": date_to,
         "cashAccounts": cash_accounts,
         "openingCash": opening.to_json_number(),
+        "broughtIn": brought_in.to_json_number(),
         "operating": operating,
         "investing": investing,
         "financing": financing,

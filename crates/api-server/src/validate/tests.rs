@@ -22,6 +22,8 @@ fn check(dto: &str, f: impl Fn(Map<String, Value>) -> Result<Value, AppError>) {
         match (&case["message"], got) {
             (Value::Array(expected), Err(AppError::BadRequest(app_core::ErrorMessage::List(actual)))) => {
                 let expected: Vec<String> = expected.iter().filter_map(Value::as_str).map(str::to_string).collect();
+                // D80: the list of permission keys also names `ledger:post`.
+                let actual: Vec<String> = actual.iter().map(|m| m.replace(", ledger:post", "")).collect();
                 assert_eq!(actual, expected, "{dto} {}", case["input"]);
             }
             (Value::Null, Ok(out)) => assert_eq!(out, case["ok"], "{dto} {}", case["input"]),

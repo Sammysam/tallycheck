@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { money } from '../lib/money';
 import { region } from '../lib/region';
-import { freeCode, type ExistingAccount } from '../lib/conversionFiles';
+import { freeCodeIn, type ExistingAccount } from '../lib/conversionFiles';
 
 /**
  * D59 quick start: books set up from a few typed figures instead of files. The person lists
@@ -46,6 +46,23 @@ const exampleFor = (key: ListKey, fallback: string) => {
 };
 
 const blank = (): Row => ({ name: '', amount: '', due: '' });
+
+/**
+ * M3: where a new account goes, so reports class it correctly. Only money is numbered next to
+ * the bank (10xx, which the cash flow report counts as cash); stock 12xx, other things owned
+ * 15xx (fixed assets); credit cards and overdrafts 21xx (current); loans 27xx (long term).
+ */
+function placeFor(key: ListKey, name: string): { range: [number, number]; subtype: string } {
+  const n = name.toLowerCase();
+  if (key === 'banks') return { range: [1010, 1090], subtype: 'bank' };
+  if (key === 'assets') {
+    if (/stock|inventor/.test(n)) return { range: [1210, 1290], subtype: 'inventory' };
+    if (/deposit|prepaid|advance/.test(n)) return { range: [1410, 1490], subtype: 'current_asset' };
+    return { range: [1500, 1690], subtype: 'fixed_asset' };
+  }
+  if (/credit card|overdraft|card/.test(n)) return { range: [2100, 2190], subtype: 'current_liability' };
+  return { range: [2700, 2890], subtype: 'long_term_liability' };
+}
 const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
 
 export interface QuickStartBody {
@@ -103,9 +120,10 @@ export default function QuickStartForm({ existing, busy, onBack, onCheck }: {
         const same = active.find((a) => norm(a.name) === norm(r.name) && a.type === type);
         if (same) accounts.push({ key: k, accountId: same.id });
         else {
-          const code = freeCode(type, taken);
+          const place = placeFor(key, r.name);
+          const code = freeCodeIn(place.range[0], place.range[1], taken);
           taken.add(code);
-          accounts.push({ key: k, code, name: r.name.trim(), type });
+          accounts.push({ key: k, code, name: r.name.trim(), type, subtype: place.subtype });
         }
         const c = plain(toCents(r.amount) ?? 0);
         balances.push({ account: k, debit: side === 'debit' ? c : '', credit: side === 'credit' ? c : '' });

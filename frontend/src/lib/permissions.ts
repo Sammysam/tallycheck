@@ -22,7 +22,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   ] },
   { title: 'Accounting', items: [
     { key: 'accounts', label: 'Chart of accounts', description: 'Add, edit and delete accounts; revalue foreign-currency accounts.' },
-    { key: 'ledger', label: 'Ledger', description: 'See journal entries and transactions; post and reverse manual entries.' },
+    { key: 'ledger', label: 'Ledger', description: 'See journal entries, transactions and account activity.' },
+    { key: 'ledger:post', label: 'Post to the ledger', description: 'Post and reverse manual journal entries, reconcile bank accounts, adjust stock, revalue and transfer.' },
     { key: 'banking', label: 'Banking', description: 'Reconcile bank accounts to their statements.' },
     { key: 'reports', label: 'Reports', description: 'Profit & Loss, Balance Sheet, Cash Flow, ageing, tax return.' },
   ] },

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -145,6 +145,8 @@ export default function App() {
                   <Route path="/settings" element={
                     <ProtectedRoute permission="settings"><Settings /></ProtectedRoute>
                   } />
+                  {/* C8: an address that is not a screen (e.g. /invoices/new) goes to its list, not a blank page. */}
+                  <Route path="/:section/*" element={<SectionFallback />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>
@@ -153,4 +155,11 @@ export default function App() {
       </BrowserRouter>
     </AuthProvider>
   );
+}
+
+/** C8: /invoices/new and other unknown addresses under a screen open that screen's list. */
+function SectionFallback() {
+  const first = window.location.pathname.split('/').filter(Boolean)[0] ?? '';
+  const known = ['invoices', 'bills', 'estimates', 'customers', 'vendors', 'expenses', 'payments', 'items', 'employees', 'payroll', 'ledger', 'reports', 'accounts'];
+  return <Navigate to={known.includes(first) ? `/${first}` : '/'} replace />;
 }

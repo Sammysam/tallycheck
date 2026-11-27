@@ -175,12 +175,19 @@ pub async fn post_in(tx: &mut Tx, id: &str) -> AppResult<Expense> {
     }
     // The expense account gets the amount without its tax; the tax goes to the code's
     // purchase account (D26).
-    let net = e.amount.checked_sub(e.tax_amount).ok_or_else(overflow)?;
+    let parts =
+        crate::tax::load_parts(tx, "EXPENSE", std::slice::from_ref(&e.id)).await?.remove(&e.id).unwrap_or_default();
+    // D79: tax that can't be claimed back stays in the expense.
+    let net = e
+        .amount
+        .checked_sub(e.tax_amount)
+        .ok_or_else(overflow)?
+        .checked_add(crate::tax::in_cost(&parts)?)
+        .ok_or_else(overflow)?;
     let mut lines =
         vec![NewLine { account_id: e.expense_account_id.clone(), debit: net, credit: Money::ZERO, description: None }];
     // D27: each part of the tax to its own code's account.
-    let parts = crate::tax::load_parts(tx, "EXPENSE", std::slice::from_ref(&e.id)).await?.remove(&e.id);
-    for (account_id, tax) in crate::tax::by_account(tx, parts.unwrap_or_default(), false).await? {
+    for (account_id, tax) in crate::tax::by_account(tx, parts, false).await? {
         lines.push(NewLine { account_id, debit: tax, credit: Money::ZERO, description: Some("Tax".into()) });
     }
     lines.push(NewLine {

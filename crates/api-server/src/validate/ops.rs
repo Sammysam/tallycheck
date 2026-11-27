@@ -506,6 +506,7 @@ pub fn tax_code(body: Map<String, Value>, optional: bool) -> Result<operations::
         .field("description", true, &[Rule::IsString, Rule::MaxLength(200)])
         .field("salesAccountId", true, &[Rule::IsUuid])
         .field("purchaseAccountId", true, &[Rule::IsUuid])
+        .field("purchaseTaxRecoverable", true, &[Rule::IsBoolean])
         .field("isActive", true, &[Rule::IsBoolean])
         .field("components", true, &[Rule::IsArray]);
     let m = v.finish()?;
@@ -543,6 +544,7 @@ pub fn tax_code(body: Map<String, Value>, optional: bool) -> Result<operations::
         description: nullable(&m, "description"),
         sales_account_id: opt_string(&m, "salesAccountId"),
         purchase_account_id: opt_string(&m, "purchaseAccountId"),
+        purchase_tax_recoverable: m.get("purchaseTaxRecoverable").and_then(Value::as_bool),
         is_active: m.get("isActive").and_then(Value::as_bool),
     })
 }

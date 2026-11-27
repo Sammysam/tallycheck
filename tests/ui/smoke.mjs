@@ -740,7 +740,7 @@ try {
   await check('Employees page creates an employee and opens the profile', async () => {
     await go('/employees');
     await clickText('+ New Employee');
-    await type('input[placeholder="e.g. CEN-042"]', 'CEN-042');
+    await type('input[placeholder="e.g. E-042"]', 'CEN-042');
     await type('input[placeholder="Full name"]', 'Asha Perera');
     await type('input[placeholder="Department"]', 'Operations');
     await clickText('Save & open profile');

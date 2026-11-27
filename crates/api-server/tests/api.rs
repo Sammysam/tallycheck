@@ -153,7 +153,7 @@ async fn full_login_and_two_factor_flow() -> TestResult {
     assert_eq!(me.body["username"], "admin");
     assert_eq!(me.body["isTwoFactorEnabled"], json!(true));
     assert_eq!(me.body["role"]["name"], "Admin");
-    assert_eq!(me.body["role"]["permissions"].as_array().map(Vec::len), Some(17));
+    assert_eq!(me.body["role"]["permissions"].as_array().map(Vec::len), Some(18));
     assert!(me.body.get("passwordHash").is_none());
 
     // Second login: 2FA is required and verify issues the access token.
@@ -357,7 +357,7 @@ async fn roles_endpoints_match_reference_contract() -> TestResult {
     let admin = app.signed_in("admin", "Admin").await?;
 
     let catalog = app.call(Method::GET, "/api/roles/permissions", Some(&admin), None).await?;
-    assert_eq!(catalog.body.as_array().map(Vec::len), Some(17));
+    assert_eq!(catalog.body.as_array().map(Vec::len), Some(18));
     assert_eq!(catalog.body[7], json!({"key": "invoices:all", "label": "Invoices — see everyone's (not just own)"}));
 
     let roles = app.call(Method::GET, "/api/roles", Some(&admin), None).await?;
@@ -1590,7 +1590,8 @@ async fn credit_and_debit_notes_through_the_api() -> TestResult {
 async fn bank_reconciliation_through_the_api() -> TestResult {
     let app = App::new().await?;
     let admin = app.signed_in("admin", "Admin").await?;
-    let clerk = app.signed_in("clerk", "Viewer").await?;
+    let viewer = app.signed_in("viewer", "Viewer").await?;
+    let clerk = app.with_permissions(&admin, "clerk", &["ledger", "ledger:post"]).await?;
     app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
     let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
     let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
@@ -1610,7 +1611,16 @@ async fn bank_reconciliation_through_the_api() -> TestResult {
         .await?;
 
     let start = json!({"accountId": cash, "statementDate": "2026-04-30", "statementBalance": 1000});
-    // The Viewer role has `ledger`, so it may reconcile; an income account may not be reconciled.
+    // D80: the Viewer role only looks — it can neither reconcile nor post a journal entry.
+    let looked = app.call(Method::POST, "/api/reconciliations", Some(&viewer), Some(start.clone())).await?;
+    assert_eq!(looked.status, StatusCode::FORBIDDEN);
+    let entry = json!({"date": "2026-04-30", "description": "x", "lines": [
+        {"accountId": cash, "debit": 1, "credit": 0}, {"accountId": revenue, "debit": 0, "credit": 1}]});
+    let posted = app.call(Method::POST, "/api/ledger/entries", Some(&viewer), Some(entry)).await?;
+    assert_eq!(posted.status, StatusCode::FORBIDDEN);
+    let seen = app.call(Method::GET, "/api/ledger/entries", Some(&viewer), None).await?;
+    assert_eq!(seen.status, StatusCode::OK, "the Viewer still sees the ledger");
+    // `ledger:post` may reconcile; an income account may not be reconciled.
     let not_bank = app
         .call(
             Method::POST,
@@ -1781,6 +1791,127 @@ async fn company_and_region_settings_are_validated_and_drive_the_financial_year(
     let pl = app.call(Method::GET, "/api/reports/profit-loss", Some(&admin), None).await?;
     let from = pl.body["dateFrom"].as_str().unwrap_or("").to_string();
     assert!(from.ends_with("-04-01"), "default dateFrom {from}");
+    Ok(())
+}
+
+/// D79: US sales tax paid to vendors is part of the cost. A code whose purchase tax is not
+/// recoverable needs no purchase account; bills, expenses and debit notes post that tax with
+/// their own account, and the tax return owes all the tax collected.
+#[tokio::test]
+async fn us_sales_tax_on_purchases_is_part_of_the_cost() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    let payable = app
+        .call(
+            Method::POST,
+            "/api/accounts",
+            Some(&admin),
+            Some(json!({"code": "2400", "name": "Sales Tax Payable", "type": "LIABILITY"})),
+        )
+        .await?;
+    let payable_id = payable.body["id"].as_str().ok_or("payable")?.to_string();
+    let accounts = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let id_of = |code: &str| -> Result<String, Box<dyn std::error::Error>> {
+        Ok(accounts.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == code).ok_or("code")?["id"]
+            .as_str()
+            .ok_or("id")?
+            .to_string())
+    };
+    let (revenue, expense, cash) = (id_of("4000")?, id_of("6000")?, id_of("1000")?);
+    let code = app
+        .call(
+            Method::POST,
+            "/api/tax-codes",
+            Some(&admin),
+            Some(json!({"name": "Sales Tax 8.25%", "rate": 8.25, "salesAccountId": payable_id, "purchaseTaxRecoverable": false})),
+        )
+        .await?;
+    assert_eq!(code.status, StatusCode::CREATED, "{}", code.body);
+    assert_eq!(code.body["purchaseTaxRecoverable"], json!(false));
+    let tax = code.body["id"].as_str().ok_or("code")?.to_string();
+    let balance = |id: String| {
+        let (app, admin) = (&app, &admin);
+        async move {
+            let r = app.call(Method::GET, &format!("/api/ledger/balance/{id}"), Some(admin), None).await?;
+            Ok::<Value, Box<dyn std::error::Error>>(r.body["balance"].clone())
+        }
+    };
+
+    // A sale of 1,000.00: 82.50 of sales tax owed.
+    let cust = app.call(Method::POST, "/api/customers", Some(&admin), Some(json!({"name": "Acme"}))).await?;
+    let inv = app
+        .call(Method::POST, "/api/invoices", Some(&admin), Some(json!({"customerId": cust.body["id"], "date": "2026-04-01",
+            "lines": [{"description": "Bike", "quantity": 1, "unitPrice": 1000, "accountId": revenue, "taxCodeId": tax}]})))
+        .await?;
+    app.call(
+        Method::POST,
+        &format!("/api/invoices/{}/post", inv.body["id"].as_str().ok_or("inv")?),
+        Some(&admin),
+        None,
+    )
+    .await?;
+
+    // Supplies of 200.00 + 16.50 tax: the whole 216.50 is the expense.
+    let vendor = app.call(Method::POST, "/api/vendors", Some(&admin), Some(json!({"name": "Supply Co"}))).await?;
+    let bill = app
+        .call(Method::POST, "/api/bills", Some(&admin), Some(json!({"vendorId": vendor.body["id"], "date": "2026-04-03",
+            "lines": [{"description": "Supplies", "quantity": 1, "unitPrice": 200, "accountId": expense, "taxCodeId": tax}]})))
+        .await?;
+    assert_eq!((bill.body["taxAmount"].as_str(), bill.body["totalAmount"].as_str()), (Some("16.50"), Some("216.50")));
+    let bill_id = bill.body["id"].as_str().ok_or("bill")?.to_string();
+    let posted = app.call(Method::POST, &format!("/api/bills/{bill_id}/post"), Some(&admin), None).await?;
+    assert!(posted.status.is_success(), "{}", posted.body);
+    assert_eq!(balance(expense.clone()).await?, json!(216.5));
+    assert_eq!(balance(payable_id.clone()).await?, json!(82.5), "purchase tax never reduces the tax owed");
+
+    // An expense of 108.25 including tax: all of it is the expense.
+    let exp = app
+        .call(
+            Method::POST,
+            "/api/expenses",
+            Some(&admin),
+            Some(json!({"date": "2026-04-05", "description": "Cleaning",
+            "amount": 108.25, "expenseAccountId": expense, "paymentAccountId": cash, "taxCodeId": tax})),
+        )
+        .await?;
+    assert_eq!(exp.status, StatusCode::CREATED, "{}", exp.body);
+    app.call(
+        Method::POST,
+        &format!("/api/expenses/{}/post", exp.body["id"].as_str().ok_or("exp")?),
+        Some(&admin),
+        None,
+    )
+    .await?;
+    assert_eq!(balance(expense.clone()).await?, json!(324.75));
+
+    // A debit note of 108.25 with the code takes the whole 108.25 off the cost.
+    let dn = app
+        .call(
+            Method::POST,
+            "/api/debit-notes",
+            Some(&admin),
+            Some(json!({"billId": bill_id, "date": "2026-04-06",
+            "reason": "Returned", "amount": 108.25, "accountId": expense, "taxCodeId": tax})),
+        )
+        .await?;
+    assert_eq!(dn.status, StatusCode::CREATED, "{}", dn.body);
+    assert_eq!(balance(expense.clone()).await?, json!(216.5));
+    assert_eq!(balance(payable_id.clone()).await?, json!(82.5));
+
+    let ret =
+        app.call(Method::GET, "/api/reports/tax?dateFrom=2026-04-01&dateTo=2026-04-30", Some(&admin), None).await?;
+    assert_eq!(ret.status, StatusCode::OK, "{}", ret.body);
+    // Tax in costs: 16.50 + 8.25 − 8.25 = 16.50; nothing is claimed back.
+    assert_eq!(
+        (
+            ret.body["totals"]["outputTax"].clone(),
+            ret.body["totals"]["inputTax"].clone(),
+            ret.body["totals"]["taxInCosts"].clone()
+        ),
+        (json!(82.5), json!(0), json!(16.5))
+    );
+    assert_eq!(ret.body["netTax"], json!(82.5));
     Ok(())
 }
 
@@ -5452,6 +5583,54 @@ async fn the_windows_owner_can_see_the_usernames() -> TestResult {
     let actions: Vec<String> =
         sqlx::query_scalar(r#"SELECT "action" FROM "audit_logs""#).fetch_all(app.db.read()).await?;
     assert!(actions.iter().any(|a| a == "Listed the usernames with Windows sign-in"), "{actions:?}");
+    Ok(())
+}
+
+/// M3 / M4: balances brought in are the opening cash, not cash movements; equipment and a loan
+/// created with their subtypes are investing / financing, never cash.
+#[tokio::test]
+async fn brought_in_balances_open_the_cash_flow() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("admin", "Admin").await?;
+    let accounts = app.account_ids(&admin).await?;
+    let id_of = |code: &str| code_of(&accounts, code);
+    let body = json!({
+        "source": "Quick start", "cutoverDate": "2026-10-31", "dateOrder": "YMD", "acceptDifferences": false,
+        "accounts": [
+            {"key": "Bank: Checking", "accountId": id_of("1000")},
+            {"key": "Asset: Shop Equipment", "code": "1500", "name": "Shop Equipment", "type": "ASSET", "subtype": "fixed_asset"},
+            {"key": "Loan: SBA Term Loan", "code": "2700", "name": "SBA Term Loan", "type": "LIABILITY", "subtype": "long_term_liability"},
+            {"key": "Opening balance equity", "code": "3900", "name": "Opening Balance Equity", "type": "EQUITY"}],
+        "customers": [], "vendors": [],
+        "balances": [
+            {"account": "Bank: Checking", "debit": "48250.00"},
+            {"account": "Asset: Shop Equipment", "debit": "15000.00"},
+            {"account": "Loan: SBA Term Loan", "credit": "20000.00"},
+            {"account": "Opening balance equity", "credit": "43250.00"}],
+        "invoices": [], "bills": []
+    });
+    let saved = app.call(Method::POST, "/api/conversions", Some(&admin), Some(body)).await?;
+    assert!(saved.status.is_success(), "{}", saved.body);
+    let all = app.call(Method::GET, "/api/accounts", Some(&admin), None).await?;
+    let equipment = all.body.as_array().ok_or("accounts")?.iter().find(|a| a["code"] == "1500").ok_or("1500")?.clone();
+    assert_eq!(equipment["subtype"], json!("fixed_asset"));
+
+    // A sale paid in cash in November.
+    let cash = id_of("1000");
+    let entry = json!({"date": "2026-11-05", "description": "Cash sale", "lines": [
+        {"accountId": cash, "debit": 500, "credit": 0}, {"accountId": id_of("4000"), "debit": 0, "credit": 500}]});
+    let posted = app.call(Method::POST, "/api/ledger/entries", Some(&admin), Some(entry)).await?;
+    assert!(posted.status.is_success(), "{}", posted.body);
+
+    let cf = app
+        .call(Method::GET, "/api/reports/cash-flow?dateFrom=2026-01-01&dateTo=2026-11-30", Some(&admin), None)
+        .await?;
+    assert_eq!(cf.status, StatusCode::OK, "{}", cf.body);
+    assert_eq!(cf.body["cashAccounts"].as_array().map(|a| a.iter().all(|x| x["code"] != "1500")), Some(true));
+    assert_eq!((cf.body["broughtIn"].clone(), cf.body["openingCash"].clone()), (json!(48250), json!(48250)));
+    assert_eq!(cf.body["investing"]["total"], json!(0), "equipment brought in is not an investment made");
+    assert_eq!(cf.body["financing"]["total"], json!(0), "a loan brought in is not new borrowing");
+    assert_eq!((cf.body["operating"]["total"].clone(), cf.body["closingCash"].clone()), (json!(500), json!(48750)));
     Ok(())
 }
 

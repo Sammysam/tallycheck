@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import { amt } from '../lib/payroll';
 import { fmtDate } from '../lib/region';
+import { isMoney } from '../lib/accountChoices';
 import { US_REMIT_LABEL, US_RUN_STATUS_HELP, usd, type UsLine, type UsRemitType, type UsRunDetail } from '../lib/usPayroll';
 
 interface Account { id: string; code: string; name: string; type: string }
@@ -200,7 +201,7 @@ export default function UsPayrollRun() {
                   <span className="text-xs font-medium text-gray-500">From account</span>
                   <select required value={payForm.paymentAccountId} onChange={(e) => setPayForm({ ...payForm, paymentAccountId: e.target.value })}>
                     <option value="">Choose bank / cash account</option>
-                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                    {accounts.filter(isMoney).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
                   </select>
                 </label>
                 <label className="block">
@@ -261,7 +262,7 @@ export default function UsPayrollRun() {
                 <span className="text-xs font-medium text-gray-500">From account</span>
                 <select required value={remitForm.paymentAccountId} onChange={(e) => setRemitForm({ ...remitForm, paymentAccountId: e.target.value })}>
                   <option value="">Choose</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                  {accounts.filter(isMoney).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
                 </select>
               </label>
               <label className="block">

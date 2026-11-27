@@ -30,7 +30,8 @@ interface Statement {
 const LABEL = { INVOICE: 'Invoice', PAYMENT: 'Payment received', CREDIT_NOTE: 'Credit note' };
 const isoDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const longDate = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+// C8: the company's own date style, as in the rows.
+const longDate = (d: string) => fmtDate(d);
 
 export default function CustomerStatement() {
   const { id } = useParams();

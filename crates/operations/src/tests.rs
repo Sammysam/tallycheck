@@ -650,6 +650,7 @@ async fn taxes_split_every_document_and_post_to_the_tax_accounts() -> AppResult<
         description: None,
         sales_account_id: Some(payable.clone()),
         purchase_account_id: Some(receivable.clone()),
+        purchase_tax_recoverable: None,
         is_active: None,
     };
     let wrong = tax::create(&s.db, TaxCodeInput { sales_account_id: Some(receivable.clone()), ..code("Bad", 1) }).await;

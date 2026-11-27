@@ -16,6 +16,8 @@ interface Section { lines: { account: AccountRef; amount: number }[]; total: num
 interface CashFlowData {
   cashAccounts: AccountRef[];
   openingCash: number;
+  /** M4: balances brought in from another system during the period (part of the opening cash). */
+  broughtIn?: number;
   operating: Section;
   investing: Section;
   financing: Section;
@@ -91,7 +93,11 @@ export default function CashFlow() {
       {data && (
         <div className="max-w-3xl space-y-3">
           <ReportTable title="Cash at the start" rows={[
-            { key: 'opening', label: `Cash and bank on ${fmtDate(ran.dateFrom)}`, amount: Number(data.openingCash), total: true },
+            ...(Number(data.broughtIn ?? 0) !== 0 ? [
+              { key: 'before', label: `Cash and bank on ${fmtDate(ran.dateFrom)}`, amount: Number(data.openingCash) - Number(data.broughtIn) },
+              { key: 'brought', label: 'Balances brought in from your old system', amount: Number(data.broughtIn) },
+            ] : []),
+            { key: 'opening', label: Number(data.broughtIn ?? 0) !== 0 ? 'Cash at the start' : `Cash and bank on ${fmtDate(ran.dateFrom)}`, amount: Number(data.openingCash), total: true },
           ]} />
           <ReportTable title="Operating activities" rows={rows('Operating', data.operating)} />
           <ReportTable title="Investing activities" rows={rows('Investing', data.investing)} />

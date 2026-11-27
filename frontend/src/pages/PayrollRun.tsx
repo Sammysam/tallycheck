@@ -18,6 +18,7 @@ import {
 } from '../lib/payroll';
 import { acknowledgementPage, bankAdvicePage, epfFormPage, etfFormPage, renderPdf, slipPages } from '../utils/payrollPdf';
 import { region } from '../lib/region';
+import { isMoney } from '../lib/accountChoices';
 import { fmtDate } from '../lib/region';
 
 const EMPTY_COMPANY: CompanyDetails = {
@@ -322,7 +323,7 @@ export default function PayrollRun() {
                   <span className="text-xs font-medium text-gray-500">From account</span>
                   <select required value={payForm.paymentAccountId} onChange={(e) => setPayForm({ ...payForm, paymentAccountId: e.target.value })}>
                     <option value="">Choose bank / cash account</option>
-                    {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                    {accounts.filter(isMoney).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
                   </select>
                 </label>
                 <label className="block">
@@ -372,7 +373,7 @@ export default function PayrollRun() {
                 <span className="text-xs font-medium text-gray-500">From account</span>
                 <select required value={remitForm.paymentAccountId} onChange={(e) => setRemitForm({ ...remitForm, paymentAccountId: e.target.value })}>
                   <option value="">Choose</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                  {accounts.filter(isMoney).map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
                 </select>
               </label>
               <label className="block">

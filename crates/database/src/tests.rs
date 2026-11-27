@@ -253,13 +253,18 @@ async fn seeds_match_reference_migrations() -> AppResult<()> {
         sqlx::query_as(r#"SELECT "name", "permissions", "isSystem" FROM "roles" ORDER BY rowid"#)
             .fetch_all(db.read())
             .await?;
-    let all: Vec<&str> = app_core::permissions::keys().collect();
+    // D80 appends `ledger:post` to the roles that could post; the order of a role's keys is free.
+    let sorted = |mut v: Vec<String>| {
+        v.sort();
+        v
+    };
+    let all: Vec<String> = app_core::permissions::keys().map(str::to_string).collect();
     let admin: Vec<String> = serde_json_array(&roles[0].1);
     assert_eq!(roles[0].0, "Admin");
-    assert_eq!(admin, all);
+    assert_eq!(sorted(admin), sorted(all.clone()));
     assert_eq!(roles[0].2, 1);
     let accountant: Vec<String> = serde_json_array(&roles[1].1);
-    assert_eq!(accountant, all.iter().filter(|k| **k != "users").map(|s| s.to_string()).collect::<Vec<_>>());
+    assert_eq!(sorted(accountant), sorted(all.into_iter().filter(|k| k != "users").collect()));
     assert_eq!(serde_json_array(&roles[2].1), vec!["dashboard", "ledger", "reports"]);
 
     let inv: i64 =

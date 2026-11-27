@@ -46,33 +46,34 @@ fn overflow() -> AppError {
     AppError::internal("tax return overflow")
 }
 
-/// One part of one line: side ('S' / 'P'), the line, the standard code (or NULL), net, tax.
+/// One part of one line: side ('S' / 'P'), the line, the standard code (or NULL), net, tax, and
+/// (D79) whether purchase tax is claimed back or part of the cost.
 const MOVEMENTS: &str = r#"
 SELECT 'S' AS "side", 'I:' || l."id" AS "line", dt."taxCodeId" AS "code",
        CASE WHEN i."pricesIncludeTax" = 1 THEN l."amount" - l."taxAmount" ELSE l."amount" END AS "net",
-       COALESCE(dt."taxAmount", 0) AS "tax", i."exchangeRate" AS "rate"
+       COALESCE(dt."taxAmount", 0) AS "tax", i."exchangeRate" AS "rate", COALESCE(dt."recoverable", 1) AS "recoverable"
   FROM "invoice_lines" l JOIN "invoices" i ON i."id" = l."invoiceId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'INVOICE_LINE' AND dt."sourceId" = l."id"
  WHERE i."status" IN ('POSTED', 'PAID') AND (?1 IS NULL OR i."date" >= ?1) AND (?2 IS NULL OR i."date" <= ?2)
 UNION ALL
-SELECT 'S', 'N:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0), ni."exchangeRate"
+SELECT 'S', 'N:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0), ni."exchangeRate", 1
   FROM "credit_notes" n JOIN "invoices" ni ON ni."id" = n."invoiceId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'CREDIT_NOTE' AND dt."sourceId" = n."id"
  WHERE n."type" = 'AR' AND n."status" = 'POSTED' AND (?1 IS NULL OR n."date" >= ?1) AND (?2 IS NULL OR n."date" <= ?2)
 UNION ALL
 SELECT 'P', 'B:' || l."id", dt."taxCodeId",
        CASE WHEN b."pricesIncludeTax" = 1 THEN l."amount" - l."taxAmount" ELSE l."amount" END,
-       COALESCE(dt."taxAmount", 0), b."exchangeRate"
+       COALESCE(dt."taxAmount", 0), b."exchangeRate", COALESCE(dt."recoverable", 1)
   FROM "bill_lines" l JOIN "bills" b ON b."id" = l."billId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'BILL_LINE' AND dt."sourceId" = l."id"
  WHERE b."status" IN ('POSTED', 'PAID') AND (?1 IS NULL OR b."date" >= ?1) AND (?2 IS NULL OR b."date" <= ?2)
 UNION ALL
-SELECT 'P', 'E:' || e."id", dt."taxCodeId", e."amount" - e."taxAmount", COALESCE(dt."taxAmount", 0), 100000000
+SELECT 'P', 'E:' || e."id", dt."taxCodeId", e."amount" - e."taxAmount", COALESCE(dt."taxAmount", 0), 100000000, COALESCE(dt."recoverable", 1)
   FROM "expenses" e
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'EXPENSE' AND dt."sourceId" = e."id"
  WHERE e."status" = 'POSTED' AND (?1 IS NULL OR e."date" >= ?1) AND (?2 IS NULL OR e."date" <= ?2)
 UNION ALL
-SELECT 'P', 'D:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0), nb."exchangeRate"
+SELECT 'P', 'D:' || n."id", dt."taxCodeId", -(n."amount" - n."taxAmount"), -COALESCE(dt."taxAmount", 0), nb."exchangeRate", COALESCE(dt."recoverable", 1)
   FROM "credit_notes" n JOIN "bills" nb ON nb."id" = n."billId"
   LEFT JOIN "document_taxes" dt ON dt."sourceType" = 'CREDIT_NOTE' AND dt."sourceId" = n."id"
  WHERE n."type" = 'AP' AND n."status" = 'POSTED' AND (?1 IS NULL OR n."date" >= ?1) AND (?2 IS NULL OR n."date" <= ?2)"#;
@@ -89,6 +90,9 @@ struct Sums {
     output_tax: Money,
     purchases_net: Money,
     input_tax: Money,
+    /// D79: tax paid on purchases that can't be claimed back (US sales tax): part of the cost,
+    /// never subtracted from the tax owed.
+    cost_tax: Money,
 }
 
 fn add(a: Money, b: Money) -> AppResult<Money> {
@@ -105,11 +109,13 @@ impl Sums {
         Ok(())
     }
 
-    fn add_tax(&mut self, side: &str, tax: Money) -> AppResult<()> {
+    fn add_tax(&mut self, side: &str, tax: Money, recoverable: bool) -> AppResult<()> {
         if side == "S" {
             self.output_tax = add(self.output_tax, tax)?;
-        } else {
+        } else if recoverable {
             self.input_tax = add(self.input_tax, tax)?;
+        } else {
+            self.cost_tax = add(self.cost_tax, tax)?;
         }
         Ok(())
     }
@@ -120,6 +126,7 @@ impl Sums {
             "outputTax": self.output_tax.to_json_number(),
             "purchasesNet": self.purchases_net.to_json_number(),
             "inputTax": self.input_tax.to_json_number(),
+            "taxInCosts": self.cost_tax.to_json_number(),
         })
     }
 }
@@ -140,10 +147,11 @@ pub async fn tax_return(conn: &mut SqliteConnection, date_from: &str, date_to: &
         let rate: i64 = r.try_get("rate")?;
         let net = to_base(Money::from_cents(r.try_get("net")?), rate)?;
         let tax = to_base(Money::from_cents(r.try_get("tax")?), rate)?;
+        let recoverable = r.try_get::<i64, _>("recoverable")? == 1;
         let row = by_code.entry(code).or_default();
         row.add_net(&side, net)?;
-        row.add_tax(&side, tax)?;
-        total.add_tax(&side, tax)?;
+        row.add_tax(&side, tax, recoverable)?;
+        total.add_tax(&side, tax, recoverable)?;
         // A line under several parts of a group is one sale: count its net once.
         if counted.insert(line) {
             total.add_net(&side, net)?;

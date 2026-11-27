@@ -26,7 +26,7 @@ const isWithholdingAccount = (a: Account) => /withholding tax|wht/i.test(a.name)
 const KIND_LABEL: Record<TaxKind, string> = { STANDARD: 'Standard', GROUP: 'Group', WITHHOLDING: 'Withholding' };
 const emptyForm = {
   name: '', kind: 'STANDARD' as TaxKind, rate: '', description: '', salesAccountId: '', purchaseAccountId: '',
-  isActive: true, components: [] as Part[],
+  purchaseTaxRecoverable: true, isActive: true, components: [] as Part[],
 };
 
 export default function Taxes() {
@@ -73,7 +73,8 @@ export default function Taxes() {
   const startNew = () => {
     setEditing(null);
     setError('');
-    setForm({ ...emptyForm, ...guess('STANDARD') });
+    // D79: US sales tax paid to vendors is part of the cost; VAT / GST is claimed back.
+    setForm({ ...emptyForm, ...guess('STANDARD'), purchaseTaxRecoverable: region().country !== 'US' });
     setShowForm(true);
   };
   useCommand('new', startNew);
@@ -87,7 +88,7 @@ export default function Taxes() {
     setForm({
       name: c.name, kind: c.kind, rate: String(c.rate), description: c.description ?? '',
       salesAccountId: c.salesAccountId, purchaseAccountId: c.purchaseAccountId, isActive: c.isActive,
-      components: c.components,
+      purchaseTaxRecoverable: c.purchaseTaxRecoverable !== false, components: c.components,
     });
     setShowForm(true);
   };
@@ -101,7 +102,7 @@ export default function Taxes() {
       const pick = (preferred: string[]) => preferred.find((c) => !taken.has(c)) ?? '';
       // D75: codes outside 2300–2390, which US payroll uses for its own payable accounts.
       const us = region().country === 'US';
-      const pair = form.kind === 'WITHHOLDING'
+      const pair: { code: string; name: string; type: string; subtype: string }[] = form.kind === 'WITHHOLDING'
         ? [
           { code: pick(['1450', '1460', '1470']), name: 'Withholding Tax Receivable', type: 'ASSET', subtype: 'current_asset' },
           { code: pick(['2450', '2460', '2470']), name: 'Withholding Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
@@ -110,12 +111,12 @@ export default function Taxes() {
           { code: pick(['2400', '2410', '2420']), name: us ? 'Sales Tax Payable' : 'Tax Payable', type: 'LIABILITY', subtype: 'current_liability' },
           { code: pick(['1400', '1410', '1490']), name: us ? 'Sales Tax Receivable' : 'Tax Receivable', type: 'ASSET', subtype: 'current_asset' },
         ];
+      // D79: tax that is part of the cost needs no receivable account.
+      if (form.kind === 'STANDARD' && !form.purchaseTaxRecoverable) pair.pop();
       const made = await Promise.all(pair.map((a) => api.post('/accounts', a)));
       await loadAccounts();
       const [first, second] = made.map((r) => r.data.id);
-      setForm((f) => (f.kind === 'WITHHOLDING'
-        ? { ...f, salesAccountId: first, purchaseAccountId: second }
-        : { ...f, salesAccountId: first, purchaseAccountId: second }));
+      setForm((f) => ({ ...f, salesAccountId: first, purchaseAccountId: second ?? f.purchaseAccountId }));
     } catch (e) {
       setError(errMsg(e, 'Could not add the tax accounts'));
     } finally {
@@ -140,8 +141,10 @@ export default function Taxes() {
       const body = form.kind === 'GROUP'
         ? { ...common, kind: form.kind, components: form.components }
         : {
-          ...common, kind: form.kind, rate: Number(form.rate),
-          salesAccountId: form.salesAccountId, purchaseAccountId: form.purchaseAccountId,
+          ...common, kind: form.kind, rate: Number(form.rate), salesAccountId: form.salesAccountId,
+          ...(form.kind === 'STANDARD' && !form.purchaseTaxRecoverable
+            ? { purchaseTaxRecoverable: false }
+            : { purchaseAccountId: form.purchaseAccountId, ...(form.kind === 'STANDARD' ? { purchaseTaxRecoverable: true } : {}) }),
         };
       if (editing) await api.patch(`/tax-codes/${editing}`, body);
       else await api.post('/tax-codes', body);
@@ -247,13 +250,27 @@ export default function Taxes() {
                     {salesChoices.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
                   </select>
                 </label>
-                <label className="text-xs font-medium text-gray-600" style={{ gridColumn: 'span 2' }}>
-                  {form.kind === 'WITHHOLDING' ? 'Withheld from vendors goes to (a liability)' : 'Tax on purchases goes to'}
-                  <select className="mt-1" required value={form.purchaseAccountId} onChange={(e) => setForm({ ...form, purchaseAccountId: e.target.value })} aria-label="Purchase tax account">
-                    <option value="">Choose an account…</option>
-                    {purchaseChoices.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-                  </select>
-                </label>
+                {form.kind === 'STANDARD' && !form.purchaseTaxRecoverable ? (
+                  <p className="text-xs text-gray-600 self-end pb-2" style={{ gridColumn: 'span 2' }}>
+                    Tax you pay on purchases is added to the cost of what you buy (as US sales tax is), and is not
+                    taken off the tax you owe.
+                  </p>
+                ) : (
+                  <label className="text-xs font-medium text-gray-600" style={{ gridColumn: 'span 2' }}>
+                    {form.kind === 'WITHHOLDING' ? 'Withheld from vendors goes to (a liability)' : 'Tax on purchases is claimed back through'}
+                    <select className="mt-1" required value={form.purchaseAccountId} onChange={(e) => setForm({ ...form, purchaseAccountId: e.target.value })} aria-label="Purchase tax account">
+                      <option value="">Choose an account…</option>
+                      {purchaseChoices.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                {form.kind === 'STANDARD' && (
+                  <label className="flex items-center gap-2 text-xs text-gray-700" style={{ gridColumn: '1 / -1' }}>
+                    <input type="checkbox" checked={form.purchaseTaxRecoverable}
+                      onChange={(e) => setForm({ ...form, purchaseTaxRecoverable: e.target.checked })} aria-label="Tax on purchases can be claimed back" />
+                    Tax paid on purchases can be claimed back (VAT / GST). Leave this off for US sales tax.
+                  </label>
+                )}
                 {!hasAccounts && (
                   <p className="text-xs text-gray-600" style={{ gridColumn: '1 / -1' }}>
                     No {form.kind === 'WITHHOLDING' ? 'withholding tax' : us ? 'sales tax' : 'tax'} accounts in the chart yet.{' '}
@@ -290,7 +307,9 @@ export default function Taxes() {
           { header: 'Rate', accessor: (c) => `${c.rate}%` },
           { header: 'Posts to', accessor: (c) => (c.kind === 'GROUP'
             ? c.components.map((p) => `${codeName(p.taxCodeId)}${p.isCompound ? ' (compound)' : ''}`).join(' + ')
-            : `${label(c.salesAccountId)} / ${label(c.purchaseAccountId)}`) },
+            : c.kind === 'STANDARD' && c.purchaseTaxRecoverable === false
+              ? `${label(c.salesAccountId)} / purchases: in the cost`
+              : `${label(c.salesAccountId)} / ${label(c.purchaseAccountId)}`) },
           { header: 'Status', accessor: (c) => <StatusBadge status={c.isActive ? 'ACTIVE' : 'LEFT'} /> },
           { header: 'Actions', accessor: (c) => (
             <span className="space-x-3">

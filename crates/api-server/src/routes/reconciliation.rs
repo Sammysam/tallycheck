@@ -29,7 +29,7 @@ pub async fn list(State(s): State<AppState>, _a: Authorized<perm::Ledger>, Query
 /// `POST /api/reconciliations` `{accountId, statementDate, statementBalance}`.
 pub async fn start(
     State(s): State<AppState>,
-    a: Authorized<perm::Ledger>,
+    a: Authorized<perm::LedgerPost>,
     body: JsonBody,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let mut v = Validator::new(body.object());
@@ -57,7 +57,7 @@ pub async fn get(
 /// `PUT /api/reconciliations/:id/lines` `{lineIds: [...]}`: the ticked lines, all of them.
 pub async fn set_lines(
     State(s): State<AppState>,
-    _a: Authorized<perm::Ledger>,
+    _a: Authorized<perm::LedgerPost>,
     Path(id): Path<String>,
     body: JsonBody,
 ) -> AppResult<Json<Value>> {
@@ -77,7 +77,7 @@ pub async fn set_lines(
 
 pub async fn complete(
     State(s): State<AppState>,
-    a: Authorized<perm::Ledger>,
+    a: Authorized<perm::LedgerPost>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     Ok(Json(rec::complete(&s.db, &id, Some(&a.user().id)).await?.to_json()))
@@ -85,7 +85,7 @@ pub async fn complete(
 
 pub async fn undo(
     State(s): State<AppState>,
-    _a: Authorized<perm::Ledger>,
+    _a: Authorized<perm::LedgerPost>,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     Ok(Json(rec::undo(&s.db, &id).await?.to_json()))
@@ -93,7 +93,7 @@ pub async fn undo(
 
 pub async fn discard(
     State(s): State<AppState>,
-    _a: Authorized<perm::Ledger>,
+    _a: Authorized<perm::LedgerPost>,
     Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
     rec::discard(&s.db, &id).await?;

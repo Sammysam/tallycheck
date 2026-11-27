@@ -4,7 +4,7 @@
  * keeps a "Show all accounts" way out, and the account already chosen is always kept.
  */
 
-export interface PickAccount { id: string; code: string; name: string; type: string; isActive?: boolean }
+export interface PickAccount { id: string; code: string; name: string; type: string; isActive?: boolean; subtype?: string | null }
 
 /** Accounts payroll posts to by itself (salaries, payroll taxes and what is withheld). */
 export const PAYROLL = /withh|payroll|income tax|social security|medicare|futa|suta|unemployment|epf|etf|paye|stamp duty|401|section 125|disability|paid leave|local income|salar|wage|staff loan/i;
@@ -22,6 +22,14 @@ export const isPayable = (a: PickAccount) => a.type === 'LIABILITY' && !isPayrol
 
 /** Assets a purchase may go to (equipment, prepaid, stock), not money or receivables. */
 export const isPurchasedAsset = (a: PickAccount) => a.type === 'ASSET' && !isMoneyOrReceivable(a);
+
+/** C6: money accounts — cash and bank (10xx, a "bank" subtype, or named so), never equipment,
+ *  stock, receivables or accumulated depreciation. */
+export const isMoney = (a: PickAccount) =>
+  a.type === 'ASSET' && a.isActive !== false
+  && !['fixed_asset', 'non_current_asset', 'inventory'].includes(a.subtype ?? '')
+  && !/receivable|depreciation|inventory|equipment/i.test(a.name)
+  && (a.code.startsWith('10') || a.subtype === 'bank' || /bank|cash|petty|paypal|stripe|clearing|checking|savings/i.test(a.name));
 
 /** The suggested accounts, plus the one already chosen even if it is not suggested. */
 export function suggested<T extends PickAccount>(all: T[], ok: (a: T) => boolean, chosen?: string | null): T[] {

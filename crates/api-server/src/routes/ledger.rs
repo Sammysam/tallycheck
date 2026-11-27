@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 pub async fn post_entry(
     State(state): State<AppState>,
-    _auth: Authorized<perm::Ledger>,
+    _auth: Authorized<perm::LedgerPost>,
     body: JsonBody,
 ) -> AppResult<(StatusCode, Json<JournalEntry>)> {
     let dto = validate::create_journal_entry(body.object())?;
@@ -118,7 +118,7 @@ fn document_name(source_type: &str) -> Option<&'static str> {
 /// Dated with the Sri Lanka business date (D5); the reference used the UTC date.
 pub async fn reverse(
     State(state): State<AppState>,
-    _auth: Authorized<perm::Ledger>,
+    _auth: Authorized<perm::LedgerPost>,
     Path(id): Path<String>,
 ) -> AppResult<(StatusCode, Json<JournalEntry>)> {
     let mut tx = state.db.begin().await?;

@@ -289,7 +289,7 @@ pub async fn bank_transfer(
     Path(id): Path<String>,
     body: JsonBody,
 ) -> AppResult<Json<Value>> {
-    if !auth.user().has_permission("ledger") {
+    if !auth.user().has_permission("ledger:post") {
         return Err(forbidden());
     }
     parse_uuid(&id)?;

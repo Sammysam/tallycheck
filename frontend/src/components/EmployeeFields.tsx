@@ -5,6 +5,7 @@ import {
   type EmployeeStatus,
   type EmploymentType,
 } from '../lib/employees';
+import { region } from '../lib/region';
 
 /** Shared between the create form on the list page and the edit form on the profile. */
 export default function EmployeeFields({
@@ -19,11 +20,13 @@ export default function EmployeeFields({
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       onChange({ ...form, [key]: e.target.value });
 
+  // C1: Sri Lankan statutory fields (EPF number, NIC) only for a Sri Lankan company.
+  const lk = region().country !== 'US';
   return (
     <>
       <label className="block">
         <span className="text-xs font-medium text-gray-500">Employee ID *</span>
-        <input required placeholder="e.g. CEN-042" value={form.employeeId} onChange={set('employeeId')} />
+        <input required placeholder="e.g. E-042" value={form.employeeId} onChange={set('employeeId')} />
       </label>
       <label className="block">
         <span className="text-xs font-medium text-gray-500">Full name *</span>
@@ -61,7 +64,7 @@ export default function EmployeeFields({
         <span className="text-xs font-medium text-gray-500">Employment type</span>
         <select value={form.employmentType} onChange={set('employmentType')}>
           {(Object.keys(EMPLOYMENT_TYPE_LABEL) as EmploymentType[]).map((t) => (
-            <option key={t} value={t}>{EMPLOYMENT_TYPE_LABEL[t]}</option>
+            <option key={t} value={t}>{!lk && t === 'CONTRACT' ? 'Contractor (not on payroll)' : EMPLOYMENT_TYPE_LABEL[t]}</option>
           ))}
         </select>
       </label>
@@ -69,14 +72,18 @@ export default function EmployeeFields({
         <span className="text-xs font-medium text-gray-500">Resigned date</span>
         <input type="date" value={form.resignedDate} onChange={set('resignedDate')} />
       </label>
-      <label className="block">
-        <span className="text-xs font-medium text-gray-500">EPF member no.</span>
-        <input placeholder="e.g. 96" value={form.epfNumber} onChange={set('epfNumber')} />
-      </label>
-      <label className="block">
-        <span className="text-xs font-medium text-gray-500">National ID (NIC)</span>
-        <input placeholder="NIC number" value={form.nationalId} onChange={set('nationalId')} />
-      </label>
+      {lk && (
+        <>
+          <label className="block">
+            <span className="text-xs font-medium text-gray-500">EPF member no.</span>
+            <input placeholder="e.g. 96" value={form.epfNumber} onChange={set('epfNumber')} />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-gray-500">National ID (NIC)</span>
+            <input placeholder="NIC number" value={form.nationalId} onChange={set('nationalId')} />
+          </label>
+        </>
+      )}
       <label className="block" style={{ gridColumn: '1 / -1' }}>
         <span className="text-xs font-medium text-gray-500">Notes</span>
         <textarea rows={2} placeholder="Anything worth remembering" value={form.notes} onChange={set('notes')} />

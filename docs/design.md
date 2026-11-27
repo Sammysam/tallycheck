@@ -1140,6 +1140,38 @@ recommendations without answering each one individually; revisit any of them on 
   version (`v1.1.1`), which opens **What's new**; the first start after an update on that PC shows
   it once (`frontend/src/lib/whatsNew.ts`, written in the app so it works offline; add each
   release's points there).
+- **D79 US sales tax on purchases is part of the cost** (requested 2026-11-27 after a US CPA's
+  review). A standard tax code says whether tax paid on purchases can be claimed back
+  (`tax_codes."purchaseTaxRecoverable"`, default yes: VAT / GST). When it can't (US sales tax), a
+  bill line's, expense's or debit note's tax posts with that document's own account (and a stock
+  item's cost), no purchase tax account is needed, and the tax return lists it as "tax paid in
+  costs" (`taxInCosts`) without subtracting it from the tax owed. Each stored split keeps its
+  treatment (`document_taxes."recoverable"`), so changing a code never rewrites saved documents.
+  New codes default to not recoverable for a US company; migration `20261127000007` switches a US
+  company's existing standard codes (documents already saved keep how they were posted).
+- **D80 Seeing the ledger and posting to it are separate rights** (same review: the built-in
+  Viewer role could post and reverse journal entries). New permission `ledger:post`: posting and
+  reversing manual journal entries, bank reconciliation (start, tick, complete, undo, discard),
+  stock adjustments, revaluations, bank-line transfers and the opening-balances import. `ledger`
+  alone reads the ledger, transaction details and account activity. Migration `20261127000008`
+  gives `ledger:post` to every role that had `ledger`, except Viewer. The screens hide those
+  actions without it.
+- **D81 Other fixes from the US CPA review** (2026-11-27). Credit / debit notes start with a tax
+  code only when every line of the document has that code. Quick start numbers new accounts by
+  kind with a subtype (bank 10xx, stock 12xx, deposits 14xx, other assets 15xx `fixed_asset`,
+  cards / overdrafts 21xx, loans 27xx `long_term_liability`; conversions accept `subtype`), and
+  the account form offers subtypes as a list. The cash flow report treats balances brought in
+  (source CONVERSION) as opening cash (`broughtIn`), never as movements, and its default cash
+  accounts leave out 10xx accounts whose subtype says otherwise and add any `bank` account. The
+  trial balance shows each account's net balance as of a date and can hide empty accounts; the
+  balance sheet puts the profit to date inside total equity and hides empty accounts unless asked.
+  A new bill is due 30 days after its date unless changed. A US company's employee form leaves out
+  EPF / NIC and calls contract labour "Contractor (not on payroll)". "Paid from" on expenses and
+  pay runs and the reconciliation account list offer bank and cash accounts only. Smaller: the
+  sign-in tagline, "Invoiced" on converted estimates, statement dates in the company style, and
+  unknown addresses such as /invoices/new open their list. Not built (features, not fixes):
+  payroll year-to-date figures from before TallyCheck, 1099s, cash-basis reports, sales tax by
+  jurisdiction, check / vendor invoice numbers, SSN and address on employees.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

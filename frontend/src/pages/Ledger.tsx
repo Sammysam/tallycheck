@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import api, { errMsg } from '../api/client';
 import PageHeader from '../components/PageHeader';
+import { useAuth } from '../contexts/AuthContext';
 import StatusBadge from '../components/StatusBadge';
 import { money } from '../lib/money';
 import { useCommand, setUnsaved } from '../lib/commands';
@@ -23,6 +24,8 @@ const blankLine = (): FormLine => ({ _key: nextKey++, accountId: '', debit: '', 
 const cents = (v: string) => Math.round((Number(v) || 0) * 100);
 
 export default function Ledger() {
+  // D80: seeing the ledger needs `ledger`; posting needs `ledger:post`.
+  const canPost = useAuth().hasPermission('ledger:post');
   const navigate = useNavigate();
   const location = useLocation();
   const [prefill] = useState(() => (location.state as { prefill?: Prefill } | null)?.prefill);
@@ -124,7 +127,7 @@ export default function Ledger() {
 
   return (
     <div>
-      <PageHeader title="Journal Entries" action={!showForm && <button onClick={open} className="btn btn-primary">+ New Journal Entry</button>} />
+      <PageHeader title="Journal Entries" action={!showForm && canPost && <button onClick={open} className="btn btn-primary">+ New Journal Entry</button>} />
 
       {showForm && (
         <form onSubmit={submit} aria-label="Journal entry" className="bg-white rounded-lg border border-gray-200 p-4 mb-4 space-y-3">

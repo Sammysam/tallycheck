@@ -46,6 +46,9 @@ pub struct AccountRow {
     pub code: String,
     pub name: String,
     pub account_type: Option<AccountType>,
+    /// M3: the subtype of an account that is created (e.g. `fixed_asset`, `long_term_liability`),
+    /// so the cash flow report classes it correctly.
+    pub subtype: Option<String>,
 }
 
 pub struct PartyRow {
@@ -339,7 +342,7 @@ pub async fn run(db: &Db, req: Request, created_by: Option<&str>, commit: bool) 
             code: code.to_string(),
             name: name.to_string(),
             account_type: kind,
-            subtype: None,
+            subtype: a.subtype.clone(),
             description: Some(format!("Brought in from {source}")),
             parent_id: None,
             currency: None,

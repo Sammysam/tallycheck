@@ -42,7 +42,7 @@ const MOVE_LABEL: Record<string, string> = {
 export default function Items() {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('invoices') || hasPermission('bills');
-  const canAdjust = hasPermission('ledger');
+  const canAdjust = hasPermission('ledger:post');
   const [items, setItems] = useState<Item[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [type, setType] = useState<'' | ItemType>('');

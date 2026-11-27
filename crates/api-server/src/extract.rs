@@ -176,6 +176,7 @@ pub mod perm {
     permission!(Settings, "settings");
     permission!(Accounts, "accounts");
     permission!(Ledger, "ledger");
+    permission!(LedgerPost, "ledger:post");
     permission!(Customers, "customers");
     permission!(Vendors, "vendors");
     permission!(Banking, "banking");

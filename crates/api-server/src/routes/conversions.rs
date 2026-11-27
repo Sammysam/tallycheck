@@ -84,6 +84,14 @@ fn request(m: &Map<String, Value>) -> AppResult<conversion::Request> {
                 account_id: Some(s(r, "accountId")).filter(|a| !a.is_empty()),
                 code: s(r, "code"),
                 name: s(r, "name"),
+                subtype: {
+                    let sub = s(r, "subtype");
+                    let sub = sub.trim();
+                    if sub.chars().count() > 50 {
+                        return Err(AppError::bad_request("subtype must be at most 50 characters"));
+                    }
+                    Some(sub.to_string()).filter(|v| !v.is_empty())
+                },
                 account_type: match kind.trim() {
                     "" => None,
                     k => Some(AccountType::parse(&k.to_ascii_uppercase()).ok_or_else(|| {

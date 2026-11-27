@@ -1,4 +1,4 @@
-//! Exact copy of the reference `backend/src/common/constants/permissions.ts`.
+//! Copy of the reference `backend/src/common/constants/permissions.ts`, plus `ledger:post` (D80).
 
 pub struct Permission {
     pub key: &'static str,
@@ -19,6 +19,8 @@ pub const PERMISSIONS: &[Permission] = &[
     Permission { key: "payments", label: "Payments" },
     Permission { key: "banking", label: "Banking" },
     Permission { key: "ledger", label: "Ledger" },
+    // D80: seeing the ledger and changing it are separate rights (the Viewer role is read-only).
+    Permission { key: "ledger:post", label: "Ledger — post and reverse entries, reconcile" },
     Permission { key: "reports", label: "Reports" },
     Permission { key: "users", label: "Users & Roles" },
     Permission { key: "audit", label: "Activity Log" },
@@ -41,15 +43,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn seventeen_unique_keys_in_reference_order() {
+    fn eighteen_unique_keys_in_reference_order() {
         let k: Vec<_> = keys().collect();
-        assert_eq!(k.len(), 17);
+        assert_eq!(k.len(), 18);
         assert_eq!(k.first(), Some(&"dashboard"));
         assert_eq!(k.last(), Some(&"settings"));
         let mut sorted = k.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), 17);
+        assert_eq!(sorted.len(), 18);
         assert!(is_known("invoices:all"));
         assert!(!is_known("admin"));
     }

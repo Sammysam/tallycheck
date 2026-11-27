@@ -9,7 +9,7 @@ export default function AuthShell({ children }: { children: ReactNode }) {
         <div className="flex flex-col items-center px-6 pt-6 pb-4 bg-white border-b-[3px] border-orange-500">
           <img src="/tallycheck-mark.png" alt="" className="h-16 w-16 object-contain" />
           <img src="/Logo_tallycheck.png" alt="TallyCheck" className="mt-2 h-8 w-auto" />
-          <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-gray-500">Accounting System</p>
+          <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-gray-500">Accounting, invoicing &amp; payroll</p>
         </div>
         <div className="px-6 py-5">{children}</div>
         <div className="flex items-center gap-1.5 px-6 py-2 text-[11px] text-gray-500 bg-[#f3f3f3] border-t border-[#e5e5e5]">

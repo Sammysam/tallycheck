@@ -90,7 +90,7 @@ export const KINDS: KindInfo[] = [
     kind: 'OPENING',
     label: 'Opening balances',
     description: 'Account balances on the day you start using the app. They open as a journal entry for you to check and post.',
-    permission: 'ledger',
+    permission: 'ledger:post',
     fields: [
       { key: 'account', label: 'Account code', required: true, words: ['account code', 'code', 'account', 'gl'] },
       { key: 'debit', label: 'Debit', words: ['debit', 'dr'] },

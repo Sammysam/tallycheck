@@ -28,6 +28,8 @@ export default function BalanceSheet() {
   // A balance sheet is cumulative: an account link shows everything up to the date it was run for.
   const [ranAsOf, setRanAsOf] = useState(asOf);
   const [ranBefore, setRanBefore] = useState<string | null>(null);
+  // m2: accounts with nothing on them are left out unless asked for.
+  const [showZero, setShowZero] = useState(false);
 
   const load = () => {
     const other = compareWith === 'lastYear' ? shiftYears(asOf, -1) : compareWith === 'yearEnd' ? lastYearEnd(asOf) : null;
@@ -49,6 +51,20 @@ export default function BalanceSheet() {
   const cmp = (lines: AccountLine[] | undefined, total: number | undefined) =>
     before ? { lines: lines ?? [], total: total ?? 0 } : undefined;
   const was = (v: number | undefined) => (before ? Number(v ?? 0) : undefined);
+  const keep = (lines: AccountLine[] | undefined) => (showZero ? lines ?? [] : (lines ?? []).filter((l) => Number(l.balance) !== 0));
+  // m2: the profit not yet closed into retained earnings belongs inside total equity.
+  const equityRows = () => {
+    if (!data) return [];
+    const rows = sectionRows('Equity', keep(data.equity), Number(data.totalEquity) + Number(data.retainedEarnings), dates,
+      before ? { lines: keep(before.equity), total: Number(before.totalEquity) + Number(before.retainedEarnings) } : undefined);
+    const total = rows.pop()!;
+    return [
+      ...rows,
+      { key: 'retained', label: 'Retained earnings (profit to date)', amount: Number(data.retainedEarnings), compare: was(before?.retainedEarnings) },
+      total,
+      { key: 'grand-le', label: 'Total liabilities and equity', amount: Number(data.totalLiabilitiesAndEquity), compare: was(before?.totalLiabilitiesAndEquity), total: true },
+    ];
+  };
 
   return (
     <div>
@@ -57,6 +73,10 @@ export default function BalanceSheet() {
         subtitle={data ? `As of ${fmtDate(ranAsOf)} · click an account to see its entries` : undefined}
         action={
           <div className="flex gap-2 items-center">
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 mr-2">
+              <input type="checkbox" checked={showZero} onChange={(e) => setShowZero(e.target.checked)} />
+              Show accounts with no balance
+            </label>
             <span className="text-sm text-gray-500">As of</span>
             <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="!w-40" aria-label="As of" />
             <select value={compareWith} onChange={(e) => setCompareWith(e.target.value as CompareWith)} className="!w-64" aria-label="Compare with">
@@ -76,7 +96,7 @@ export default function BalanceSheet() {
               amountHeader={amountHeader}
               compareHeader={compareHeader}
               rows={[
-                ...sectionRows('Assets', data.assets, data.totalAssets, dates, cmp(before?.assets, before?.totalAssets)),
+                ...sectionRows('Assets', keep(data.assets), data.totalAssets, dates, cmp(keep(before?.assets), before?.totalAssets)),
               ]}
             />
           </div>
@@ -85,17 +105,13 @@ export default function BalanceSheet() {
               title="Liabilities"
               amountHeader={amountHeader}
               compareHeader={compareHeader}
-              rows={sectionRows('Liabilities', data.liabilities, data.totalLiabilities, dates, cmp(before?.liabilities, before?.totalLiabilities))}
+              rows={sectionRows('Liabilities', keep(data.liabilities), data.totalLiabilities, dates, cmp(keep(before?.liabilities), before?.totalLiabilities))}
             />
             <ReportTable
               title="Equity"
               amountHeader={amountHeader}
               compareHeader={compareHeader}
-              rows={[
-                ...sectionRows('Equity', data.equity, data.totalEquity, dates, cmp(before?.equity, before?.totalEquity)),
-                { key: 'retained', label: 'Retained Earnings', amount: Number(data.retainedEarnings), compare: was(before?.retainedEarnings) },
-                { key: 'grand-le', label: 'Total liabilities and equity', amount: Number(data.totalLiabilitiesAndEquity), compare: was(before?.totalLiabilitiesAndEquity), total: true },
-              ]}
+              rows={equityRows()}
             />
             <p className={`text-xs px-1 ${data.balanced ? 'text-green-700' : 'text-red-600'}`}>
               {data.balanced ? '✓ Balanced' : '✗ Out of balance'}

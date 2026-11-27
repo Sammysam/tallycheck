@@ -14,6 +14,7 @@ import { toast } from '../lib/toast';
 import { useNavigate } from 'react-router-dom';
 import { lineCodes, summarize, useTaxCodes } from '../lib/taxes';
 import TxnLink from '../components/TxnLink';
+import { addDays } from '../lib/periods';
 import type { PickItem } from '../lib/items';
 
 interface Bill { id: string; billNumber: string; vendor: { name: string }; date: string; dueDate?: string | null; totalAmount: number; status: string; currency?: string | null }
@@ -36,7 +37,7 @@ export default function Bills() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ vendorId: '', date: todayIso(), dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
+  const [form, setForm] = useState({ vendorId: '', date: todayIso(), dueDate: addDays(todayIso(), 30), pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
   const taxCodes = useTaxCodes();
   // D26: what the bill will total, worked out as the server will.
   const summary = summarize(
@@ -124,7 +125,7 @@ export default function Bills() {
         lines: lines.map(({ _key, taxCodeId, itemId, ...l }) => ({ ...l, taxCodeId: taxCodeId || undefined, itemId: itemId || undefined })),
       });
       setShowForm(false);
-      setForm({ vendorId: '', date: todayIso(), dueDate: '', pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
+      setForm({ vendorId: '', date: todayIso(), dueDate: addDays(todayIso(), 30), pricesIncludeTax: false, currency: '', exchangeRate: '', payableAccountId: '', lines: [emptyLine()] });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to save bill');
@@ -158,8 +159,13 @@ export default function Bills() {
                 {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
               <label className="block"><span className="text-xs font-medium text-gray-500">Bill date</span>
-                <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} aria-label="Bill date" /></label>
-              <label className="block"><span className="text-xs font-medium text-gray-500">Due date (optional)</span>
+                <input required type="date" value={form.date} aria-label="Bill date"
+                  onChange={(e) => setForm({
+                    ...form, date: e.target.value,
+                    // m3: the due date follows the bill date (30 days) until it is changed by hand.
+                    dueDate: !form.dueDate || form.dueDate === addDays(form.date, 30) ? addDays(e.target.value, 30) : form.dueDate,
+                  })} /></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Due date (30 days unless you change it; empty = due on receipt)</span>
                 <input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} aria-label="Due date" /></label>
             </div>
             <div style={{ maxWidth: 520 }}>

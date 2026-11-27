@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { money, moneyIn } from '../lib/money';
 import { fmtDate } from '../lib/region';
+import { useAuth } from '../contexts/AuthContext';
 
 /**
  * D35: one transaction in full — the journal entry with every line, and the document behind it
@@ -154,6 +155,7 @@ function DocSummary({ entry, doc }: { entry: Entry; doc: Doc }) {
 }
 
 export default function TransactionDetail() {
+  const canPost = useAuth().hasPermission('ledger:post');
   const { id } = useParams();
   const navigate = useNavigate();
   const [entry, setEntry] = useState<Entry | null>(null);
@@ -201,7 +203,7 @@ export default function TransactionDetail() {
         action={
           <div className="flex gap-2 no-print">
             {/* Entries a document posted are undone from that document (D18). */}
-            {entry && !entry.sourceType && !entry.reversalOfId && entry.status === 'POSTED' && (
+            {canPost && entry && !entry.sourceType && !entry.reversalOfId && entry.status === 'POSTED' && (
               <button onClick={() => setReversing(true)} className="btn btn-secondary">Reverse this entry</button>
             )}
             <button onClick={() => navigate(-1)} className="btn btn-secondary">Back</button>

@@ -11,6 +11,7 @@ import SalarySection from '../components/SalarySection';
 import UsTaxSection from '../components/UsTaxSection';
 import { usePayrollCountry } from '../lib/usPayroll';
 import { useAuth } from '../contexts/AuthContext';
+import { region } from '../lib/region';
 import {
   CATEGORY_LABEL,
   EMPLOYMENT_TYPE_LABEL,
@@ -340,9 +341,9 @@ export default function EmployeeProfile() {
                   <Field label="Email" value={profile.email} />
                   <Field label="Phone" value={profile.phone} />
                   <Field label="Join date" value={profile.joinDate} />
-                  <Field label="Employment type" value={EMPLOYMENT_TYPE_LABEL[profile.employmentType] ?? profile.employmentType} />
-                  <Field label="EPF member no." value={profile.epfNumber} />
-                  <Field label="National ID" value={profile.nationalId} />
+                  <Field label="Employment type" value={region().country === 'US' && profile.employmentType === 'CONTRACT' ? 'Contractor (not on payroll)' : EMPLOYMENT_TYPE_LABEL[profile.employmentType] ?? profile.employmentType} />
+                  {region().country !== 'US' && <Field label="EPF member no." value={profile.epfNumber} />}
+                  {region().country !== 'US' && <Field label="National ID" value={profile.nationalId} />}
                   {profile.resignedDate && <Field label="Resigned" value={profile.resignedDate} />}
                   <Field label="Documents on file" value={String(profile.documents.filter((d) => d.isCurrent).length)} />
                   {profile.notes && (

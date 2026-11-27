@@ -747,7 +747,7 @@ try {
     for (const e of EMPLOYEES) {
       await go('/employees');
       await clickText('+ New Employee');
-      await set('input[placeholder="e.g. CEN-042"]', e.id);
+      await set('input[placeholder="e.g. E-042"]', e.id);
       await set('input[placeholder="Full name"]', e.name);
       await set('input[placeholder="Job title"]', e.title);
       await set('input[placeholder="Department"]', e.dept);

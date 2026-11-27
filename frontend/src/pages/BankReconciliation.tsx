@@ -6,6 +6,8 @@ import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
 import { moneyIn } from '../lib/money';
+import { useAuth } from '../contexts/AuthContext';
+import { isMoney } from '../lib/accountChoices';
 import { fmtDate } from '../lib/region';
 
 /** D22: match a cash or bank account's ledger lines to a bank statement. */
@@ -100,6 +102,8 @@ function LineTable({ title, lines, ticked, amount, onToggle, onAll, readOnly }: 
 }
 
 export default function BankReconciliation() {
+  // D80: reconciling changes what is cleared; it needs `ledger:post`.
+  const canPost = useAuth().hasPermission('ledger:post');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountId, setAccountId] = useState('');
   const [history, setHistory] = useState<Rec[]>([]);
@@ -114,7 +118,8 @@ export default function BankReconciliation() {
 
   useEffect(() => {
     api.get('/accounts').then((r) => {
-      const banks = r.data.filter((a: Account) => a.type === 'ASSET' && a.isActive && a.code !== '1100');
+      // C6: bank and cash accounts (and credit cards / clearing accounts named so).
+      const banks = r.data.filter((a: Account) => isMoney(a));
       setAccounts(banks);
       const cash = banks.find((a: Account) => a.code === '1000') ?? banks[0];
       if (cash) setAccountId(cash.id);
@@ -286,7 +291,8 @@ export default function BankReconciliation() {
               <input type="number" step="0.01" className="mt-1" required placeholder="Closing balance" value={start.statementBalance}
                 onChange={(e) => setStart({ ...start, statementBalance: e.target.value })} />
             </label>
-            <button type="submit" className="btn btn-primary" disabled={busy || !accountId}>Start</button>
+            <button type="submit" className="btn btn-primary" disabled={busy || !accountId || !canPost}
+              title={canPost ? undefined : 'Reconciling needs the right to post to the ledger'}>Start</button>
           </form>
 
           <section className="xl:col-span-2 bg-white border border-[#e0e0e0] rounded-md overflow-hidden">

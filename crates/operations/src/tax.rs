@@ -55,6 +55,9 @@ pub struct TaxCode {
     pub description: Option<String>,
     pub sales_account_id: String,
     pub purchase_account_id: String,
+    /// D79: whether tax paid on purchases can be claimed back (VAT / GST). When not (US sales
+    /// tax), it is part of the cost and the purchase account is not used.
+    pub purchase_tax_recoverable: bool,
     pub is_active: bool,
     pub components: Vec<Component>,
     pub created_at: String,
@@ -78,6 +81,7 @@ impl TaxCode {
             "description": opt(&self.description),
             "salesAccountId": self.sales_account_id,
             "purchaseAccountId": self.purchase_account_id,
+            "purchaseTaxRecoverable": self.purchase_tax_recoverable,
             "isActive": self.is_active,
             "components": self.components.iter().map(|c| json!({
                 "taxCodeId": c.tax_code_id,
@@ -125,6 +129,9 @@ pub fn tax_of(amount: Money, rate: i64, inclusive: bool) -> AppResult<Money> {
 pub struct TaxPart {
     pub tax_code_id: String,
     pub amount: Money,
+    /// D79: on a purchase, whether this tax is claimed back (to the code's purchase account)
+    /// or part of the cost. Always true on sales.
+    pub recoverable: bool,
 }
 
 /// `(id, rate, compound)` of each part, in charging order.
@@ -168,7 +175,7 @@ pub fn split_parts(amount: Money, rates: &Rates, inclusive: bool) -> AppResult<V
         }
         parts
     };
-    parts.into_iter().map(|(id, t)| Ok(TaxPart { tax_code_id: id, amount: to_money(t)? })).collect()
+    parts.into_iter().map(|(id, t)| Ok(TaxPart { tax_code_id: id, amount: to_money(t)?, recoverable: true })).collect()
 }
 
 /// `(net, tax, gross)` of a line amount at one rate.
@@ -190,12 +197,17 @@ pub async fn line_tax(
     inclusive: bool,
 ) -> AppResult<(Vec<TaxPart>, Money)> {
     let code = usable(conn, code_id).await?;
+    let mut recoverable: HashMap<String, bool> = HashMap::new();
     let rates: Rates = match code.kind.as_str() {
-        STANDARD => vec![(code.id.clone(), code.rate, false)],
+        STANDARD => {
+            recoverable.insert(code.id.clone(), code.purchase_tax_recoverable);
+            vec![(code.id.clone(), code.rate, false)]
+        }
         GROUP => {
             let mut rates = Vec::new();
             for c in &code.components {
                 let part = usable(conn, &c.tax_code_id).await?;
+                recoverable.insert(part.id.clone(), part.purchase_tax_recoverable);
                 rates.push((part.id, part.rate, c.is_compound));
             }
             rates
@@ -207,7 +219,10 @@ pub async fn line_tax(
             )))
         }
     };
-    let parts = split_parts(amount, &rates, inclusive)?;
+    let mut parts = split_parts(amount, &rates, inclusive)?;
+    for p in &mut parts {
+        p.recoverable = recoverable.get(&p.tax_code_id).copied().unwrap_or(true);
+    }
     let total = parts.iter().try_fold(Money::ZERO, |s, p| s.checked_add(p.amount)).ok_or_else(overflow)?;
     Ok((parts, total))
 }
@@ -217,13 +232,14 @@ pub async fn line_tax(
 pub async fn save_parts(tx: &mut Tx, source_type: &str, source_id: &str, parts: &[TaxPart]) -> AppResult<()> {
     for p in parts {
         sqlx::query(
-            r#"INSERT INTO "document_taxes" ("id","sourceType","sourceId","taxCodeId","taxAmount") VALUES (?1,?2,?3,?4,?5)"#,
+            r#"INSERT INTO "document_taxes" ("id","sourceType","sourceId","taxCodeId","taxAmount","recoverable") VALUES (?1,?2,?3,?4,?5,?6)"#,
         )
         .bind(new_id())
         .bind(source_type)
         .bind(source_id)
         .bind(&p.tax_code_id)
         .bind(p.amount.cents())
+        .bind(p.recoverable)
         .execute(&mut **tx)
         .await?;
     }
@@ -242,7 +258,7 @@ pub async fn load_parts(
     }
     let placeholders = (2..2 + source_ids.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",");
     let sql = format!(
-        r#"SELECT "sourceId","taxCodeId","taxAmount" FROM "document_taxes"
+        r#"SELECT "sourceId","taxCodeId","taxAmount","recoverable" FROM "document_taxes"
            WHERE "sourceType" = ?1 AND "sourceId" IN ({placeholders}) ORDER BY rowid"#
     );
     let mut q = sqlx::query(sqlx::AssertSqlSafe(&*sql)).bind(source_type);
@@ -250,9 +266,11 @@ pub async fn load_parts(
         q = q.bind(id);
     }
     for r in q.fetch_all(&mut *conn).await? {
-        out.entry(r.try_get("sourceId")?)
-            .or_default()
-            .push(TaxPart { tax_code_id: r.try_get("taxCodeId")?, amount: Money::from_cents(r.try_get("taxAmount")?) });
+        out.entry(r.try_get("sourceId")?).or_default().push(TaxPart {
+            tax_code_id: r.try_get("taxCodeId")?,
+            amount: Money::from_cents(r.try_get("taxAmount")?),
+            recoverable: r.try_get::<i64, _>("recoverable")? == 1,
+        });
     }
     Ok(out)
 }
@@ -270,7 +288,8 @@ pub async fn delete_parts(tx: &mut Tx, source_type: &str, source_ids: &[String])
 }
 
 /// Adds each part to the tax account of its code — the sales account on sales, the purchase
-/// account on purchases — for a journal entry.
+/// account on purchases — for a journal entry. D79: tax on purchases that is not recoverable is
+/// left out here; it is part of the cost (`in_cost`), posted with the line's own account.
 pub async fn by_account(
     conn: &mut SqliteConnection,
     parts: impl IntoIterator<Item = TaxPart>,
@@ -278,7 +297,7 @@ pub async fn by_account(
 ) -> AppResult<Vec<(String, Money)>> {
     let mut out: Vec<(String, Money)> = Vec::new();
     for p in parts {
-        if p.amount == Money::ZERO {
+        if p.amount == Money::ZERO || (!sales && !p.recoverable) {
             continue;
         }
         let code = find_one(conn, &p.tax_code_id).await?;
@@ -291,9 +310,14 @@ pub async fn by_account(
     Ok(out)
 }
 
+/// D79: the tax on a purchase that is part of the cost (not claimed back).
+pub fn in_cost(parts: &[TaxPart]) -> AppResult<Money> {
+    parts.iter().filter(|p| !p.recoverable).try_fold(Money::ZERO, |s, p| s.checked_add(p.amount)).ok_or_else(overflow)
+}
+
 // ─── Tax codes ───────────────────────────────────────────────────────────────
 
-const COLUMNS: &str = r#""id","name","kind","rate","description","salesAccountId","purchaseAccountId","isActive","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","name","kind","rate","description","salesAccountId","purchaseAccountId","purchaseTaxRecoverable","isActive","createdAt","updatedAt""#;
 
 fn from_row(r: &SqliteRow) -> AppResult<TaxCode> {
     Ok(TaxCode {
@@ -304,6 +328,7 @@ fn from_row(r: &SqliteRow) -> AppResult<TaxCode> {
         description: r.try_get("description")?,
         sales_account_id: r.try_get("salesAccountId")?,
         purchase_account_id: r.try_get("purchaseAccountId")?,
+        purchase_tax_recoverable: r.try_get::<i64, _>("purchaseTaxRecoverable")? == 1,
         is_active: r.try_get::<i64, _>("isActive")? == 1,
         components: Vec::new(),
         created_at: r.try_get("createdAt")?,
@@ -375,6 +400,9 @@ pub struct TaxCodeInput {
     pub description: Option<Option<String>>,
     pub sales_account_id: Option<String>,
     pub purchase_account_id: Option<String>,
+    /// D79: false = tax on purchases is part of the cost (US sales tax); the purchase account
+    /// may then be left out.
+    pub purchase_tax_recoverable: Option<bool>,
     pub is_active: Option<bool>,
     /// A group's parts in charging order: `(standard code id, compound)`.
     pub components: Option<Vec<(String, bool)>>,
@@ -472,8 +500,14 @@ pub async fn create(db: &Db, input: TaxCodeInput) -> AppResult<TaxCode> {
         let (rate, sales, purchase) = check_components(&mut tx, &parts).await?;
         (rate, sales, purchase, parts)
     } else {
-        let (Some(rate), Some(sales), Some(purchase)) = (input.rate, input.sales_account_id, input.purchase_account_id)
-        else {
+        let recoverable = input.purchase_tax_recoverable.unwrap_or(true) || kind == WITHHOLDING;
+        // D79: purchase tax that is part of the cost needs no account of its own.
+        let purchase = match (&input.purchase_account_id, &input.sales_account_id) {
+            (Some(p), _) => Some(p.clone()),
+            (None, Some(s)) if !recoverable => Some(s.clone()),
+            _ => None,
+        };
+        let (Some(rate), Some(sales), Some(purchase)) = (input.rate, input.sales_account_id, purchase) else {
             return Err(AppError::bad_request("name, rate, salesAccountId and purchaseAccountId are required"));
         };
         check_accounts(&mut tx, &kind, &sales, &purchase).await?;
@@ -482,8 +516,8 @@ pub async fn create(db: &Db, input: TaxCodeInput) -> AppResult<TaxCode> {
     let id = new_id();
     let now = now_iso();
     sqlx::query(
-        r#"INSERT INTO "tax_codes" ("id","name","kind","rate","description","salesAccountId","purchaseAccountId","isActive","createdAt","updatedAt")
-           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)"#,
+        r#"INSERT INTO "tax_codes" ("id","name","kind","rate","description","salesAccountId","purchaseAccountId","isActive","createdAt","updatedAt","purchaseTaxRecoverable")
+           VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10)"#,
     )
     .bind(&id)
     .bind(&name)
@@ -494,6 +528,7 @@ pub async fn create(db: &Db, input: TaxCodeInput) -> AppResult<TaxCode> {
     .bind(&purchase)
     .bind(input.is_active.unwrap_or(true))
     .bind(&now)
+    .bind(input.purchase_tax_recoverable.unwrap_or(true) || kind == WITHHOLDING)
     .execute(&mut *tx)
     .await?;
     save_components(&mut tx, &id, &parts).await?;
@@ -539,11 +574,14 @@ pub async fn update(db: &Db, id: &str, input: TaxCodeInput) -> AppResult<TaxCode
         if let Some(p) = input.purchase_account_id {
             code.purchase_account_id = p;
         }
+        if let Some(r) = input.purchase_tax_recoverable {
+            code.purchase_tax_recoverable = r || code.kind == WITHHOLDING;
+        }
         check_accounts(&mut tx, &code.kind, &code.sales_account_id, &code.purchase_account_id).await?;
     }
     sqlx::query(
         r#"UPDATE "tax_codes" SET "name"=?1,"rate"=?2,"description"=?3,"salesAccountId"=?4,"purchaseAccountId"=?5,
-             "isActive"=?6,"updatedAt"=?7 WHERE "id"=?8"#,
+             "isActive"=?6,"updatedAt"=?7,"purchaseTaxRecoverable"=?9 WHERE "id"=?8"#,
     )
     .bind(&code.name)
     .bind(code.rate)
@@ -553,6 +591,7 @@ pub async fn update(db: &Db, id: &str, input: TaxCodeInput) -> AppResult<TaxCode
     .bind(code.is_active)
     .bind(now_iso())
     .bind(id)
+    .bind(code.purchase_tax_recoverable)
     .execute(&mut *tx)
     .await?;
     let out = find_one(&mut tx, id).await?;
@@ -621,7 +660,7 @@ mod tests {
     }
 
     fn part(id: &str, amount: &str) -> TaxPart {
-        TaxPart { tax_code_id: id.into(), amount: m(amount) }
+        TaxPart { tax_code_id: id.into(), amount: m(amount), recoverable: true }
     }
 
     #[test]

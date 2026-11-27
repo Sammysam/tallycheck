@@ -8,6 +8,7 @@ import Pagination from '../components/Pagination';
 import { money } from '../lib/money';
 import { region } from '../lib/region';
 import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
+import { isMoney } from '../lib/accountChoices';
 import TxnLink from '../components/TxnLink';
 
 interface Expense { id: string; expenseNumber: string; date: string; description: string; amount: number; status: string }
@@ -40,7 +41,7 @@ export default function Expenses() {
   useEffect(() => { api.get('/accounts').then((r) => setAccounts(r.data)); }, []);
 
   const expenseAccounts = accounts.filter((a) => a.type === 'EXPENSE');
-  const assetAccounts   = accounts.filter((a) => a.type === 'ASSET');
+  const assetAccounts   = accounts.filter((a) => isMoney(a) || a.id === form.paymentAccountId);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

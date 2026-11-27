@@ -74,16 +74,22 @@ pub(crate) async fn booked(conn: &mut SqliteConnection, bill: &Bill) -> AppResul
     let rate = bill.exchange_rate;
     let mut total = Money::ZERO;
     let mut nets = Vec::with_capacity(bill.lines.len());
+    let mut parts = Vec::new();
     for l in &bill.lines {
         let net =
             if bill.prices_include_tax { l.amount.checked_sub(l.tax_amount).ok_or_else(overflow)? } else { l.amount };
-        let net = crate::fx::to_base(net, rate)?;
+        let mut net = crate::fx::to_base(net, rate)?;
+        for p in &l.taxes {
+            let part = crate::tax::TaxPart { amount: crate::fx::to_base(p.amount, rate)?, ..p.clone() };
+            if part.recoverable {
+                parts.push(part);
+            } else {
+                // D79: tax that can't be claimed back is part of what the line cost.
+                net = net.checked_add(part.amount).ok_or_else(overflow)?;
+            }
+        }
         total = total.checked_add(net).ok_or_else(overflow)?;
         nets.push(net);
-    }
-    let mut parts = Vec::new();
-    for p in bill.lines.iter().flat_map(|l| l.taxes.clone()) {
-        parts.push(crate::tax::TaxPart { amount: crate::fx::to_base(p.amount, rate)?, ..p });
     }
     let taxes = crate::tax::by_account(conn, parts, false).await?;
     for (_, t) in &taxes {
@@ -484,7 +490,7 @@ pub async fn post_in(tx: &mut Tx, id: &str) -> AppResult<Bill> {
         },
     )
     .await?;
-    // D38: stock bought comes in at the line's cost without tax, in the home currency.
+    // D38: stock bought comes in at the line's cost without recoverable tax (D79), in the home currency.
     for (l, net) in bill.lines.iter().zip(&figures.nets) {
         if let Some(item_id) = &l.item_id {
             crate::stock::receive(tx, item_id, l.quantity, *net, &bill.date, &bill.id, &entry.id).await?;

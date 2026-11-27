@@ -106,7 +106,7 @@ export default function BankTransactions() {
     return act(line, 'transfer', { accountId: line.hint.accountId }, 'Transfer recorded.');
   };
   const canHint = (line: Line) =>
-    !!line.hint && (line.hint.action === 'EXPENSE' ? hasPermission('expenses') && line.amount < 0 && !currency : hasPermission('ledger') && !currency);
+    !!line.hint && (line.hint.action === 'EXPENSE' ? hasPermission('expenses') && line.amount < 0 && !currency : hasPermission('ledger:post') && !currency);
 
   const loading = loadedFor !== `${accountId}|${status}`;
   const fmt = (v: number) => moneyIn(v, currency);
@@ -221,7 +221,7 @@ export default function BankTransactions() {
                         ...(l.amount > 0 && hasPermission('payments') ? [{ label: 'Payment for an invoice…', onSelect: () => setPaying(l) }] : []),
                         ...(l.amount < 0 && hasPermission('payments') ? [{ label: 'Payment for a bill…', onSelect: () => setPaying(l) }] : []),
                         ...(l.amount < 0 && !currency && hasPermission('expenses') ? [{ label: 'Record as an expense…', onSelect: () => setExpensing(l) }] : []),
-                        ...(!currency && hasPermission('ledger') ? [{ label: l.amount < 0 ? 'Transfer to another account…' : 'Transfer from another account…', onSelect: () => setTransferring(l) }] : []),
+                        ...(!currency && hasPermission('ledger:post') ? [{ label: l.amount < 0 ? 'Transfer to another account…' : 'Transfer from another account…', onSelect: () => setTransferring(l) }] : []),
                         { label: 'Ignore', onSelect: () => act(l, 'ignore', undefined, 'Ignored. Find it under Ignored if you need it back.') },
                       ]} />
                     )}
