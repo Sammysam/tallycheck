@@ -7,6 +7,8 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-11-27
+
 ### Fixed (from a US CPA's review)
 - US sales tax paid to vendors is part of the cost: it is no longer posted to a tax receivable or
   subtracted on the tax return. Each tax code says whether purchase tax can be claimed back (D79).
@@ -167,7 +169,8 @@ taxes for any country, foreign currencies, Sri Lankan and US payroll, products a
 bank reconciliation, imports, Shopify / WooCommerce / PayPal / Stripe connectors, the Claude
 (MCP) connector, encrypted backups, LAN mode, in-app updates and the Microsoft Store package.
 
-[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/Sammysam/tallycheck/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/Sammysam/tallycheck/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/Sammysam/tallycheck/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Sammysam/tallycheck/compare/v1.0.0...v1.1.0

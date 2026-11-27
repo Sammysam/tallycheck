@@ -3,6 +3,13 @@
 // points at the top with every release (the same points as the release notes).
 
 export const WHATS_NEW: Record<string, string[]> = {
+  '1.1.3': [
+    'US sales tax you pay to vendors is now part of the cost, and the tax return owes only the sales tax you collected. Each tax code says whether purchase tax can be claimed back (VAT / GST).',
+    'The Viewer role is read-only: posting, reversing and reconciling need the new "Post to the ledger" right.',
+    'Trial balance with net balances and an "as of" date; balance sheet with profit inside total equity; empty accounts hidden unless you ask.',
+    'Cash flow counts balances brought in from your old system as opening cash; Quick start numbers equipment, stock and loans by kind.',
+    'New bills are due in 30 days; account lists offer only the accounts that fit; questions now open in TallyCheck\'s own window.',
+  ],
   '1.1.2': [
     'TallyCheck from the Microsoft Store now checks the Store for updates when an administrator opens it, and shows "Update to …" at the bottom of the window. Without internet it says nothing.',
     'The version number is at the bottom right; click it to see what is new.',
