@@ -7,6 +7,8 @@ import Table from '../components/Table';
 import Dialog from '../components/desktop/Dialog';
 import { CURRENCIES } from '../lib/countries';
 import { useAuth } from '../contexts/AuthContext';
+import { askConfirm } from '../lib/confirm';
+import { toast } from '../lib/toast';
 import { region, todayIso } from '../lib/region';
 
 interface Account { id: string; code: string; name: string; type: string; subtype: string | null; currency?: string | null }
@@ -24,7 +26,10 @@ const subtypeLabel = (s: string) => s.replace(/_/g, ' ').replace(/^./, (c) => c.
 const EMPTY = { code: '', name: '', type: 'ASSET', subtype: '', currency: '' };
 
 export default function Accounts() {
-  const canPost = useAuth().hasPermission('ledger:post');
+  const { hasPermission } = useAuth();
+  const canPost = hasPermission('ledger:post');
+  // N2: without the Accounts right the chart is read-only.
+  const canEdit = hasPermission('accounts');
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -50,7 +55,7 @@ export default function Accounts() {
   };
   const close = () => { setShowForm(false); setEditing(null); setError(''); };
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
-  useCommand('new', openNew);
+  useCommand('new', () => { if (canEdit) openNew(); });
   useCommand('close', close);
 
   const submit = async (e: FormEvent) => {
@@ -69,12 +74,12 @@ export default function Accounts() {
   };
 
   const remove = async (row: Account) => {
-    if (!window.confirm(`Delete account "${row.code} – ${row.name}"? This cannot be undone.`)) return;
+    if (!(await askConfirm(`Delete account "${row.code} – ${row.name}"? This cannot be undone.`))) return;
     try {
       await api.delete(`/accounts/${row.id}`);
       load();
     } catch (err) {
-      alert(errMsg(err, 'Failed to delete account'));
+      toast(errMsg(err, 'Failed to delete account'));
     }
   };
 
@@ -99,7 +104,7 @@ export default function Accounts() {
     <div>
       <PageHeader
         title="Chart of Accounts"
-        action={<button onClick={() => (showForm ? close() : openNew())} className="btn btn-primary">+ New Account</button>}
+        action={canEdit && <button onClick={() => (showForm ? close() : openNew())} className="btn btn-primary">+ New Account</button>}
       />
 
       {showForm && (
@@ -142,15 +147,15 @@ export default function Accounts() {
           { header: 'Code',     accessor: 'code' },
           { header: 'Name',     accessor: (r) => <button className="btn-link" onClick={() => navigate(`/ledger/account/${r.id}`)}>{r.name}</button> },
           { header: 'Type',     accessor: 'type' },
-          { header: 'Subtype',  accessor: (r) => r.subtype ?? '—' },
+          { header: 'Kind',     accessor: (r) => (r.subtype ? subtypeLabel(r.subtype) : '—') },
           { header: 'Currency', accessor: (r) => r.currency ?? home },
           { header: '', accessor: (r) => (
             <span className="flex gap-3">
-              <button onClick={() => openEdit(r)} className="btn-link text-xs">Edit</button>
+              {canEdit && <button onClick={() => openEdit(r)} className="btn-link text-xs">Edit</button>}
               {r.currency && canPost && (
                 <button onClick={() => { setRevaluing(r); setRevalMsg(''); setReval({ date: todayIso(), rate: '' }); }} className="btn-link text-xs">Revalue</button>
               )}
-              <button onClick={() => remove(r)} className="btn-link text-xs" style={{ color: '#dc2626' }}>Delete</button>
+              {canEdit && <button onClick={() => remove(r)} className="btn-link text-xs" style={{ color: '#dc2626' }}>Delete</button>}
             </span>
           )},
         ]}

@@ -7,7 +7,7 @@
 export interface PickAccount { id: string; code: string; name: string; type: string; isActive?: boolean; subtype?: string | null }
 
 /** Accounts payroll posts to by itself (salaries, payroll taxes and what is withheld). */
-export const PAYROLL = /withh|payroll|income tax|social security|medicare|futa|suta|unemployment|epf|etf|paye|stamp duty|401|section 125|disability|paid leave|local income|salar|wage|staff loan/i;
+export const PAYROLL = /withh|payroll|income tax|social security|medicare|futa|suta|unemployment|epf|etf|paye|stamp duty|401|section 125|disability|paid leave|local income|salar|wage|staff loan|staff deduction/i;
 export const isPayroll = (a: PickAccount) => PAYROLL.test(a.name);
 
 /** Cash, bank and receivable accounts (codes below 1200, or named so). */
@@ -17,8 +17,12 @@ const isMoneyOrReceivable = (a: PickAccount) =>
 /** What a bill line or a product's purchases usually go to: expenses, never payroll. */
 export const isSpending = (a: PickAccount) => a.type === 'EXPENSE' && !isPayroll(a);
 
-/** What a bill may be owed on: liabilities other than payroll's own. */
-export const isPayable = (a: PickAccount) => a.type === 'LIABILITY' && !isPayroll(a);
+/** N6: loans and other long-term debts (by subtype, or named so). */
+export const isLongTerm = (a: PickAccount) =>
+  /long_term|non_current|noncurrent|loan/i.test(a.subtype ?? '') || /\bloan\b|mortgage|note payable/i.test(a.name);
+
+/** What a bill may be owed on: payables and cards, not payroll's own accounts or loans. */
+export const isPayable = (a: PickAccount) => a.type === 'LIABILITY' && !isPayroll(a) && !isLongTerm(a);
 
 /** Assets a purchase may go to (equipment, prepaid, stock), not money or receivables. */
 export const isPurchasedAsset = (a: PickAccount) => a.type === 'ASSET' && !isMoneyOrReceivable(a);

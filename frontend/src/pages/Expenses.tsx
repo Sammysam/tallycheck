@@ -6,9 +6,10 @@ import Table from '../components/Table';
 import StatusBadge from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import { money } from '../lib/money';
-import { region } from '../lib/region';
+import { todayIso, region } from '../lib/region';
 import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
 import { isMoney } from '../lib/accountChoices';
+import { toast } from '../lib/toast';
 import TxnLink from '../components/TxnLink';
 
 interface Expense { id: string; expenseNumber: string; date: string; description: string; amount: number; status: string }
@@ -25,7 +26,7 @@ export default function Expenses() {
   // Ctrl+N / Esc and the toolbar, via the desktop shell.
   useCommand('new', () => setShowForm(true));
   useCommand('close', () => setShowForm(false));
-  const [form, setForm] = useState({ date: '', description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '', taxCodeId: region().defaultPurchaseTax });
+  const [form, setForm] = useState({ date: todayIso(), description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '', taxCodeId: region().defaultPurchaseTax });
   const taxCodes = useTaxCodes();
   const chosenTax = taxCodes.find((c) => c.id === form.taxCodeId);
   const [error, setError] = useState('');
@@ -49,7 +50,7 @@ export default function Expenses() {
     try {
       await api.post('/expenses', { ...form, amount: Number(form.amount), taxCodeId: form.taxCodeId || undefined });
       setShowForm(false);
-      setForm({ date: '', description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '', taxCodeId: region().defaultPurchaseTax });
+      setForm({ date: todayIso(), description: '', amount: '', expenseAccountId: '', paymentAccountId: '', receiptUrl: '', taxCodeId: region().defaultPurchaseTax });
       load(1); setPage(1);
     } catch (err: any) {
       setError(err?.response?.data?.message ?? 'Failed to save expense');
@@ -58,7 +59,7 @@ export default function Expenses() {
 
   const action = async (id: string, ep: string) => {
     try { await api.post(`/expenses/${id}/${ep}`); load(); }
-    catch (err: any) { alert(err?.response?.data?.message ?? 'Action failed'); }
+    catch (err: any) { toast(err?.response?.data?.message ?? 'Action failed'); }
   };
 
   const fmt = (v: number) => money(Number(v));
@@ -74,29 +75,37 @@ export default function Expenses() {
           <h3 className="text-sm font-semibold text-gray-700 mb-3">New Expense</h3>
           <form onSubmit={submit} className="space-y-3">
             <div className="form-grid" style={{ gridTemplateColumns: '1fr 2fr 1fr' }}>
-              <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-              <input required placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-              <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+              <label className="block"><span className="text-xs font-medium text-gray-500">Date</span>
+                <input required type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} aria-label="Date" /></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">What was it for?</span>
+                <input required placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Amount paid{taxCodes.length ? ' (including any tax)' : ''}</span>
+                <input required type="number" min="0.01" step="0.01" placeholder="Amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
             </div>
             <div className="form-grid" style={{ gridTemplateColumns: taxCodes.length ? '1fr 1fr 1fr' : '1fr 1fr' }}>
-              <select required value={form.expenseAccountId} onChange={(e) => setForm({ ...form, expenseAccountId: e.target.value })}>
-                <option value="">Expense Account</option>
-                {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-              </select>
-              <select required value={form.paymentAccountId} onChange={(e) => setForm({ ...form, paymentAccountId: e.target.value })}>
-                <option value="">Paid From (Bank / Cash)</option>
-                {assetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
-              </select>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Expense account</span>
+                <select required value={form.expenseAccountId} onChange={(e) => setForm({ ...form, expenseAccountId: e.target.value })}>
+                  <option value="">Expense Account</option>
+                  {expenseAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                </select></label>
+              <label className="block"><span className="text-xs font-medium text-gray-500">Paid from</span>
+                <select required value={form.paymentAccountId} onChange={(e) => setForm({ ...form, paymentAccountId: e.target.value })}>
+                  <option value="">Paid From (Bank / Cash)</option>
+                  {assetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} – {a.name}</option>)}
+                </select></label>
               {taxCodes.length > 0 && (
-                <select value={form.taxCodeId} onChange={(e) => setForm({ ...form, taxCodeId: e.target.value })} aria-label="Tax">
-                  <option value="">No tax</option>
-                  {lineCodes(taxCodes).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <label className="block"><span className="text-xs font-medium text-gray-500">Tax</span>
+                  <select value={form.taxCodeId} onChange={(e) => setForm({ ...form, taxCodeId: e.target.value })} aria-label="Tax">
+                    <option value="">No tax</option>
+                    {lineCodes(taxCodes).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select></label>
               )}
             </div>
             {chosenTax && Number(form.amount) > 0 && (
               <p className="text-xs text-gray-600">
-                The amount includes {chosenTax.name}: {fmt(taxInGross(Number(form.amount), chosenTax))} tax, reclaimable.
+                {/* N1: US sales tax paid is part of the cost (D79); VAT / GST is claimed back. */}
+                The amount includes {chosenTax.name}: {fmt(taxInGross(Number(form.amount), chosenTax))} tax,{' '}
+                {chosenTax.purchaseTaxRecoverable === false ? 'which stays in the cost of this expense.' : 'claimed back through the tax account.'}
               </p>
             )}
             <input placeholder="Receipt URL (optional)" value={form.receiptUrl} onChange={(e) => setForm({ ...form, receiptUrl: e.target.value })} />

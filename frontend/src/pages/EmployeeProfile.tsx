@@ -12,6 +12,8 @@ import UsTaxSection from '../components/UsTaxSection';
 import { usePayrollCountry } from '../lib/usPayroll';
 import { useAuth } from '../contexts/AuthContext';
 import { region } from '../lib/region';
+import { askConfirm } from '../lib/confirm';
+import { toast } from '../lib/toast';
 import {
   CATEGORY_LABEL,
   EMPLOYMENT_TYPE_LABEL,
@@ -125,12 +127,12 @@ export default function EmployeeProfile() {
     const warning = docs
       ? `Delete ${profile.name} and all ${docs} stored document${docs === 1 ? '' : 's'}? This cannot be undone.`
       : `Delete ${profile.name}? This cannot be undone.`;
-    if (!window.confirm(warning)) return;
+    if (!(await askConfirm(warning))) return;
     try {
       await api.delete(`/employees/${id}`);
       navigate('/employees');
     } catch (err) {
-      alert(errMsg(err, 'Failed to delete employee'));
+      toast(errMsg(err, 'Failed to delete employee'));
     }
   };
 
@@ -155,7 +157,7 @@ export default function EmployeeProfile() {
   };
 
   const removePhoto = async () => {
-    if (!window.confirm('Remove the profile photo?')) return;
+    if (!(await askConfirm('Remove the profile photo?'))) return;
     setPhotoBusy(true);
     try {
       await api.delete(`/employees/${id}/photo`);
@@ -221,23 +223,23 @@ export default function EmployeeProfile() {
   };
 
   const removeDoc = async (doc: EmployeeDocument) => {
-    if (!window.confirm(`Delete "${doc.title}" (${doc.originalName})? The file will be removed from storage.`)) return;
+    if (!(await askConfirm(`Delete "${doc.title}" (${doc.originalName})? The file will be removed from storage.`))) return;
     try {
       await api.delete(`/employees/${id}/documents/${doc.id}`);
       await load();
     } catch (err) {
-      alert(errMsg(err, 'Failed to delete document'));
+      toast(errMsg(err, 'Failed to delete document'));
     }
   };
 
   const viewDoc = (doc: EmployeeDocument) =>
     fetchFile(`/employees/${id}/documents/${doc.id}/download?inline=1`, doc.originalName, 'open').catch((err) =>
-      alert(errMsg(err, 'Could not open the file')),
+      toast(errMsg(err, 'Could not open the file')),
     );
 
   const downloadDoc = (doc: EmployeeDocument) =>
     fetchFile(`/employees/${id}/documents/${doc.id}/download`, doc.originalName, 'save').catch((err) =>
-      alert(errMsg(err, 'Could not download the file')),
+      toast(errMsg(err, 'Could not download the file')),
     );
 
   // ─── Render ───────────────────────────────────────────────────────────────

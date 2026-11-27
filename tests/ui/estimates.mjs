@@ -210,7 +210,7 @@ try {
   });
 
   await check('turns it into a draft invoice', async () => {
-    await evaluate('window.confirm = () => true; true');
+    await evaluate('window.confirm = () => true; window.__tcAutoConfirm = true; true');
     await rowAction('EST-0001', 'Turn into invoice');
     await waitFor(`document.body.innerText.includes('is now draft invoice')`, 'converted toast');
     const inv = (await api('GET', '/invoices')).body.data[0];

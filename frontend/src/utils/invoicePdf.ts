@@ -4,6 +4,7 @@ import html2canvas from 'html2canvas';
 import { amountInWords } from './amountInWords';
 import { amount } from '../lib/money';
 import { company, region } from '../lib/region';
+import { toast } from '../lib/toast';
 import { taxCodeById } from '../lib/taxes';
 
 // The letterhead, remittance details and footer come from Settings → Company (D25): the app
@@ -251,7 +252,7 @@ function openInvoiceWindow(
 
   const win = target ?? window.open('', '_blank');
   if (!win) {
-    alert('Please allow pop-ups for this site to open the invoice.');
+    toast('Please allow pop-ups for this site to open the invoice.');
     return;
   }
 

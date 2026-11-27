@@ -215,7 +215,7 @@ try {
   });
 
   await check('stop keeps the invoices it made', async () => {
-    await evaluate('window.confirm = () => true; true');
+    await evaluate('window.confirm = () => true; window.__tcAutoConfirm = true; true');
     await rowAction('Lanka Rentals', 'Stop');
     await waitFor(`document.body.innerText.includes('stopped')`, 'stopped toast');
     const list = (await api('GET', '/recurring-invoices')).body;

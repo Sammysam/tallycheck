@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
+import { askConfirm } from '../lib/confirm';
 import { LEAVE_CHOICES, US_STATES, usd, type LeaveOption, type LeaveProgram, type UnemploymentDefault, type UsStateRegistration, type UsStatesOverview } from '../lib/usPayroll';
 
 /**
@@ -89,7 +90,7 @@ export default function UsStateRegistrations({ accounts }: { accounts: LedgerAcc
   };
 
   const remove = async (state: string) => {
-    if (!window.confirm(`Remove the ${state} registration? Employees working mainly in ${state} then use the company-wide unemployment settings.`)) return;
+    if (!(await askConfirm(`Remove the ${state} registration? Employees working mainly in ${state} then use the company-wide unemployment settings.`))) return;
     try {
       await api.delete(`/payroll/us/states/${state}`);
       await load();

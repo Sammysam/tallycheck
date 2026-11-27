@@ -259,13 +259,16 @@ pub async fn update_settings(db: &Db, p: UsSettingsPatch) -> AppResult<Value> {
     Ok(out)
 }
 
-/// D72: the Sri Lankan payroll accounts the baseline seeds on every install (code, name).
+/// D72: the Sri Lankan payroll accounts the baseline seeds on every install (code, name). N8: the
+/// staff loan and staff deduction accounts the Sri Lankan payroll uses as well.
 const LK_PAYROLL_ACCOUNTS: &[(&str, &str)] = &[
+    ("1300", "Staff Loans & Advances"),
     ("2210", "EPF Payable"),
     ("2220", "ETF Payable"),
     ("2230", "PAYE Payable"),
     ("2240", "Stamp Duty Payable"),
     ("2250", "Staff Welfare Fund"),
+    ("2260", "Staff Deductions Payable"),
     ("6110", "EPF & ETF Employer Contributions"),
     ("6120", "Staff Welfare Expense"),
 ];

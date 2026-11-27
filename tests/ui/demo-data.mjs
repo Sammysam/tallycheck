@@ -99,7 +99,7 @@ const HELPERS = `
     window.__set(sel, o.value);
   };
   window.__q = (s, n = 0) => { const el = document.querySelectorAll(s)[n]; if (!el) throw new Error('nothing matches ' + s + ' [' + n + ']'); return el; };
-  window.confirm = () => true; window.alert = (m) => { window.__alerts = [...(window.__alerts || []), String(m)]; };
+  window.confirm = () => true; window.__tcAutoConfirm = true; window.alert = (m) => { window.__alerts = [...(window.__alerts || []), String(m)]; };
   true;`;
 async function go(path) {
   await send('Page.navigate', { url: BASE + path });

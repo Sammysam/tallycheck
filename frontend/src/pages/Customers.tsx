@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader';
 import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
 import { toast } from '../lib/toast';
+import { askConfirm } from '../lib/confirm';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Customer { id: string; name: string; email: string; phone: string; address: string }
@@ -40,12 +41,12 @@ export default function Customers() {
   };
 
   const remove = async (row: Customer) => {
-    if (!window.confirm(`Delete customer "${row.name}"? This cannot be undone.`)) return;
+    if (!(await askConfirm(`Delete customer "${row.name}"? This cannot be undone.`))) return;
     try {
       await api.delete(`/customers/${row.id}`);
       load();
     } catch (err: any) {
-      alert(err?.response?.data?.message ?? 'Failed to delete customer');
+      toast(err?.response?.data?.message ?? 'Failed to delete customer');
     }
   };
 

@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
 import { region, regionFromSettings, setRegion } from '../lib/region';
+import { isLongTerm } from '../lib/accountChoices';
 import type { TaxCode, TaxKind } from '../lib/taxes';
 
 /**
@@ -15,7 +16,7 @@ import type { TaxCode, TaxKind } from '../lib/taxes';
  * - Withholding: tax a payer holds back from a payment for the tax office.
  */
 
-interface Account { id: string; code: string; name: string; type: string; isActive: boolean }
+interface Account { id: string; code: string; name: string; type: string; isActive: boolean; subtype?: string | null }
 interface Part { taxCodeId: string; isCompound: boolean }
 
 /** D75: payroll and income-tax accounts are never offered as a sales / purchase tax account guess. */
@@ -172,9 +173,11 @@ export default function Taxes() {
 
   const lineCodes = codes.filter((c) => c.isActive && c.kind !== 'WITHHOLDING');
   // D76: payroll accounts, money and receivables are never offered for tax (the chosen one is kept).
+  // N6: never Accounts Payable, a credit card, a loan or staff deductions either.
   const fits = (a: Account, chosen: string) => a.id === chosen
     || ((form.kind === 'WITHHOLDING' ? isWithholdingAccount(a) || !PAYROLL.test(a.name) : !PAYROLL.test(a.name))
-      && !(a.type === 'ASSET' && Number(a.code) < 1200));
+      && !(a.type === 'ASSET' && Number(a.code) < 1200)
+      && !(a.type === 'LIABILITY' && (a.code === '2000' || isLongTerm(a) || /card|staff deduction|accounts payable/i.test(a.name))));
   const [salesChoices, purchaseChoices] = choices(form.kind).map((list, n) =>
     list.filter((a) => fits(a, n === 0 ? form.salesAccountId : form.purchaseAccountId))) as [Account[], Account[]];
   const hasAccounts = form.kind === 'WITHHOLDING'
@@ -275,7 +278,9 @@ export default function Taxes() {
                   <p className="text-xs text-gray-600" style={{ gridColumn: '1 / -1' }}>
                     No {form.kind === 'WITHHOLDING' ? 'withholding tax' : us ? 'sales tax' : 'tax'} accounts in the chart yet.{' '}
                     <button type="button" className="btn-link" disabled={busy} onClick={createAccounts}>
-                      {form.kind === 'WITHHOLDING' ? 'Add Withholding Tax Receivable and Payable' : us ? 'Add Sales Tax Payable and Sales Tax Receivable' : 'Add Tax Payable and Tax Receivable'}
+                      {form.kind === 'WITHHOLDING' ? 'Add Withholding Tax Receivable and Payable'
+                        : !form.purchaseTaxRecoverable ? (us ? 'Add Sales Tax Payable' : 'Add Tax Payable')
+                          : us ? 'Add Sales Tax Payable and Sales Tax Receivable' : 'Add Tax Payable and Tax Receivable'}
                     </button>
                   </p>
                 )}

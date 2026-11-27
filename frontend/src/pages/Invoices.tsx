@@ -17,6 +17,7 @@ import RecurringScheduleForm from '../components/RecurringScheduleForm';
 import { nextAfter, type Schedule } from '../lib/recurring';
 import { toast } from '../lib/toast';
 import { fmtDate } from '../lib/region';
+import { askConfirm } from '../lib/confirm';
 import Dialog from '../components/desktop/Dialog';
 
 interface Invoice {
@@ -155,7 +156,7 @@ export default function Invoices() {
 
   /** Drafts only — the API refuses anything that has reached the ledger. */
   const remove = async (r: Invoice) => {
-    if (!window.confirm(`Delete draft ${r.invoiceNumber}? This cannot be undone.`)) return;
+    if (!(await askConfirm(`Delete draft ${r.invoiceNumber}? This cannot be undone.`))) return;
     try {
       await api.delete(`/invoices/${r.id}`);
       load();
@@ -191,7 +192,7 @@ export default function Invoices() {
       status === 'VOID'  ? `Void ${r.invoiceNumber}? Its ledger entry is reversed.`
       : status === 'DRAFT' ? `Return ${r.invoiceNumber} to draft? Its ledger entry is reversed so you can edit it.`
       : `Post ${r.invoiceNumber}? This writes it to the ledger.`;
-    if (!window.confirm(warn)) return;
+    if (!(await askConfirm(warn))) return;
     try {
       await api.patch(`/invoices/${r.id}/status`, { status });
       toast(status === 'POSTED' ? `${r.invoiceNumber} posted to the books` : status === 'VOID' ? `${r.invoiceNumber} voided` : `${r.invoiceNumber} is a draft again`);

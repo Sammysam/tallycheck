@@ -3,6 +3,7 @@ import api from '../api/client';
 import PageHeader from '../components/PageHeader';
 import { useCommand } from '../lib/commands';
 import Table from '../components/Table';
+import { askConfirm } from '../lib/confirm';
 import { toast } from '../lib/toast';
 
 interface Vendor { id: string; name: string; email: string; phone: string; address: string }
@@ -36,12 +37,12 @@ export default function Vendors() {
   };
 
   const remove = async (row: Vendor) => {
-    if (!window.confirm(`Delete vendor "${row.name}"? This cannot be undone.`)) return;
+    if (!(await askConfirm(`Delete vendor "${row.name}"? This cannot be undone.`))) return;
     try {
       await api.delete(`/vendors/${row.id}`);
       load();
     } catch (err: any) {
-      alert(err?.response?.data?.message ?? 'Failed to delete vendor');
+      toast(err?.response?.data?.message ?? 'Failed to delete vendor');
     }
   };
 

@@ -12,6 +12,8 @@ import {
   type SalaryForm,
   type SalaryRecord,
 } from '../lib/employees';
+import { askConfirm } from '../lib/confirm';
+import { toast } from '../lib/toast';
 import { region } from '../lib/region';
 
 const STATE_BADGE: Record<SalaryRecord['state'], { label: string; cls: string }> = {
@@ -90,12 +92,12 @@ export default function SalarySection({ employeeId, isContract }: { employeeId: 
   };
 
   const remove = async (s: SalaryRecord) => {
-    if (!window.confirm(`Delete the salary record effective ${formatDate(s.effectiveFrom)}?`)) return;
+    if (!(await askConfirm(`Delete the salary record effective ${formatDate(s.effectiveFrom)}?`))) return;
     try {
       await api.delete(`/payroll/employees/${employeeId}/salaries/${s.id}`);
       await load();
     } catch (err) {
-      alert(errMsg(err, 'Failed to delete salary record'));
+      toast(errMsg(err, 'Failed to delete salary record'));
     }
   };
 

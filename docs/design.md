@@ -1172,6 +1172,21 @@ recommendations without answering each one individually; revisit any of them on 
   unknown addresses such as /invoices/new open their list. Not built (features, not fixes):
   payroll year-to-date figures from before TallyCheck, 1099s, cash-basis reports, sales tax by
   jurisdiction, check / vendor invoice numbers, SSN and address on employees.
+- **D82 Follow-ups from the CPA re-test** (requested 2026-11-27). The expense form says whether
+  the tax stays in the cost (D79) or is claimed back. Every browser confirm() / alert() is replaced
+  by the app's own window (`lib/confirm.ts` `askConfirm`, shown by `ConfirmHost`; UI test scripts
+  answer it with `window.__tcAutoConfirm = true`) and corner messages. List screens open only for
+  the right they need (else the dashboard); transaction details link to a document's screen only
+  for that right; the chart of accounts is read-only without `accounts`; Import from File is listed
+  only for roles that can import. Account pickers leave out what does not belong: sales tax never
+  goes to Accounts Payable, a card, a loan or staff deductions; a bill is never owed on a loan; an AP
+  debit note credits expenses or purchased assets only; the cash flow lists bank and cash accounts
+  (others on request). Profit & Loss hides accounts with nothing on them unless asked, and the trial
+  balance's "no balance" option lists unused accounts too. A US company's untouched 1300 Staff Loans
+  & Advances and 2260 Staff Deductions Payable are switched off like the other Sri Lankan payroll
+  accounts (D72). The tax-account link names only what it adds; the chart shows account kinds in
+  words; the dashboard's year start and the expense form follow the company date style; the expense
+  form starts on today and labels its fields.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

@@ -60,7 +60,7 @@ export const navigation = [
       { label: 'Bank Reconciliation', to: '/reconcile', permission: 'ledger' },
       { label: 'Bank Transactions', to: '/bank-transactions', permission: 'banking' },
       // D37: open to anyone who may import at least one kind of record.
-      { label: 'Import from File', to: '/import', permission: ['banking', 'invoices', 'customers', 'vendors', 'ledger'] },
+      { label: 'Import from File', to: '/import', permission: ['banking', 'invoices', 'customers', 'vendors', 'ledger:post'] },
     ],
   },
   {
@@ -68,7 +68,7 @@ export const navigation = [
     label: 'Reports',
     icon: BarChart2,
     items: [
-      { label: 'Trial Balance', to: '/reports/trial-balance', permission: 'reports' },
+      { label: 'Trial Balance', to: '/reports/trial-balance', permission: 'ledger' },
       { label: 'Profit & Loss', to: '/reports/profit-loss',   permission: 'reports' },
       { label: 'Balance Sheet', to: '/reports/balance-sheet', permission: 'reports' },
       { label: 'Cash Flow',     to: '/reports/cash-flow',     permission: 'reports' },

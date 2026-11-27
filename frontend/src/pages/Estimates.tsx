@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { moneyIn } from '../lib/money';
 import { useTaxCodes } from '../lib/taxes';
 import { toast } from '../lib/toast';
+import { askConfirm } from '../lib/confirm';
 import { fmtDate } from '../lib/region';
 
 /**
@@ -129,7 +130,7 @@ export default function Estimates() {
   };
 
   const convert = async (r: Estimate) => {
-    if (!window.confirm(`Turn ${r.estimateNumber} into a draft invoice dated today? You can check it before posting.`)) return;
+    if (!(await askConfirm(`Turn ${r.estimateNumber} into a draft invoice dated today? You can check it before posting.`))) return;
     try {
       const { data } = await api.post(`/estimates/${r.id}/convert`);
       toast(`${r.estimateNumber} is now draft invoice ${data.invoice.invoiceNumber}`);
@@ -140,7 +141,7 @@ export default function Estimates() {
   };
 
   const remove = async (r: Estimate) => {
-    if (!window.confirm(`Delete ${r.estimateNumber}? This cannot be undone.`)) return;
+    if (!(await askConfirm(`Delete ${r.estimateNumber}? This cannot be undone.`))) return;
     try {
       await api.delete(`/estimates/${r.id}`);
       toast(`${r.estimateNumber} deleted`);

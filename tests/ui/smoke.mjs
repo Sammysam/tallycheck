@@ -390,7 +390,7 @@ try {
   });
 
   await check('Accounts page deletes an unused account', async () => {
-    await evaluate(`window.confirm = () => true`);
+    await evaluate(`window.confirm = () => true; window.__tcAutoConfirm = true`);
     await evaluate(`(() => {
       const row = [...document.querySelectorAll('tr')].find((tr) => tr.innerText.includes('Temporary'));
       [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Delete').click(); return true; })()`);
@@ -443,7 +443,7 @@ try {
 
   // ── W2 screens ───────────────────────────────────────────────────────────
   // Row actions report failures with alert() and ask with confirm(); both would block CDP.
-  const quietDialogs = () => evaluate(`window.confirm = () => true; window.__alerts = []; window.alert = (m) => window.__alerts.push(String(m)); true`);
+  const quietDialogs = () => evaluate(`window.confirm = () => true; window.__tcAutoConfirm = true; window.__alerts = []; window.alert = (m) => window.__alerts.push(String(m)); true`);
   /** Picks, in the nth <select> of the open form, the option whose text contains `text`. */
   const pick = (n, text) => evaluate(`(() => {
     const sel = document.querySelectorAll('form select')[${n}];

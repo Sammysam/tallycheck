@@ -72,8 +72,8 @@ export default function App() {
                   <Route path="/"                         element={<Dashboard />} />
                   <Route path="/recovery-key"             element={<RecoveryKey />} />
                   <Route path="/accounts"                 element={<Accounts />} />
-                  <Route path="/customers"                element={<Customers />} />
-                  <Route path="/vendors"                  element={<Vendors />} />
+                  <Route path="/customers"                element={<ProtectedRoute permission="customers"><Customers /></ProtectedRoute>} />
+                  <Route path="/vendors"                  element={<ProtectedRoute permission="vendors"><Vendors /></ProtectedRoute>} />
                   <Route path="/employees" element={
                     <ProtectedRoute permission="employees"><Employees /></ProtectedRoute>
                   } />
@@ -95,15 +95,15 @@ export default function App() {
                   <Route path="/payroll/:id" element={
                     <ProtectedRoute permission="payroll"><PayrollRun /></ProtectedRoute>
                   } />
-                  <Route path="/invoices"                 element={<Invoices />} />
+                  <Route path="/invoices"                 element={<ProtectedRoute permission="invoices"><Invoices /></ProtectedRoute>} />
                   <Route path="/recurring-invoices"       element={<ProtectedRoute permission="invoices"><RecurringInvoices /></ProtectedRoute>} />
                   <Route path="/estimates"                element={<ProtectedRoute permission="invoices"><Estimates /></ProtectedRoute>} />
-                  <Route path="/bills"                    element={<Bills />} />
-                  <Route path="/expenses"                 element={<Expenses />} />
-                  <Route path="/payments"                 element={<Payments />} />
-                  <Route path="/credit-notes"             element={<CreditNotes kind="AR" key="AR" />} />
-                  <Route path="/debit-notes"              element={<CreditNotes kind="AP" key="AP" />} />
-                  <Route path="/ledger"                   element={<Ledger />} />
+                  <Route path="/bills"                    element={<ProtectedRoute permission="bills"><Bills /></ProtectedRoute>} />
+                  <Route path="/expenses"                 element={<ProtectedRoute permission="expenses"><Expenses /></ProtectedRoute>} />
+                  <Route path="/payments"                 element={<ProtectedRoute permission="payments"><Payments /></ProtectedRoute>} />
+                  <Route path="/credit-notes"             element={<ProtectedRoute permission="invoices"><CreditNotes kind="AR" key="AR" /></ProtectedRoute>} />
+                  <Route path="/debit-notes"              element={<ProtectedRoute permission="bills"><CreditNotes kind="AP" key="AP" /></ProtectedRoute>} />
+                  <Route path="/ledger"                   element={<ProtectedRoute permission="ledger"><Ledger /></ProtectedRoute>} />
                   <Route path="/import"                   element={<ImportData />} />
                   <Route path="/move-books"               element={<MoveBooks />} />
                   <Route path="/items"                    element={<Items />} />
@@ -119,17 +119,17 @@ export default function App() {
                   <Route path="/customers/:id/statement" element={
                     <ProtectedRoute permission="invoices"><CustomerStatement /></ProtectedRoute>
                   } />
-                  <Route path="/reconcile"                element={<BankReconciliation />} />
-                  <Route path="/reports/trial-balance"    element={<TrialBalance />} />
-                  <Route path="/reports/profit-loss"      element={<ProfitLoss />} />
-                  <Route path="/reports/balance-sheet"    element={<BalanceSheet />} />
-                  <Route path="/reports/cash-flow"        element={<CashFlow />} />
-                  <Route path="/reports/tax"              element={<TaxReturn />} />
+                  <Route path="/reconcile"                element={<ProtectedRoute permission="ledger"><BankReconciliation /></ProtectedRoute>} />
+                  <Route path="/reports/trial-balance"    element={<ProtectedRoute permission="ledger"><TrialBalance /></ProtectedRoute>} />
+                  <Route path="/reports/profit-loss"      element={<ProtectedRoute permission="reports"><ProfitLoss /></ProtectedRoute>} />
+                  <Route path="/reports/balance-sheet"    element={<ProtectedRoute permission="reports"><BalanceSheet /></ProtectedRoute>} />
+                  <Route path="/reports/cash-flow"        element={<ProtectedRoute permission="reports"><CashFlow /></ProtectedRoute>} />
+                  <Route path="/reports/tax"              element={<ProtectedRoute permission="reports"><TaxReturn /></ProtectedRoute>} />
                   <Route path="/taxes" element={
                     <ProtectedRoute permission="settings"><Taxes /></ProtectedRoute>
                   } />
-                  <Route path="/reports/ar-aging"         element={<ArAging />} />
-                  <Route path="/reports/ap-aging"         element={<ApAging />} />
+                  <Route path="/reports/ar-aging"         element={<ProtectedRoute permission="reports"><ArAging /></ProtectedRoute>} />
+                  <Route path="/reports/ap-aging"         element={<ProtectedRoute permission="reports"><ApAging /></ProtectedRoute>} />
                   <Route path="/admin" element={
                     <ProtectedRoute permission="users"><AdminCentre /></ProtectedRoute>
                   } />
@@ -145,7 +145,7 @@ export default function App() {
                   <Route path="/settings" element={
                     <ProtectedRoute permission="settings"><Settings /></ProtectedRoute>
                   } />
-                  {/* C8: an address that is not a screen (e.g. /invoices/new) goes to its list, not a blank page. */}
+                  {/* N2: each screen above needs its own right (else the dashboard). C8: an address that is not a screen (e.g. /invoices/new) goes to its list, not a blank page. */}
                   <Route path="/:section/*" element={<SectionFallback />} />
                 </Routes>
               </Layout>

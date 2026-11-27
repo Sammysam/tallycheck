@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import { amt } from '../lib/payroll';
 import { fmtDate } from '../lib/region';
 import { isMoney } from '../lib/accountChoices';
+import { askConfirm } from '../lib/confirm';
 import { US_REMIT_LABEL, US_RUN_STATUS_HELP, usd, type UsLine, type UsRemitType, type UsRunDetail } from '../lib/usPayroll';
 
 interface Account { id: string; code: string; name: string; type: string }
@@ -141,18 +142,18 @@ export default function UsPayrollRun() {
             {isDraft && (
               <>
                 <button className="btn btn-primary" disabled={busy || run.lines.length === 0}
-                  onClick={() => window.confirm('Post this pay run to the ledger? Lines can no longer be edited afterwards.') && act(() => api.post(`/payroll/us/runs/${id}/post`), 'Could not post the run')}>
+                  onClick={async () => (await askConfirm('Post this pay run to the ledger? Lines can no longer be edited afterwards.')) && act(() => api.post(`/payroll/us/runs/${id}/post`), 'Could not post the run')}>
                   Post to ledger
                 </button>
                 <button className="btn btn-danger" disabled={busy}
-                  onClick={() => window.confirm('Delete this draft pay run?') && act(async () => { await api.delete(`/payroll/us/runs/${id}`); navigate('/payroll/us'); }, 'Could not delete the run')}>
+                  onClick={async () => (await askConfirm('Delete this draft pay run?')) && act(async () => { await api.delete(`/payroll/us/runs/${id}`); navigate('/payroll/us'); }, 'Could not delete the run')}>
                   Delete draft
                 </button>
               </>
             )}
             {live && (
               <button className="btn btn-danger" disabled={busy}
-                onClick={() => window.confirm('Void this pay run? Every ledger entry it made (posting, net pay, tax deposits) will be reversed.') && act(() => api.post(`/payroll/us/runs/${id}/void`), 'Could not void the run')}>
+                onClick={async () => (await askConfirm('Void this pay run? Every ledger entry it made (posting, net pay, tax deposits) will be reversed.')) && act(() => api.post(`/payroll/us/runs/${id}/void`), 'Could not void the run')}>
                 Void
               </button>
             )}
@@ -390,7 +391,7 @@ export default function UsPayrollRun() {
                     <>
                       <button className="btn-link text-xs" onClick={() => startEdit(l)}>Edit</button>
                       <button className="btn-link text-xs ml-2" style={{ color: '#dc2626' }}
-                        onClick={() => window.confirm(`Remove ${l.employeeName} from this run?`) && act(() => api.delete(`/payroll/us/runs/${id}/lines/${l.id}`), 'Could not remove the line')}>
+                        onClick={async () => (await askConfirm(`Remove ${l.employeeName} from this run?`)) && act(() => api.delete(`/payroll/us/runs/${id}/lines/${l.id}`), 'Could not remove the line')}>
                         Remove
                       </button>
                     </>

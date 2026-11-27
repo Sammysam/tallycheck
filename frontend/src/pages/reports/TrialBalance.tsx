@@ -18,6 +18,8 @@ export default function TrialBalance() {
   const [asOf, setAsOf] = useState(todayIso());
   const [ranAsOf, setRanAsOf] = useState(asOf);
   const [showZero, setShowZero] = useState(false);
+  // N7: "no balance" also lists accounts never used.
+  const [chart, setChart] = useState<Row['account'][]>([]);
 
   const fetchRows = (date: string) =>
     api.get('/ledger/trial-balance', { params: { asOf: date } })
@@ -27,12 +29,16 @@ export default function TrialBalance() {
     setLoading(true);
     fetchRows(date);
   };
-  useEffect(() => { fetchRows(todayIso()); }, []);
+  useEffect(() => {
+    fetchRows(todayIso());
+    api.get('/accounts').then((r) => setChart(r.data.filter((a: Row['account'] & { isActive?: boolean }) => a.isActive !== false))).catch(() => undefined);
+  }, []);
 
   const fmt = (v: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
   const cents = (v: number) => Math.round(Number(v) * 100);
   const net = rows.map((r) => ({ ...r, net: cents(r.debit) - cents(r.credit) }));
-  const shown = showZero ? net : net.filter((r) => r.net !== 0);
+  const unused = chart.filter((a) => !rows.some((r) => r.account.id === a.id)).map((account) => ({ account, debit: 0, credit: 0, balance: 0, net: 0 }));
+  const shown = showZero ? [...net, ...unused].sort((a, b) => a.account.code.localeCompare(b.account.code)) : net.filter((r) => r.net !== 0);
   const totalDebit = net.reduce((s, r) => s + (r.net > 0 ? r.net : 0), 0) / 100;
   const totalCredit = net.reduce((s, r) => s + (r.net < 0 ? -r.net : 0), 0) / 100;
 

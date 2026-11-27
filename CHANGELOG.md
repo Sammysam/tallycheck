@@ -20,6 +20,9 @@ All notable changes to TallyCheck. The format follows
   equity; empty accounts hidden unless asked (D81).
 - New bills are due in 30 days unless changed; US employee forms without Sri Lankan fields;
   "Paid from" lists only bank and cash accounts; smaller wording fixes (D81).
+- The expense form no longer calls US sales tax "reclaimable"; every browser pop-up is now the
+  app's own window; screens a role can't use are no longer offered; account lists and empty report
+  rows tidied; Sri Lankan staff loan accounts hidden for US companies (D82).
 
 ## [1.1.2] - 2026-11-27
 

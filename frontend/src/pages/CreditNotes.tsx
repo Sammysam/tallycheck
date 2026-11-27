@@ -7,6 +7,7 @@ import Dialog from '../components/desktop/Dialog';
 import { useCommand } from '../lib/commands';
 import { lineCodes, taxInGross, useTaxCodes } from '../lib/taxes';
 import { money, moneyIn } from '../lib/money';
+import { isPurchasedAsset, isSpending } from '../lib/accountChoices';
 import TxnLink from '../components/TxnLink';
 
 /**
@@ -145,7 +146,7 @@ export default function CreditNotes({ kind }: { kind: Kind }) {
     api.get('/accounts').then((r) =>
       setAccounts(
         r.data.filter((a: Account) =>
-          a.isActive && (kind === 'AR' ? a.type === 'REVENUE' : (a.type === 'EXPENSE' || a.type === 'ASSET')),
+          a.isActive && (kind === 'AR' ? a.type === 'REVENUE' : (isSpending(a) || isPurchasedAsset(a) || (a.type === 'EXPENSE' && /cost of|cogs/i.test(a.name)))),
         ),
       ),
     );

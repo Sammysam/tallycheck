@@ -19,6 +19,7 @@ import {
 import { acknowledgementPage, bankAdvicePage, epfFormPage, etfFormPage, renderPdf, slipPages } from '../utils/payrollPdf';
 import { region } from '../lib/region';
 import { isMoney } from '../lib/accountChoices';
+import { askConfirm } from '../lib/confirm';
 import { fmtDate } from '../lib/region';
 
 const EMPTY_COMPANY: CompanyDetails = {
@@ -118,7 +119,7 @@ export default function PayrollRun() {
     if (!run) return;
     const lines = run.lines.filter((l) => l.employeeId);
     if (!lines.length) return;
-    if (run.slipsFiledAt && !window.confirm('Slips were already filed for this run. File them again as new versions?')) return;
+    if (run.slipsFiledAt && !(await askConfirm('Slips were already filed for this run. File them again as new versions?'))) return;
     setFiling({ done: 0, total: lines.length, errors: [] });
     const errors: string[] = [];
     const month = periodLabel(run.period);
@@ -233,18 +234,18 @@ export default function PayrollRun() {
             {isDraft && (
               <>
                 <button className="btn btn-primary" disabled={busy || run.lines.length === 0}
-                  onClick={() => window.confirm(`Post ${periodLabel(run.period)} payroll to the ledger? Lines can no longer be edited afterwards.`) && act(() => api.post(`/payroll/runs/${id}/post`), 'Could not post the run')}>
+                  onClick={async () => (await askConfirm(`Post ${periodLabel(run.period)} payroll to the ledger? Lines can no longer be edited afterwards.`)) && act(() => api.post(`/payroll/runs/${id}/post`), 'Could not post the run')}>
                   Post to ledger
                 </button>
                 <button className="btn btn-danger" disabled={busy}
-                  onClick={() => window.confirm('Delete this draft run?') && act(async () => { await api.delete(`/payroll/runs/${id}`); navigate('/payroll'); }, 'Could not delete the run')}>
+                  onClick={async () => (await askConfirm('Delete this draft run?')) && act(async () => { await api.delete(`/payroll/runs/${id}`); navigate('/payroll'); }, 'Could not delete the run')}>
                   Delete draft
                 </button>
               </>
             )}
             {(run.status === 'POSTED' || run.status === 'PAID') && (
               <button className="btn btn-danger" disabled={busy}
-                onClick={() => window.confirm('Void this run? Every ledger entry it created (posting, salary payment, remittances) will be reversed and loan balances restored.') && act(() => api.post(`/payroll/runs/${id}/void`), 'Could not void the run')}>
+                onClick={async () => (await askConfirm('Void this run? Every ledger entry it created (posting, salary payment, remittances) will be reversed and loan balances restored.')) && act(() => api.post(`/payroll/runs/${id}/void`), 'Could not void the run')}>
                 Void
               </button>
             )}
@@ -485,7 +486,7 @@ export default function PayrollRun() {
                     <>
                       <button className="btn-link text-xs" onClick={() => startEdit(l)}>Edit</button>
                       <button className="btn-link text-xs ml-2" style={{ color: '#dc2626' }}
-                        onClick={() => window.confirm(`Remove ${l.employeeName} from this run?`) && act(() => api.delete(`/payroll/runs/${id}/lines/${l.id}`), 'Could not remove the line')}>
+                        onClick={async () => (await askConfirm(`Remove ${l.employeeName} from this run?`)) && act(() => api.delete(`/payroll/runs/${id}/lines/${l.id}`), 'Could not remove the line')}>
                         Remove
                       </button>
                     </>

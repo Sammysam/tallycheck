@@ -14,7 +14,7 @@ import api from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import PageHeader from '../components/PageHeader';
 import GettingStarted from '../components/GettingStarted';
-import { fiscalYearStart, region } from '../lib/region';
+import { fiscalYearStart, fmtDate, region } from '../lib/region';
 import { compactAmount, money } from '../lib/money';
 
 type Icon = ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
@@ -144,7 +144,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" subtitle={`Financial year from ${yearStart}. Press F5 to refresh.`} />
+      <PageHeader title="Dashboard" subtitle={`Financial year from ${fmtDate(yearStart)}. Press F5 to refresh.`} />
       {backupNotice}
       {/* D73: the administrator's checklist; others see the short first-steps list. */}
       {user?.role === 'Admin' && <GettingStarted />}

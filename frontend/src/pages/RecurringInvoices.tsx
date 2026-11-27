@@ -9,6 +9,7 @@ import RecurringScheduleForm from '../components/RecurringScheduleForm';
 import { repeatsLabel, type Schedule } from '../lib/recurring';
 import { moneyIn } from '../lib/money';
 import { fmtDate } from '../lib/region';
+import { askConfirm } from '../lib/confirm';
 import { toast } from '../lib/toast';
 
 /**
@@ -54,7 +55,7 @@ export default function RecurringInvoices() {
   };
 
   const stop = async (r: Recurring) => {
-    if (!window.confirm(`Stop "${r.name}"? No more invoices will be made. The ${r.invoicesMade} invoice(s) it made stay as they are.`)) return;
+    if (!(await askConfirm(`Stop "${r.name}"? No more invoices will be made. The ${r.invoicesMade} invoice(s) it made stay as they are.`))) return;
     try {
       await api.delete(`/recurring-invoices/${r.id}`);
       toast(`${r.name} stopped`);

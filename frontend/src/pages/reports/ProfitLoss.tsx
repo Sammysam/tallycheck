@@ -31,6 +31,8 @@ export default function ProfitLoss() {
   // The dates the figures on screen were run for; account links drill into the same range.
   const [ran, setRan] = useState<Range>({ dateFrom: yearStart, dateTo: today });
   const [ranBefore, setRanBefore] = useState<Range | null>(null);
+  // N7: as on the balance sheet and trial balance, accounts with nothing on them only on request.
+  const [showZero, setShowZero] = useState(false);
 
   const load = () => {
     const range = { dateFrom, dateTo };
@@ -50,8 +52,9 @@ export default function ProfitLoss() {
 
   const head = (r: Range) => `${fmtDate(r.dateFrom)} – ${fmtDate(r.dateTo)}`;
   const compareHeader = before && ranBefore ? head(ranBefore) : undefined;
+  const keep = (lines: AccountLine[] | undefined) => (showZero ? lines ?? [] : (lines ?? []).filter((l) => Number(l.balance) !== 0));
   const cmp = (lines: AccountLine[] | undefined, total: number | undefined) =>
-    before ? { lines: lines ?? [], total: total ?? 0 } : undefined;
+    before ? { lines: keep(lines), total: total ?? 0 } : undefined;
 
   return (
     <div>
@@ -60,6 +63,10 @@ export default function ProfitLoss() {
         subtitle={data ? `${head(ran)} · click an account to see its entries` : undefined}
         action={
           <div className="flex gap-2 items-center">
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 mr-2">
+              <input type="checkbox" checked={showZero} onChange={(e) => setShowZero(e.target.checked)} />
+              Show accounts with no balance
+            </label>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="!w-40" aria-label="From" />
             <span className="text-gray-500 text-sm">to</span>
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="!w-40" aria-label="To" />
@@ -75,11 +82,11 @@ export default function ProfitLoss() {
       {data && (
         <div className={`${compareHeader ? 'max-w-5xl' : 'max-w-3xl'} space-y-3`}>
           <ReportTable title="Revenue" amountHeader={compareHeader ? head(ran) : 'Amount'} compareHeader={compareHeader}
-            rows={sectionRows('Revenue', data.revenue, data.totalRevenue, ran, cmp(before?.revenue, before?.totalRevenue))} />
+            rows={sectionRows('Revenue', keep(data.revenue), data.totalRevenue, ran, cmp(before?.revenue, before?.totalRevenue))} />
           <ReportTable title="Cost of Goods Sold" amountHeader={compareHeader ? head(ran) : 'Amount'} compareHeader={compareHeader}
-            rows={sectionRows('Cost of Goods Sold', data.cogs, data.totalCogs, ran, cmp(before?.cogs, before?.totalCogs))} />
+            rows={sectionRows('Cost of Goods Sold', keep(data.cogs), data.totalCogs, ran, cmp(before?.cogs, before?.totalCogs))} />
           <ReportTable title="Operating Expenses" amountHeader={compareHeader ? head(ran) : 'Amount'} compareHeader={compareHeader}
-            rows={sectionRows('Operating Expenses', data.operatingExpenses, data.totalOperatingExpenses, ran,
+            rows={sectionRows('Operating Expenses', keep(data.operatingExpenses), data.totalOperatingExpenses, ran,
               cmp(before?.operatingExpenses, before?.totalOperatingExpenses))} />
           <ReportTable
             title="Summary"

@@ -4153,6 +4153,37 @@ async fn us_pay_runs_post_pay_deposit_and_void() -> TestResult {
     Ok(())
 }
 
+/// D72 / N8: a US company does not see the untouched Sri Lankan payroll accounts, the staff loan
+/// and staff deduction accounts included; they come back with Sri Lankan payroll.
+#[tokio::test]
+async fn us_payroll_switches_off_the_sri_lankan_accounts() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    app.call(Method::POST, "/api/accounts/seed", Some(&admin), None).await?;
+    use_usd(&app, &admin).await?;
+    let active = |code: &'static str| {
+        let (app, admin) = (&app, &admin);
+        async move {
+            let r = app.call(Method::GET, "/api/accounts", Some(admin), None).await?;
+            // The list holds active accounts only: a switched-off account is not in it.
+            let listed = r.body.as_array().ok_or("accounts")?.iter().any(|a| a["code"] == code);
+            Ok::<Value, Box<dyn std::error::Error>>(json!(listed))
+        }
+    };
+    let settings = "/api/payroll/us/settings";
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(json!({"country": "US", "state": "TX"}))).await?;
+    assert!(r.status.is_success(), "{}", r.body);
+    for code in ["1300", "2210", "2260", "6110"] {
+        assert_eq!(active(code).await?, json!(false), "{code} is switched off for a US company");
+    }
+    let r = app.call(Method::PATCH, settings, Some(&admin), Some(json!({"country": "LK"}))).await?;
+    assert!(r.status.is_success(), "{}", r.body);
+    for code in ["1300", "2260"] {
+        assert_eq!(active(code).await?, json!(true), "{code} is back for Sri Lankan payroll");
+    }
+    Ok(())
+}
+
 /// D43 option (b): a code US payroll would use that is already some other account is never
 /// used quietly; the company chooses the account, and posting follows the choice.
 #[tokio::test]

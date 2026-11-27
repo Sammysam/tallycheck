@@ -3,6 +3,7 @@ import api, { errMsg } from '../../api/client';
 import PageHeader from '../../components/PageHeader';
 import { AccountLink, ReportTable, type ReportRow } from '../../components/ReportTable';
 import type { AccountRef } from '../../lib/reportRows';
+import { isMoney } from '../../lib/accountChoices';
 import { fiscalYearStart, fmtDate, todayIso } from '../../lib/region';
 
 /**
@@ -26,6 +27,7 @@ interface CashFlowData {
 }
 
 export default function CashFlow() {
+  const [allAssets, setAllAssets] = useState(false);
   const today = todayIso();
   const yearStart = fiscalYearStart();
   const [dateFrom, setDateFrom] = useState(yearStart);
@@ -82,12 +84,15 @@ export default function CashFlow() {
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-sm">
         <span className="text-xs font-semibold text-gray-600">Cash and bank accounts:</span>
-        {assets.map((a) => (
+        {assets.filter((a) => allAssets || isMoney(a) || cash.has(a.id)).map((a) => (
           <label key={a.id} className="flex items-center gap-1.5">
             <input type="checkbox" checked={cash.has(a.id)} onChange={() => toggle(a.id)} />
             {a.code} {a.name}
           </label>
         ))}
+        <button type="button" className="btn-link text-xs" onClick={() => setAllAssets(!allAssets)}>
+          {allAssets ? 'Show only bank and cash' : 'Show other asset accounts'}
+        </button>
       </div>
 
       {data && (

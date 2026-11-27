@@ -32,6 +32,7 @@ import { exportScreen } from '../lib/exportCsv';
 import { companyIsSetUp, region, SETUP_LATER, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
 import api from '../api/client';
 import ToastHost from './ToastHost';
+import ConfirmHost from './ConfirmHost';
 import { keyLabel } from '../lib/platform';
 
 declare const __APP_VERSION__: string;
@@ -257,7 +258,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     'separator',
     { label: 'Print…', shortcut: 'Ctrl+P', onSelect: () => window.print() },
     { label: 'Export to Excel (CSV)…', shortcut: 'Ctrl+E', onSelect: exportTables },
-    ...(['banking', 'invoices', 'customers', 'vendors', 'ledger'].some((p) => hasPermission(p))
+    // N5: only roles that can import something see Import from File (opening balances need ledger:post).
+    ...(['banking', 'invoices', 'customers', 'vendors', 'ledger:post'].some((p) => hasPermission(p))
       ? [{ label: 'Import from file…', onSelect: go('/import') }]
       : []),
     'separator',
@@ -464,6 +466,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         </Dialog>
       )}
       <ToastHost />
+      <ConfirmHost />
     </div>
   );
 }

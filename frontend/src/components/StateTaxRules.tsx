@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
+import { askConfirm } from '../lib/confirm';
 import { US_STATES, usd, type StateTaxRule } from '../lib/usPayroll';
 
 type Draft = {
@@ -125,7 +126,7 @@ export default function StateTaxRules() {
     const msg = r?.builtInAvailable
       ? `Delete your own ${state} rule? The built-in ${state} rule from the state's 2026 guide is used again.`
       : `Delete the ${state} income tax rule? Pay runs for employees in ${state} can't be posted until it is added again.`;
-    if (!window.confirm(msg)) return;
+    if (!(await askConfirm(msg))) return;
     try {
       await api.delete(`/payroll/us/state-taxes/${state}`);
       await load();

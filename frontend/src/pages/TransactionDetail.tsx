@@ -155,7 +155,17 @@ function DocSummary({ entry, doc }: { entry: Entry; doc: Doc }) {
 }
 
 export default function TransactionDetail() {
-  const canPost = useAuth().hasPermission('ledger:post');
+  const { hasPermission } = useAuth();
+  const canPost = hasPermission('ledger:post');
+  // N2: the document's screen is offered only to someone with the right to open it.
+  const canOpen = (path: string) => {
+    const need: Record<string, string> = {
+      '/invoices': 'invoices', '/bills': 'bills', '/expenses': 'expenses', '/payments': 'payments',
+      '/credit-notes': 'invoices', '/debit-notes': 'bills', '/payroll': 'payroll', '/items': 'ledger',
+    };
+    const key = Object.keys(need).find((k) => path === k || path.startsWith(`${k}/`));
+    return !key || hasPermission(need[key]);
+  };
   const { id } = useParams();
   const navigate = useNavigate();
   const [entry, setEntry] = useState<Entry | null>(null);
@@ -220,7 +230,7 @@ export default function TransactionDetail() {
               {entry.reversalOfId && (
                 <Link className="btn-link text-xs" to={`/ledger/entries/${entry.reversalOfId}`}>Reverses an earlier entry →</Link>
               )}
-              {kind && <Link className="btn-link text-xs ml-auto no-print" to={payrollRun ? `/payroll/${payrollRun}` : usPayrollRun ? `/payroll/us/${usPayrollRun}` : kind.list}>Open {kind.label.toLowerCase()} screen →</Link>}
+              {kind && canOpen(payrollRun || usPayrollRun ? '/payroll' : kind.list) && <Link className="btn-link text-xs ml-auto no-print" to={payrollRun ? `/payroll/${payrollRun}` : usPayrollRun ? `/payroll/us/${usPayrollRun}` : kind.list}>Open {kind.label.toLowerCase()} screen →</Link>}
             </div>
             {doc ? <><DocSummary entry={entry} doc={doc} /><DocLines doc={doc} /></>
               : <p className="text-sm text-gray-500">{entry.sourceType ? 'Posted by the screen above.' : 'Entered by hand on the Ledger screen.'}</p>}

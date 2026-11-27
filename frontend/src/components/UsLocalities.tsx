@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { errMsg } from '../api/client';
+import { askConfirm } from '../lib/confirm';
 import { US_STATES, usd, type Locality } from '../lib/usPayroll';
 
 /**
@@ -99,7 +100,7 @@ export default function UsLocalities({ accounts }: { accounts: LedgerAccount[] }
   };
 
   const remove = async (code: string) => {
-    if (!window.confirm(`Remove the ${code} local tax?`)) return;
+    if (!(await askConfirm(`Remove the ${code} local tax?`))) return;
     try {
       await api.delete(`/payroll/us/localities/${encodeURIComponent(code)}`);
       await load();
