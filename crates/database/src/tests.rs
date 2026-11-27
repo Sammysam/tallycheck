@@ -90,6 +90,8 @@ const APPROVED_EXTRA_TABLES: &[&str] = &[
     "conversions",
     "conversion_items",
     "us_localities",
+    // D83: payroll paid before TallyCheck.
+    "us_payroll_prior",
 ]; // D21, D22, D26, D27, D37, D38, D41, D42, D43, D49, D52, D59, D69
 
 async fn sqlite_columns(db: &Db, table: &str) -> AppResult<Vec<(String, bool)>> {

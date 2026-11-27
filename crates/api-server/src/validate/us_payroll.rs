@@ -763,3 +763,69 @@ pub fn state_rule(body: Map<String, Value>) -> Result<(StateRule, Option<String>
     }
     Ok((rule, opt_string(&m, "notes")))
 }
+
+/// D83 figure names of a row of payroll before TallyCheck (`gross` is required).
+const PRIOR_AMOUNTS: &[&str] = &[
+    "gross",
+    "pretax401k",
+    "pretaxSection125",
+    "incomeTaxWages",
+    "federalIncomeTax",
+    "socialSecurityWages",
+    "socialSecurityEmployee",
+    "socialSecurityEmployer",
+    "medicareWages",
+    "medicareEmployee",
+    "medicareEmployer",
+    "additionalMedicareWages",
+    "additionalMedicare",
+    "futaWages",
+    "futa",
+    "sutaWages",
+    "suta",
+    "stateIncomeTaxWages",
+    "stateIncomeTax",
+];
+
+/// D83: one row of payroll before TallyCheck. Figures left out are worked out by the server.
+pub fn prior(body: Map<String, Value>) -> Result<payroll::us_prior::PriorInput, AppError> {
+    let mut v = Validator::new(body);
+    to_number(&mut v, PRIOR_AMOUNTS);
+    trim_or_null(&mut v, &["notes"]);
+    v.field("employeeId", false, &[Rule::IsUuid])
+        .field("payDate", false, &[Rule::IsDateFormat])
+        .field("workState", true, &[Rule::IsString, Rule::MaxLength(2)])
+        .field("sutaState", true, &[Rule::IsString, Rule::MaxLength(2)])
+        .field("notes", true, &[Rule::IsString, Rule::MaxLength(500)]);
+    for k in PRIOR_AMOUNTS {
+        v.field(k, *k != "gross", AMOUNT);
+    }
+    let m = v.finish()?;
+    let mo = |k: &str| money(&m, k);
+    Ok(payroll::us_prior::PriorInput {
+        employee_id: opt_string(&m, "employeeId").unwrap_or_default(),
+        pay_date: opt_string(&m, "payDate").unwrap_or_default(),
+        work_state: opt_string(&m, "workState"),
+        suta_state: opt_string(&m, "sutaState"),
+        gross: mo("gross")?.unwrap_or(Money::ZERO),
+        pretax_401k: mo("pretax401k")?,
+        pretax_125: mo("pretaxSection125")?,
+        income_tax_wages: mo("incomeTaxWages")?,
+        federal_income_tax: mo("federalIncomeTax")?,
+        ss_wages: mo("socialSecurityWages")?,
+        ss_employee: mo("socialSecurityEmployee")?,
+        ss_employer: mo("socialSecurityEmployer")?,
+        medicare_wages: mo("medicareWages")?,
+        medicare_employee: mo("medicareEmployee")?,
+        medicare_employer: mo("medicareEmployer")?,
+        additional_medicare_wages: mo("additionalMedicareWages")?,
+        additional_medicare: mo("additionalMedicare")?,
+        futa_wages: mo("futaWages")?,
+        futa: mo("futa")?,
+        suta_wages: mo("sutaWages")?,
+        suta: mo("suta")?,
+        state_wages: mo("stateIncomeTaxWages")?,
+        state_tax: mo("stateIncomeTax")?,
+        notes: m.get("notes").and_then(Value::as_str).map(str::to_string),
+    })
+}

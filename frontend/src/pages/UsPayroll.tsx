@@ -6,6 +6,7 @@ import Table from '../components/Table';
 import StateTaxRules from '../components/StateTaxRules';
 import UsStateRegistrations from '../components/UsStateRegistrations';
 import UsLocalities from '../components/UsLocalities';
+import UsPriorPayroll from '../components/UsPriorPayroll';
 import StatusBadge from '../components/StatusBadge';
 import { fmtDate } from '../lib/region';
 import { PAY_FREQUENCY_LABEL, US_STATES, usd, type PayFrequency, type UsRun, type UsSettings } from '../lib/usPayroll';
@@ -275,6 +276,7 @@ export default function UsPayroll() {
           { header: '', accessor: (r) => <button onClick={() => navigate(`/payroll/us/${r.id}`)} className="btn-link text-xs">Open</button> },
         ]}
       />
+      {isUs && <div className="mt-5"><UsPriorPayroll /></div>}
     </div>
   );
 }

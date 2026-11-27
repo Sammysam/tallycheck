@@ -292,6 +292,14 @@ pub fn summarize(method: &str, path: &str) -> String {
         }
         .into();
     }
+    // US pay runs say what was done (the Sri Lankan runs keep the reference's own wording).
+    if resource == "payroll" && at(1) == Some("us") && at(2) == Some("runs") {
+        match last {
+            "post" => return "Posted a US pay run to the ledger".into(),
+            "void" => return "Voided a US pay run".into(),
+            _ => {}
+        }
+    }
     match last {
         "post" => return format!("Posted {} {noun}", article(noun)),
         "void" => return format!("Voided {} {noun}", article(noun)),
@@ -382,6 +390,29 @@ pub fn summarize(method: &str, path: &str) -> String {
             (Some("states"), _) => return "Saved a US state registration".into(),
             (Some("reciprocity"), "DELETE") => return "Removed a state reciprocity agreement".into(),
             (Some("reciprocity"), _) => return "Added a state reciprocity agreement".into(),
+            // D83: payroll paid before TallyCheck.
+            (Some("prior"), "DELETE") => return "Removed payroll from before TallyCheck".into(),
+            (Some("prior"), "PUT") => return "Changed payroll from before TallyCheck".into(),
+            (Some("prior"), _) => return "Entered payroll from before TallyCheck".into(),
+            // US pay runs: what was done, instead of the generic "Created a payroll".
+            (Some("runs"), _) => {
+                return match (last, method) {
+                    ("post", _) => "Posted a US pay run to the ledger",
+                    ("pay", _) => "Paid a US pay run",
+                    ("remit", _) => "Recorded a US payroll tax payment",
+                    ("void", _) => "Voided a US pay run",
+                    (_, _) if at(4) == Some("lines") => match method {
+                        "POST" => "Added an employee to a US pay run",
+                        "DELETE" => "Removed an employee from a US pay run",
+                        _ => "Edited an employee's US pay run line",
+                    },
+                    (_, "POST") => "Created a US pay run",
+                    (_, "DELETE") => "Deleted a draft US pay run",
+                    _ => "Updated a US pay run",
+                }
+                .into();
+            }
+            (Some("settings"), _) => return "Changed the US payroll settings".into(),
             _ => {}
         }
     }

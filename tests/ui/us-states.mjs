@@ -282,6 +282,24 @@ try {
     if (!t.includes('Employees on the payroll for the pay period including the 12th')) throw new Error('12th counts missing');
     await shot('06-state-forms');
   });
+
+  await check('payroll before TallyCheck: a row entered through the form (D83)', async () => {
+    await go('/payroll/us');
+    await waitFor(`document.body.innerText.includes('Payroll before TallyCheck')`, 'prior section');
+    await clickText('+ Enter payroll paid before TallyCheck');
+    await waitFor(`!!document.querySelector('select[aria-label="Employee"]')?.options[1]`, 'employee list');
+    await evaluate(`(() => { const s = document.querySelector('select[aria-label="Employee"]');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, s.options[1].value);
+      s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await evaluate(`(() => { const i = document.querySelector('input[aria-label="Pay date"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '2026-01-31');
+      i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await type('input[aria-label="Gross pay"]', '1000');
+    await type('input[aria-label="Federal income tax withheld"]', '80');
+    await clickText('Save');
+    await waitFor(`[...document.querySelectorAll('[aria-label="Payroll before TallyCheck"] tr')].some((tr) => tr.innerText.includes('$1,000.00') && tr.innerText.includes('$80.00'))`, 'prior row');
+    await shot('07-prior-payroll');
+  });
 } catch (e) {
   failures.push('harness');
   results.push(`FAIL  harness: ${e.message}`);

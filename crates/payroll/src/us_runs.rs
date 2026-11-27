@@ -846,9 +846,9 @@ async fn write_line(conn: &mut SqliteConnection, l: &Line) -> AppResult<()> {
     Ok(())
 }
 
-/// Wages on the employee's other posted / paid runs paid in `year`. Unemployment wages count
-/// only from runs whose unemployment went to the same state (`suta_state`; None = all, as
-/// before D63): each state has its own wage base.
+/// Wages on the employee's other posted / paid runs paid in `year`, plus (D83) payroll paid
+/// before TallyCheck that year. Unemployment wages count only from runs whose unemployment went
+/// to the same state (`suta_state`; None = all, as before D63): each state has its own wage base.
 async fn year_to_date(
     conn: &mut SqliteConnection,
     employee_id: &str,
@@ -872,11 +872,12 @@ async fn year_to_date(
     .bind(suta_state)
     .fetch_one(&mut *conn)
     .await?;
+    let prior = crate::us_prior::wages_in_year(conn, employee_id, year, suta_state, None).await?;
     Ok(YearToDate {
-        social_security_wages: Money::from_cents(row.0),
-        medicare_wages: Money::from_cents(row.1),
-        futa_wages: Money::from_cents(row.2),
-        suta_wages: Money::from_cents(row.3),
+        social_security_wages: Money::from_cents(row.0 + prior.0),
+        medicare_wages: Money::from_cents(row.1 + prior.1),
+        futa_wages: Money::from_cents(row.2 + prior.2),
+        suta_wages: Money::from_cents(row.3 + prior.3),
     })
 }
 

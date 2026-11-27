@@ -7,6 +7,15 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+### Added
+- US payroll paid before TallyCheck: for a company that starts part-way through the year, enter
+  what each employee was already paid (US payroll → Payroll before TallyCheck). It counts towards
+  the social security, FUTA and state unemployment limits and is included in Forms 941, 940 and
+  W-2, without touching the ledger (D83).
+
+### Changed
+- The activity log names US pay run actions (posted, paid, tax payment recorded, voided) (D83).
+
 ## [1.1.3] - 2026-11-27
 
 ### Fixed (from a US CPA's review)

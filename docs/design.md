@@ -1187,6 +1187,25 @@ recommendations without answering each one individually; revisit any of them on 
   accounts (D72). The tax-account link names only what it adds; the chart shows account kinds in
   words; the dashboard's year start and the expense form follow the company date style; the expense
   form starts on today and labels its fields.
+- **D83 US payroll paid before TallyCheck** (requested 2026-11-27, item M5 of the US CPA review).
+  Table `us_payroll_prior` (`payroll::us_prior`): one row per employee and pay date (or a month's
+  or quarter's total) with the previous provider's figures — gross, 401(k), section 125, federal
+  income tax wages and tax, social security and Medicare wages and both shares, Additional
+  Medicare wages and tax, FUTA wages and tax, state unemployment state, wages and tax, state
+  income tax wages and tax. Figures left out are worked out: taxable wages from the gross, social
+  security, FUTA and state unemployment wages capped by what the year's earlier rows already used
+  (2026 bases), the employer's FICA equal to the employee's, the states from the employee. Nothing
+  is posted to the ledger (the opening balances hold that money). The rows count towards every
+  later pay run's year-to-date wages (`us_runs::year_to_date`), so the social security, FUTA, state
+  unemployment and Additional Medicare limits are right, and they are paid lines of Forms 941,
+  940, W-2 and the state forms (not pay runs), their taxes counted as deposited by the previous
+  provider. A row must be dated before the employee's first posted TallyCheck pay run that year
+  and not in the future. Routes (`payroll`): `GET|POST /payroll/us/prior`, `PUT|DELETE
+  /payroll/us/prior/{id}`. Screen: US payroll → Payroll before TallyCheck. The activity log now
+  names US pay run actions ("Posted a US pay run to the ledger", "Recorded a US payroll tax
+  payment", …) and these rows. Not covered: prior state disability / paid leave and local tax
+  contributions (their yearly caps count TallyCheck runs only), the FUTA credit reduction on prior
+  wages, and Form 941 line 1 for prior pay periods.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

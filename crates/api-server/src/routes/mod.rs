@@ -155,6 +155,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/payroll/us/runs/{id}/pay", post(us::run_pay))
         .route("/payroll/us/runs/{id}/remit", post(us::run_remit))
         .route("/payroll/us/runs/{id}/void", post(us::run_void))
+        .route("/payroll/us/prior", get(us::prior_list).post(us::prior_create))
+        .route("/payroll/us/prior/{id}", put(us::prior_update).delete(us::prior_delete))
         .route("/payroll/us/reports/941", get(us::report_941))
         .route("/payroll/us/reports/940", get(us::report_940))
         .route("/payroll/us/reports/w2", get(us::report_w2))

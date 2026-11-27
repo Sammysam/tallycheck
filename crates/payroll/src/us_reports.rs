@@ -96,11 +96,16 @@ struct Paid {
     suta_surcharge_rate: Option<i64>,
     leave: Vec<crate::us_leave::Contribution>,
     local: Vec<crate::us_leave::Contribution>,
+    /// D83: payroll before TallyCheck gives its Additional Medicare wages itself.
+    additional_wages_given: Option<i64>,
 }
 
 impl Paid {
     /// Wages in this pay over the $200,000 Additional Medicare withholding threshold.
     fn additional_wages(&self) -> i64 {
+        if let Some(given) = self.additional_wages_given {
+            return given;
+        }
         let paid = self.ytd_medicare.max(0);
         (paid + self.medicare_wages - ADDITIONAL_MEDICARE_THRESHOLD.max(paid)).clamp(0, self.medicare_wages)
     }
@@ -135,6 +140,7 @@ async fn paid_lines(conn: &mut SqliteConnection, from: &str, to: &str) -> AppRes
     .bind(to)
     .fetch_all(&mut *conn)
     .await?;
+    let prior = crate::us_prior::between(conn, from, to).await?;
     rows.iter()
         .map(|r| {
             let c = |k: &str| r.try_get::<i64, _>(k);
@@ -191,7 +197,60 @@ async fn paid_lines(conn: &mut SqliteConnection, from: &str, to: &str) -> AppRes
                 suta_surcharge_rate: r.try_get("sutaSurchargeRate")?,
                 leave: contributions(&r.try_get::<String, _>("leave")?),
                 local: contributions(&r.try_get::<String, _>("local")?),
+                additional_wages_given: None,
             })
+        })
+        .collect::<AppResult<Vec<Paid>>>()
+        .map(|mut v| {
+            // D83: payroll before TallyCheck joins the lines; a stable sort keeps each day's order.
+            v.extend(prior_lines(&prior));
+            v.sort_by(|a, b| a.pay_date.cmp(&b.pay_date));
+            v
+        })
+}
+
+/// D83: payroll before TallyCheck as paid lines, so every form includes it.
+fn prior_lines(rows: &[crate::us_prior::Prior]) -> Vec<Paid> {
+    rows.iter()
+        .map(|p| {
+            let a = &p.a;
+            Paid {
+                run_id: format!("prior:{}", p.id),
+                pay_date: p.pay_date.clone(),
+                reduction: 0,
+                employee_id: Some(p.employee_id.clone()),
+                code: p.employee_code.clone(),
+                name: p.employee_name.clone(),
+                state: p.work_state.clone(),
+                gross: a.gross,
+                pretax_401k: a.pretax_401k,
+                pretax_125: a.pretax_125,
+                income_tax_wages: a.income_tax_wages,
+                fit: a.federal_income_tax,
+                ss_wages: a.ss_wages,
+                ss_ee: a.ss_employee,
+                ss_er: a.ss_employer,
+                medicare_wages: a.medicare_wages,
+                ytd_medicare: 0,
+                medicare_ee: a.medicare_employee,
+                additional: a.additional_medicare,
+                medicare_er: a.medicare_employer,
+                futa_wages: a.futa_wages,
+                futa: a.futa,
+                state_wages: a.state_wages,
+                state_tax: a.state_tax,
+                states: vec![(p.work_state.clone(), a.state_wages, a.state_tax)],
+                period_start: p.pay_date.clone(),
+                period_end: p.pay_date.clone(),
+                suta_state: p.suta_state.clone(),
+                suta_wages: a.suta_wages,
+                suta: a.suta,
+                suta_rate: None,
+                suta_surcharge_rate: None,
+                leave: Vec::new(),
+                local: Vec::new(),
+                additional_wages_given: Some(a.additional_medicare_wages),
+            }
         })
         .collect()
 }
@@ -216,7 +275,9 @@ async fn deposits(conn: &mut SqliteConnection, from: &str, to: &str, types: &[&s
     .bind(&types)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(total)
+    // D83: what the previous provider deposited for payroll before TallyCheck.
+    let types: Vec<&str> = serde_json::from_str(&types).unwrap_or_default();
+    Ok(total + crate::us_prior::deposited(conn, from, to, &types).await?)
 }
 
 fn check_year(year: i32) -> AppResult<()> {
@@ -288,7 +349,8 @@ pub async fn form_941(db: &Db, year: i32, quarter: u32) -> AppResult<Value> {
     for p in &lines {
         *months.entry(p.pay_date[..7].to_string()).or_insert(0) += p.liability_941();
     }
-    let runs: std::collections::BTreeSet<&str> = lines.iter().map(|p| p.run_id.as_str()).collect();
+    let runs: std::collections::BTreeSet<&str> =
+        lines.iter().map(|p| p.run_id.as_str()).filter(|r| !r.starts_with("prior:")).collect();
 
     Ok(json!({
         "year": year,
@@ -496,7 +558,7 @@ async fn deposits_for(conn: &mut SqliteConnection, from: &str, to: &str, kind: &
     .bind(key)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(total)
+    Ok(total + crate::us_prior::deposited_for(conn, from, to, kind, key).await?)
 }
 
 fn check_state(state: &str) -> AppResult<String> {

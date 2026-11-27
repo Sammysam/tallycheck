@@ -324,3 +324,49 @@ pub async fn state_tax_delete(
     us_state::delete_rule(&s.db, &state).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// D83: `GET /payroll/us/prior?year` — payroll paid before TallyCheck in a year.
+pub async fn prior_list(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Query(q): Query<HashMap<String, String>>,
+) -> AppResult<Json<Value>> {
+    let year = match q.get("year").map(|y| y.trim()).filter(|y| !y.is_empty()) {
+        Some(y) => y.parse::<i32>().map_err(|_| app_core::AppError::bad_request("year must be a number"))?,
+        None => app_core::time::today_local().format("%Y").to_string().parse().unwrap_or(2026),
+    };
+    Ok(Json(payroll::us_prior::list_json(&s.db, year).await?))
+}
+
+/// D83: `POST /payroll/us/prior` (201).
+pub async fn prior_create(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    body: JsonBody,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let input = dto::prior(body.object())?;
+    Ok((StatusCode::CREATED, Json(payroll::us_prior::create(&s.db, input).await?)))
+}
+
+/// D83: `PUT /payroll/us/prior/:id` (the whole row; figures left out are worked out again).
+pub async fn prior_update(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Path(id): Path<String>,
+    body: JsonBody,
+) -> AppResult<Json<Value>> {
+    parse_uuid(&id)?;
+    let input = dto::prior(body.object())?;
+    Ok(Json(payroll::us_prior::update(&s.db, &id, input).await?))
+}
+
+/// D83: `DELETE /payroll/us/prior/:id` (204).
+pub async fn prior_delete(
+    State(s): State<AppState>,
+    _a: Authorized<perm::Payroll>,
+    Path(id): Path<String>,
+) -> AppResult<StatusCode> {
+    parse_uuid(&id)?;
+    payroll::us_prior::delete(&s.db, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}

@@ -3935,6 +3935,135 @@ async fn us_employee(
     Ok(id)
 }
 
+/// D83: payroll paid before TallyCheck. Texas (no state income tax), biweekly, SUTA $9,000 base.
+/// A US-201, salary $52,000 → gross 2,000.00, federal 156.15 (as in the run test below).
+/// Before TallyCheck: 2026-09-25 gross 183,500 (FIT 30,000; SS 11,377.00; Medicare 2,660.75),
+/// 2026-10-16 gross 500 (FIT 50; SS 31.00; Medicare 7.25). Worked out by the server: SS wages
+/// 183,500 then 500 (base 184,500), FUTA wages 7,000 then 0, SUTA wages 9,000 then 0.
+/// The pay run on 2026-11-06: SS wages only 500 left → SS 31.00 each; FUTA and SUTA 0;
+/// Medicare 29.00 (YTD Medicare wages 186,000 < 200,000, no Additional Medicare).
+/// W-2: box 1 186,000; box 2 30,206.15; box 3 184,500; box 4 11,439.00; box 5 186,000; box 6 2,697.00.
+/// 941 Q4: line 2 2,500; line 3 206.15; 5a 1,000 → 124.00; 5c 2,500 → 72.50; line 6 402.65 =
+/// liability (prior 126.50 + run 276.15), line 7 0; line 13 126.50 (deposited by the old provider).
+/// 940: line 3 186,000; line 5 179,000; line 7 7,000; line 8 42.00.
+#[tokio::test]
+async fn us_payroll_before_tallycheck_counts_towards_limits_and_forms() -> TestResult {
+    let app = App::new().await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    us_company(&app, &admin, json!({})).await?;
+    let a = us_employee(
+        &app,
+        &admin,
+        "US-201",
+        json!({}),
+        json!({"workState": "TX", "payType": "SALARY", "annualSalary": 52000}),
+    )
+    .await?;
+    let prior = "/api/payroll/us/prior";
+
+    let future = json!({"employeeId": a, "payDate": "2099-01-01", "gross": 100});
+    let r = app.call(Method::POST, prior, Some(&admin), Some(future)).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r =
+        app.call(Method::POST, prior, Some(&admin), Some(json!({"employeeId": a, "payDate": "2026-09-25"}))).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "gross is required");
+
+    let q3 = json!({"employeeId": a, "payDate": "2026-09-25", "gross": 183500, "federalIncomeTax": 30000,
+        "socialSecurityEmployee": 11377, "medicareEmployee": 2660.75, "notes": "Old provider Jan-Sep"});
+    let r = app.call(Method::POST, prior, Some(&admin), Some(q3)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(
+        (r.body["workState"].clone(), r.body["sutaState"].clone(), r.body["socialSecurityWages"].clone()),
+        (json!("TX"), json!("TX"), json!(183500))
+    );
+    assert_eq!((r.body["futaWages"].clone(), r.body["sutaWages"].clone()), (json!(7000), json!(9000)));
+    assert_eq!(
+        (r.body["socialSecurityEmployer"].clone(), r.body["medicareEmployer"].clone()),
+        (json!(11377), json!(2660.75))
+    );
+    let oct = json!({"employeeId": a, "payDate": "2026-10-16", "gross": 500, "federalIncomeTax": 50,
+        "socialSecurityEmployee": 31, "medicareEmployee": 7.25});
+    let r = app.call(Method::POST, prior, Some(&admin), Some(oct)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(
+        (r.body["socialSecurityWages"].clone(), r.body["futaWages"].clone(), r.body["sutaWages"].clone()),
+        (json!(500), json!(0), json!(0))
+    );
+    let oct_id = id_of(&r.body);
+    let listed = app.call(Method::GET, &format!("{prior}?year=2026"), Some(&admin), None).await?;
+    assert_eq!(listed.body["rows"].as_array().map(Vec::len), Some(2));
+    assert_eq!(listed.body["totals"]["gross"], json!(184000));
+
+    // The pay run counts the limits already used.
+    let period = json!({"periodStart": "2026-10-19", "periodEnd": "2026-11-01", "payDate": "2026-11-06"});
+    let r = app.call(Method::POST, "/api/payroll/us/runs", Some(&admin), Some(period)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let line = us_line(&r.body, "US-201");
+    assert_eq!(
+        (line["gross"].clone(), line["federalIncomeTax"].clone(), line["socialSecurityWages"].clone()),
+        (json!(2000), json!(156.15), json!(500))
+    );
+    assert_eq!(
+        (line["socialSecurityEmployee"].clone(), line["medicareEmployee"].clone(), line["additionalMedicare"].clone()),
+        (json!(31), json!(29), json!(0))
+    );
+    assert_eq!((line["futa"].clone(), line["suta"].clone()), (json!(0), json!(0)));
+    let run_url = format!("/api/payroll/us/runs/{}", id_of(&r.body));
+    let posted = app.call(Method::POST, &format!("{run_url}/post"), Some(&admin), None).await?;
+    assert!(posted.status.is_success(), "{}", posted.body);
+
+    // Nothing can be dated on or after the employee's first TallyCheck pay run.
+    let late = json!({"employeeId": a, "payDate": "2026-11-06", "gross": 10});
+    let r = app.call(Method::POST, prior, Some(&admin), Some(late)).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        r.body["message"],
+        json!(
+            "Payroll before TallyCheck must be dated before this employee's first pay run in TallyCheck (2026-11-06)"
+        )
+    );
+
+    let w2 = app.call(Method::GET, "/api/payroll/us/reports/w2?year=2026", Some(&admin), None).await?;
+    let e = &w2.body["employees"][0];
+    assert_eq!(
+        (
+            e["box1"].clone(),
+            e["box2"].clone(),
+            e["box3"].clone(),
+            e["box4"].clone(),
+            e["box5"].clone(),
+            e["box6"].clone()
+        ),
+        (json!(186000), json!(30206.15), json!(184500), json!(11439), json!(186000), json!(2697))
+    );
+    let f941 = app.call(Method::GET, "/api/payroll/us/reports/941?year=2026&quarter=4", Some(&admin), None).await?;
+    let b = &f941.body;
+    assert_eq!((b["line2"].clone(), b["line3"].clone()), (json!(2500), json!(206.15)));
+    assert_eq!((b["line5a"]["wages"].clone(), b["line5a"]["tax"].clone()), (json!(1000), json!(124)));
+    assert_eq!((b["line5c"]["wages"].clone(), b["line5c"]["tax"].clone()), (json!(2500), json!(72.5)));
+    assert_eq!((b["line6"].clone(), b["line7"].clone(), b["line13"].clone()), (json!(402.65), json!(0), json!(126.5)));
+    assert_eq!(b["payRuns"], json!(1), "payroll before TallyCheck is not a pay run");
+    let f940 = app.call(Method::GET, "/api/payroll/us/reports/940?year=2026", Some(&admin), None).await?;
+    assert_eq!(
+        (
+            f940.body["line3"].clone(),
+            f940.body["line5"].clone(),
+            f940.body["line7"].clone(),
+            f940.body["line8"].clone()
+        ),
+        (json!(186000), json!(179000), json!(7000), json!(42))
+    );
+
+    // Removing a row; the activity log says what happened.
+    let r = app.call(Method::DELETE, &format!("{prior}/{oct_id}"), Some(&admin), None).await?;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let log = app.call(Method::GET, "/api/audit-logs?limit=50", Some(&admin), None).await?;
+    let text = log.body.to_string();
+    assert!(text.contains("Entered payroll from before TallyCheck"), "{text}");
+    assert!(text.contains("Posted a US pay run to the ledger"), "{text}");
+    Ok(())
+}
+
 /// D43 US pay runs (ported from the web edition's `tests/api/us-payroll-runs.test.ts`).
 /// Texas, biweekly, SUTA 2.7% on the first $9,000. Pay date 2026-11-06.
 ///   A US-101 salary $52,000, single → gross 2,000.00; federal 156.15; net 1,690.85
