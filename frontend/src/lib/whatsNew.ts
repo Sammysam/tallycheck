@@ -3,6 +3,12 @@
 // points at the top with every release (the same points as the release notes).
 
 export const WHATS_NEW: Record<string, string[]> = {
+  '1.1.4': [
+    'Sign in with your email. The first-run screen and New user ask for an email; usernames still work, and administrators can add an email to existing users (Users → ⋮ → Add email).',
+    'US payroll: enter what employees were already paid this year before TallyCheck (US payroll → Payroll before TallyCheck). It counts towards the wage limits and Forms 941, 940 and W-2.',
+    '"Save as file" on the recovery key screen now saves the key into your Downloads folder and says so.',
+    'The activity log now says exactly what was done with each US pay run.',
+  ],
   '1.1.3': [
     'US sales tax you pay to vendors is now part of the cost, and the tax return owes only the sales tax you collected. Each tax code says whether purchase tax can be claimed back (VAT / GST).',
     'The Viewer role is read-only: posting, reversing and reconciling need the new "Post to the ledger" right.',

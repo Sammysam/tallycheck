@@ -7,6 +7,8 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-11-27
+
 ### Added
 - Preserve pre-flight on every push and release (Bitbucket and GitHub): blocks a change that would
   alter a released migration, drop data in a migration, change the app identity, update key or data
@@ -190,7 +192,8 @@ taxes for any country, foreign currencies, Sri Lankan and US payroll, products a
 bank reconciliation, imports, Shopify / WooCommerce / PayPal / Stripe connectors, the Claude
 (MCP) connector, encrypted backups, LAN mode, in-app updates and the Microsoft Store package.
 
-[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/Sammysam/tallycheck/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/Sammysam/tallycheck/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/Sammysam/tallycheck/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/Sammysam/tallycheck/compare/v1.1.0...v1.1.1
