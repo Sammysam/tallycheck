@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "accounting-desktop"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "api-server",
@@ -111,7 +111,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "api-server"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "app-core",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "app-core"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "aes-gcm",
  "axum",
@@ -225,7 +225,7 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "audit"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "database",
@@ -239,7 +239,7 @@ dependencies = [
 
 [[package]]
 name = "auth"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "argon2",
@@ -321,7 +321,7 @@ dependencies = [
 
 [[package]]
 name = "backup"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "aes-gcm",
  "app-core",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "database"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "chrono",
@@ -1156,7 +1156,7 @@ dependencies = [
 
 [[package]]
 name = "documents"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "aes-gcm",
  "app-core",
@@ -1253,7 +1253,7 @@ checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 
 [[package]]
 name = "employees"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "database",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "importer"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "app-core",
@@ -2259,7 +2259,7 @@ dependencies = [
 
 [[package]]
 name = "integrations"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "audit",
@@ -2505,7 +2505,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "ledger"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "database",
@@ -2647,7 +2647,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mcp"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "api-server",
  "app-core",
@@ -3141,7 +3141,7 @@ checksum = "7e036b411754132fd6b74e94b74e9a13c5cf606fa93d1885c35860d3060820b1"
 
 [[package]]
 name = "operations"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "calamine",
@@ -3246,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "payroll"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "chrono",
@@ -3741,7 +3741,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "reports"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "app-core",
  "chrono",

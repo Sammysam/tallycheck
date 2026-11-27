@@ -7,6 +7,8 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-27
+
 ### Added
 - The Microsoft Store version checks the Store for updates when an administrator opens it and
   offers **Update to x.y.z** in the status bar (also Help → Check for updates); offline it says
@@ -16,6 +18,9 @@ All notable changes to TallyCheck. The format follows
 
 ### Changed
 - SignPath code signing is no longer used; the GitHub release workflow runs by hand only (D77).
+
+### Security
+- Updated minimatch (frontend build tools), cookie 0.18.3 and url 2.5.9.
 
 ## [1.1.1] - 2026-11-26
 
@@ -145,7 +150,8 @@ taxes for any country, foreign currencies, Sri Lankan and US payroll, products a
 bank reconciliation, imports, Shopify / WooCommerce / PayPal / Stripe connectors, the Claude
 (MCP) connector, encrypted backups, LAN mode, in-app updates and the Microsoft Store package.
 
-[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/Sammysam/tallycheck/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/Sammysam/tallycheck/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/Sammysam/tallycheck/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/Sammysam/tallycheck/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Sammysam/tallycheck/releases/tag/v1.0.0

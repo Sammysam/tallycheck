@@ -3,6 +3,11 @@
 // points at the top with every release (the same points as the release notes).
 
 export const WHATS_NEW: Record<string, string[]> = {
+  '1.1.2': [
+    'TallyCheck from the Microsoft Store now checks the Store for updates when an administrator opens it, and shows "Update to …" at the bottom of the window. Without internet it says nothing.',
+    'The version number is at the bottom right; click it to see what is new.',
+    'Security updates to the libraries TallyCheck uses.',
+  ],
   '1.1.1': [
     'Getting started checklist on the dashboard that ticks itself off as you go.',
     'Backups are turned on in the setup wizard, and the first copy is made straight away.',
