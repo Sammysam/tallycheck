@@ -4439,6 +4439,72 @@ async fn updates_are_for_a_local_administrator_and_need_the_desktop_app() -> Tes
     Ok(())
 }
 
+/// D78: a Windows Store build asks the Microsoft Store (here a stand-in) and installs through it;
+/// a Store build without that (the Mac App Store) only says its store updates it.
+struct FakeStore(Option<&'static str>);
+
+impl api_server::updates::Updater for FakeStore {
+    fn check(&self) -> api_server::updates::UpdateFuture<Option<api_server::updates::UpdateInfo>> {
+        let found = self.0.map(|v| api_server::updates::UpdateInfo { version: v.into(), notes: None, date: None });
+        Box::pin(async move { Ok(found) })
+    }
+
+    fn install(&self) -> api_server::updates::UpdateFuture<api_server::updates::UpdateInfo> {
+        let found = self.0;
+        Box::pin(async move {
+            let v = found.ok_or_else(|| "TallyCheck is up to date.".to_string())?;
+            Ok(api_server::updates::UpdateInfo { version: v.into(), notes: None, date: None })
+        })
+    }
+}
+
+impl App {
+    async fn with_store(updater: Option<FakeStore>) -> Result<App, AppError> {
+        let dir = tempfile::tempdir().map_err(AppError::internal)?;
+        let db = Db::open(&dir.path().join("t.db")).await?;
+        let files = documents::FileStore::new(
+            dir.path().join("files"),
+            documents::StorageKey::from_bytes(&[5u8; 32]).map_err(AppError::internal)?,
+        );
+        let updater = updater.map(|u| std::sync::Arc::new(u) as std::sync::Arc<dyn api_server::updates::Updater>);
+        let state =
+            AppState::new(db.clone(), JwtKeys::new(b"test-secret-test-secret-test-secret!"), files, false, 47800)
+                .with_updater(updater, api_server::updates::UpdateChannel::Store);
+        let router = build_router(state, None);
+        Ok(App { _dir: dir, db, router })
+    }
+}
+
+#[tokio::test]
+async fn store_builds_update_through_the_store() -> TestResult {
+    let app = App::with_store(Some(FakeStore(Some("1.2.0")))).await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let r = app.local(Method::GET, "/api/system/update", &admin, None).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(r.body["channel"], json!("store"));
+    assert_eq!(r.body["supported"], json!(true));
+    assert_eq!(r.body["available"]["version"], json!("1.2.0"));
+    let r = app.local(Method::POST, "/api/system/update/install", &admin, None).await?;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.body);
+    assert_eq!(r.body["installing"]["version"], json!("1.2.0"));
+
+    let app = App::with_store(Some(FakeStore(None))).await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let r = app.local(Method::GET, "/api/system/update", &admin, None).await?;
+    assert_eq!(r.body["available"], Value::Null);
+    let r = app.local(Method::POST, "/api/system/update/install", &admin, None).await?;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.body["message"], json!("TallyCheck is up to date."));
+
+    let app = App::with_store(None).await?;
+    let admin = app.signed_in("boss", "Admin").await?;
+    let r = app.local(Method::GET, "/api/system/update", &admin, None).await?;
+    assert_eq!(r.body["supported"], json!(false));
+    let r = app.local(Method::POST, "/api/system/update/install", &admin, None).await?;
+    assert_eq!(r.body["message"], json!("This copy of TallyCheck is updated by its app store"));
+    Ok(())
+}
+
 // -- D49: password recovery ---------------------------------------------------------------
 
 struct FakeWindows(api_server::local_verify::Verification);

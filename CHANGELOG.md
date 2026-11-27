@@ -7,6 +7,16 @@ All notable changes to TallyCheck. The format follows
 
 ## [Unreleased]
 
+### Added
+- The Microsoft Store version checks the Store for updates when an administrator opens it and
+  offers **Update to x.y.z** in the status bar (also Help → Check for updates); offline it says
+  nothing (D78).
+- The version number in the status bar, and a **What's new** window after each update (also under
+  Help → What's new) (D78).
+
+### Changed
+- SignPath code signing is no longer used; the GitHub release workflow runs by hand only (D77).
+
 ## [1.1.1] - 2026-11-26
 
 ### Added

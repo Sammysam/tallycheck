@@ -35,7 +35,8 @@ fn info_json(u: &crate::updates::UpdateInfo) -> Value {
     json!({ "version": u.version, "notes": u.notes, "date": u.date })
 }
 
-/// `{current, channel, supported, available, error}`: `channel` is "direct" or "store" (D47);
+/// `{current, channel, supported, available, error}`: `channel` is "direct" or "store" (D47; a
+/// Windows Store build asks the Microsoft Store, D78);
 /// `available` is the newer version or null; `error` is why the feed couldn't be checked
 /// (usually no internet), which the screen may ignore.
 pub async fn check(State(s): State<AppState>, _a: UpdateAdmin) -> AppResult<Json<Value>> {
@@ -57,13 +58,17 @@ pub async fn check(State(s): State<AppState>, _a: UpdateAdmin) -> AppResult<Json
 /// 202 once the update is downloaded and its signature checked; the app then closes, updates
 /// itself and opens again.
 pub async fn install(State(s): State<AppState>, _a: UpdateAdmin) -> AppResult<(StatusCode, Json<Value>)> {
-    if s.update_channel == crate::updates::UpdateChannel::Store {
-        return Err(AppError::bad_request("This copy of TallyCheck is updated by the Microsoft Store"));
-    }
-    let updater = s
-        .updater
-        .clone()
-        .ok_or_else(|| AppError::bad_request("Updates are installed from the TallyCheck desktop app"))?;
+    // D78: a Windows Store build has the Store's updater; one without (the Mac App Store build)
+    // is updated by its store only.
+    let updater = match (s.updater.clone(), s.update_channel) {
+        (Some(updater), _) => updater,
+        (None, crate::updates::UpdateChannel::Store) => {
+            return Err(AppError::bad_request("This copy of TallyCheck is updated by its app store"))
+        }
+        (None, crate::updates::UpdateChannel::Direct) => {
+            return Err(AppError::bad_request("Updates are installed from the TallyCheck desktop app"))
+        }
+    };
     let info = updater.install().await.map_err(AppError::bad_request)?;
     tracing::info!(from = CURRENT_VERSION, to = %info.version, "update downloaded and verified; installing");
     Ok((StatusCode::ACCEPTED, Json(json!({ "current": CURRENT_VERSION, "installing": info_json(&info) }))))

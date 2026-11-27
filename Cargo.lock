@@ -18,6 +18,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "windows",
+ "windows-collections",
  "windows-future",
  "windows-sys 0.59.0",
 ]

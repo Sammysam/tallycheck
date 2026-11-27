@@ -26,6 +26,7 @@ import StatusBar from './desktop/StatusBar';
 import Dialog from './desktop/Dialog';
 import UpdateDialog from './desktop/UpdateDialog';
 import { useAvailableUpdate } from '../lib/updates';
+import { WHATS_NEW, whatsNewPending, whatsNewSeen } from '../lib/whatsNew';
 import { hasCommand, isUnsaved, runCommand, setUnsaved, subscribeCommands } from '../lib/commands';
 import { exportScreen } from '../lib/exportCsv';
 import { companyIsSetUp, region, SETUP_LATER, regionFromSettings, setRegion, subscribeRegion } from '../lib/region';
@@ -72,7 +73,10 @@ export default function Layout({ children }: { children: ReactNode }) {
     }
   });
   const [refreshKey, setRefreshKey] = useState(0);
-  const [dialog, setDialog] = useState<'shortcuts' | 'about' | 'discard' | 'nothing-to-export' | 'update' | null>(null);
+  const [dialog, setDialog] = useState<'shortcuts' | 'about' | 'discard' | 'nothing-to-export' | 'update' | 'whats-new' | null>(
+    // D78: the first start after an update says what changed (once per version on this PC).
+    () => (whatsNewPending(__APP_VERSION__) ? 'whats-new' : null),
+  );
   const mainRef = useRef<HTMLElement>(null);
   // Menu items grey out when the screen has no "New" / "Close".
   const canNew = useSyncExternalStore(subscribeCommands, () => hasCommand('new'));
@@ -297,6 +301,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         { label: 'Keyboard shortcuts', shortcut: 'F1', onSelect: () => setDialog('shortcuts') },
         'separator',
         ...(isAdmin ? [{ label: 'Check for updates…', onSelect: () => setDialog('update') }] : []),
+        { label: "What's new", onSelect: () => setDialog('whats-new') },
         { label: 'About TallyCheck', onSelect: () => setDialog('about') },
       ],
     },
@@ -352,9 +357,27 @@ export default function Layout({ children }: { children: ReactNode }) {
         onTwoFactor={go('/2fa/setup')}
         updateVersion={update?.available?.version ?? null}
         onUpdate={() => setDialog('update')}
+        onVersion={() => setDialog('whats-new')}
       />
 
       {dialog === 'update' && <UpdateDialog initial={update} onClose={closeDialog} />}
+
+      {dialog === 'whats-new' && (
+        <Dialog
+          title={`What's new in TallyCheck ${__APP_VERSION__}`}
+          onClose={() => { whatsNewSeen(); closeDialog(); }}
+          width={500}
+          buttons={<button type="button" className="btn btn-primary" onClick={() => { whatsNewSeen(); closeDialog(); }}>OK</button>}
+        >
+          {WHATS_NEW[__APP_VERSION__] ? (
+            <ul className="text-sm text-gray-700 list-disc pl-5 space-y-1.5">
+              {WHATS_NEW[__APP_VERSION__].map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          ) : (
+            <p className="text-sm text-gray-700">You have TallyCheck {__APP_VERSION__}. The full list of changes is in the release notes on the TallyCheck GitHub page (Help → About has the link).</p>
+          )}
+        </Dialog>
+      )}
 
       {dialog === 'shortcuts' && (
         <Dialog

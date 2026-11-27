@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Download, ShieldCheck } from 'lucide-react';
 
+declare const __APP_VERSION__: string;
+
 interface StatusBarProps {
   location: string;
   user: string;
@@ -10,10 +12,12 @@ interface StatusBarProps {
   /** D45: a newer version to offer, or null. */
   updateVersion: string | null;
   onUpdate: () => void;
+  /** D78: the version cell opens "What's new". */
+  onVersion: () => void;
 }
 
 /** Bottom strip: where you are, who is signed in, the server link, Caps Lock and the date. */
-export default function StatusBar({ location, user, role, offerTwoFactor, onTwoFactor, updateVersion, onUpdate }: StatusBarProps) {
+export default function StatusBar({ location, user, role, offerTwoFactor, onTwoFactor, updateVersion, onUpdate, onVersion }: StatusBarProps) {
   const [online, setOnline] = useState(true);
   const [caps, setCaps] = useState(false);
 
@@ -75,6 +79,9 @@ export default function StatusBar({ location, user, role, offerTwoFactor, onTwoF
         {online ? 'Connected' : 'Not connected'}
       </span>
       <span className="desk-status-cell w-12 justify-center">{caps ? 'CAPS' : ''}</span>
+      <button type="button" onClick={onVersion} className="desk-status-cell desk-status-btn" title="What's new in this version">
+        v{__APP_VERSION__}
+      </button>
       <span className="desk-status-cell">{today}</span>
     </footer>
   );

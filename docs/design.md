@@ -1130,6 +1130,16 @@ recommendations without answering each one individually; revisit any of them on 
   signature (D45) and `latest.json`, and creates the draft GitHub release. `.signpath/`,
   `CODE_SIGNING_POLICY.md` and `docs/signpath.md` are removed. The direct installer is unsigned
   (SmartScreen warns); the Microsoft Store package is signed by the Store (D47).
+- **D78 Store updates and "What's new"** (requested 2026-11-27). The Microsoft Store build asks
+  the Store whether an update is waiting (`src-tauri/src/store_updates.rs`, `StoreContext`), behind
+  the same `/api/system/update` routes as D45 (Administrator on the main PC): the status bar shows
+  **Update to x.y.z** and Help → Check for updates offers it; installing lets the Store download it
+  (its own window may ask to confirm), closes the server and database, has the Store install it and
+  opens the new version. Only the Store is contacted, and offline the check stays silent. The Mac App
+  Store build has no such call and says that the App Store updates it. The status bar shows the
+  version (`v1.1.1`), which opens **What's new**; the first start after an update on that PC shows
+  it once (`frontend/src/lib/whatsNew.ts`, written in the app so it works offline; add each
+  release's points there).
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

@@ -12,7 +12,8 @@ name = "accounting_desktop_lib"
 crate-type = ["rlib"]
 
 [features]
-# D47: the Microsoft Store build (MSIX). No in-app updater: the Store updates the app.
+# D47: the Microsoft Store build (MSIX). No in-app updater of our own: the Store updates the
+# app, and on Windows the app asks the Store for updates (D78).
 store = []
 
 [build-dependencies]
@@ -34,16 +35,21 @@ tauri-plugin-dialog = "2"
 windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
 # D49: Windows Hello / Windows password check for password recovery (already in the tree via Tauri).
 windows = { version = "0.62", features = [
+    "ApplicationModel",
     "Foundation",
     "Security_Credentials_UI",
+    "Services_Store",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Security_Credentials",
     "Win32_System_Com",
+    "Win32_System_Recovery",
     "Win32_System_Threading",
     "Win32_System_WinRT",
+    "Win32_UI_Shell",
 ] }
+windows-collections = "0.3"
 windows-future = "0.3"
 
 [lints]

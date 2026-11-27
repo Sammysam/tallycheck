@@ -4,6 +4,8 @@
 //! Updates (D45) run here too and reach the page only through the server's own API.
 
 mod folder_pick;
+#[cfg(all(windows, feature = "store"))]
+mod store_updates;
 #[cfg(not(feature = "store"))]
 mod updates;
 #[cfg(windows)]
@@ -32,8 +34,16 @@ fn start_server(app: &tauri::App) -> anyhow::Result<String> {
         }
     }
 
-    // D47: a Microsoft Store build has no updater of its own; the Store updates it.
-    #[cfg(feature = "store")]
+    // D47: a Store build has no updater of its own; the Store updates it. On Windows the app
+    // asks the Microsoft Store whether an update is waiting (D78); the Mac App Store has no such
+    // call, so its build only says that the App Store updates it.
+    #[cfg(all(feature = "store", windows))]
+    let (updater, channel) = (
+        Some(std::sync::Arc::new(store_updates::StoreUpdater { app: app.handle().clone() })
+            as std::sync::Arc<dyn api_server::updates::Updater>),
+        api_server::updates::UpdateChannel::Store,
+    );
+    #[cfg(all(feature = "store", not(windows)))]
     let (updater, channel) = (None, api_server::updates::UpdateChannel::Store);
     #[cfg(not(feature = "store"))]
     let (updater, channel) = (

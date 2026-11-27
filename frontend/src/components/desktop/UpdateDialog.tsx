@@ -3,7 +3,10 @@ import Dialog from './Dialog';
 import { errMsg } from '../../api/client';
 import { checkForUpdate, installUpdate, type UpdateStatus } from '../../lib/updates';
 
-/** D45: Help → Check for updates, and the status bar's "Update available". */
+/** D45: Help → Check for updates, and the status bar's "Update available". D78: a Microsoft Store copy
+ *  asks the Store and installs through it. */
+const STORE_NAME = /Mac/i.test(navigator.userAgent) ? 'the App Store' : 'the Microsoft Store';
+
 export default function UpdateDialog({ initial, onClose }: { initial: UpdateStatus | null; onClose: () => void }) {
   const [status, setStatus] = useState<UpdateStatus | null>(initial);
   const [checking, setChecking] = useState(!initial);
@@ -32,14 +35,16 @@ export default function UpdateDialog({ initial, onClose }: { initial: UpdateStat
   };
 
   const available = status?.available ?? null;
+  const store = status?.channel === 'store';
   const close = <button type="button" className="btn btn-secondary" onClick={onClose} disabled={installing}>Close</button>;
 
   if (restarting) {
     return (
       <Dialog title="Updating TallyCheck" onClose={() => undefined} buttons={null}>
         <p className="text-sm text-gray-700">
-          TallyCheck {restarting} is downloaded and checked. TallyCheck will now close, install the update and open
-          again by itself. Your data is kept.
+          {store
+            ? `TallyCheck ${restarting} is downloaded from the Microsoft Store. TallyCheck will now close, install the update and open again by itself (if it does not, open it from the Start menu). Your data is kept.`
+            : `TallyCheck ${restarting} is downloaded and checked. TallyCheck will now close, install the update and open again by itself. Your data is kept.`}
         </p>
       </Dialog>
     );
@@ -54,7 +59,7 @@ export default function UpdateDialog({ initial, onClose }: { initial: UpdateStat
         available ? (
           <>
             <button type="button" className="btn btn-primary" onClick={install} disabled={installing}>
-              {installing ? 'Downloading…' : `Update to ${available.version}`}
+              {installing ? (store ? 'Downloading from the Store…' : 'Downloading…') : `Update to ${available.version}`}
             </button>
             {!installing && <button type="button" className="btn btn-secondary" onClick={onClose}>Later</button>}
           </>
@@ -64,8 +69,11 @@ export default function UpdateDialog({ initial, onClose }: { initial: UpdateStat
       <div className="text-sm text-gray-700 space-y-2">
         {checking && <p>Checking for a newer version…</p>}
         {status && <p>You have TallyCheck <b>{status.current}</b>.</p>}
-        {status?.channel === 'store' && (
-          <p>This copy of TallyCheck is updated by the Microsoft Store. Open the Store's Library to get the newest version.</p>
+        {store && !status?.supported && (
+          <p>This copy of TallyCheck is updated by {STORE_NAME}, which installs new versions by itself.</p>
+        )}
+        {store && status?.supported && (
+          <p className="text-xs text-gray-500">This copy is updated through the Microsoft Store. Only the Store is contacted; your books stay on this PC.</p>
         )}
         {status && status.channel !== 'store' && !status.supported && (
           <p>This copy of TallyCheck is not set up to update itself. Install a newer version from its installer.</p>
@@ -78,6 +86,9 @@ export default function UpdateDialog({ initial, onClose }: { initial: UpdateStat
               <b>TallyCheck {available.version}</b> is available
               {available.date ? ` (published ${available.date.slice(0, 10)})` : ''}.
             </p>
+            {store && !available.notes && (
+              <p className="text-xs text-gray-500">The Store may ask you to confirm the download. After the update, Help → What's new lists the changes.</p>
+            )}
             {available.notes && (
               <div className="border border-[#e5e5e5] bg-[#fafafa] rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs">
                 {available.notes}
