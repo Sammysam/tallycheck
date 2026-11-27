@@ -54,7 +54,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 getrandom = "0.2"
 http-body-util = "0.1"
 image = { version = "0.25", default-features = false, features = ["png"] }
-jsonwebtoken = "9"
+jsonwebtoken = "11"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 qrcode = { version = "0.14", default-features = false, features = ["image"] }
 serde = { version = "1", features = ["derive"] }
