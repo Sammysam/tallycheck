@@ -89,7 +89,8 @@ def main() -> int:
     ap.add_argument("--identity-name")
     ap.add_argument("--publisher", help='e.g. "CN=12345678-ABCD-…" from Partner Center')
     ap.add_argument("--publisher-display-name")
-    ap.add_argument("--display-name", default="TallyCheck",
+    # The name reserved in Partner Center (Package/Properties/DisplayName); the Store refuses others.
+    ap.add_argument("--display-name", default="TallyCheck.io",
                     help="must match a product name reserved in Partner Center exactly (case counts)")
     ap.add_argument("--test", action="store_true", help="test identity and test data folder")
     ap.add_argument("--version", help="defaults to tauri.conf.json's version, as x.y.z.0")
