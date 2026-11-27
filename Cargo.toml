@@ -51,7 +51,7 @@ calamine = { version = "0.38", features = ["dates"] }
 csv = "1"
 encoding_rs = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-getrandom = "0.2"
+getrandom = "0.4"
 http-body-util = "0.1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 jsonwebtoken = "9"
