@@ -1,14 +1,12 @@
-# D48: builds the TallyCheck installer from this public repository, has it code-signed by
-# SignPath Foundation (free for open source projects), then makes the update signature and
-# latest.json for the in-app updater (D45) and puts everything in a DRAFT GitHub release.
+# D77: builds the TallyCheck installer from this public repository, makes the update signature
+# and latest.json for the in-app updater (D45) and puts everything in a DRAFT GitHub release.
 # A person checks the draft and publishes it; only a published release reaches the app.
+# The installer is not code-signed (SignPath, D48, is no longer used), so Windows SmartScreen
+# warns about it; the update signature still protects in-app updates.
 #
 # Needs (Settings → Secrets and variables → Actions):
-#   secrets.SIGNPATH_API_TOKEN               SignPath CI user's API token
-#   vars.SIGNPATH_ORGANIZATION_ID            SignPath organization id
 #   secrets.TAURI_SIGNING_PRIVATE_KEY        contents of updater.key (the update key)
 #   secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-# Every signing request also needs a manual approval in SignPath (their rule).
 
 name: Release
 
@@ -23,12 +21,11 @@ on:
 
 permissions:
   contents: write # create the draft release
-  actions: read # SignPath reads the uploaded artifact
 
 jobs:
   release:
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     steps:
       # Third-party actions are pinned to a full commit SHA (a tag can be moved to other code).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -66,8 +63,8 @@ jobs:
           npm run build
 
       # Built WITHOUT the update key: npm packages and build scripts never see it. The update
-      # signature is made later, from the code-signed file, in the only step that has the key.
-      - name: Installer (unsigned, no update signature)
+      # signature is made in the next step, the only one that has the key.
+      - name: Installer (no update signature yet)
         # bash: PowerShell would swallow the "--" that hands --config on to `tauri build`.
         shell: bash
         run: |
@@ -76,28 +73,6 @@ jobs:
           printf '%s' '{"bundle":{"createUpdaterArtifacts":false}}' > "$override"
           npm run installer -- --config "$override"
 
-      - name: Upload the installer for signing
-        id: unsigned
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: unsigned-installer
-          path: target/release/bundle/nsis/TallyCheck_${{ steps.version.outputs.version }}_x64-setup.exe
-          if-no-files-found: error
-
-      - name: Code-sign with SignPath
-        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: tallycheck
-          signing-policy-slug: release-signing
-          artifact-configuration-slug: installer
-          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 86400
-          output-artifact-directory: signed
-
-      # Code signing changed the file, so the update signature is made now, from the signed file.
       - name: Update signature and latest.json
         shell: pwsh
         env:
@@ -110,7 +85,6 @@ jobs:
           $v = $env:VERSION
           $exe = "TallyCheck_${v}_x64-setup.exe"
           $bundle = "target/release/bundle/nsis"
-          Copy-Item "signed/$exe" "$bundle/$exe" -Force
           Remove-Item "$bundle/$exe.sig" -ErrorAction SilentlyContinue
           npx --no-install tauri signer sign "$bundle/$exe"
           if (-not (Test-Path "$bundle/$exe.sig")) { throw "no update signature" }

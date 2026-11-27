@@ -660,7 +660,7 @@ recommendations without answering each one individually; revisit any of them on 
   uninstalling; the package asks only for `runFullTrust`. The direct installer keeps
   `%LOCALAPPDATA%\TallyCheckData`; moving between the two goes through Backup & restore.
 
-- **D48 Free code signing via SignPath Foundation** (2026-10-30).
+- **D48 Free code signing via SignPath Foundation** (replaced by D77) (2026-10-30).
   `.github/workflows/release.yml` (tag `v<version>` or run by hand): builds the NSIS installer on
   GitHub, sends it to SignPath (project `tallycheck`, artifact configuration `installer` =
   `.signpath/artifact-configuration.xml`, policy `release-signing`, manual approval), then makes the
@@ -1125,6 +1125,11 @@ recommendations without answering each one individually; revisit any of them on 
   date and its line boxes are labelled; the customer and vendor forms have a heading and visible
   labels; the review page wraps at word boundaries; the stock window's button reads "Stop counting
   it and post".
+- **D77 No SignPath** (requested 2026-11-27: SignPath cannot be used). The release workflow
+  no longer sends the installer to SignPath: it builds the NSIS installer, makes the update
+  signature (D45) and `latest.json`, and creates the draft GitHub release. `.signpath/`,
+  `CODE_SIGNING_POLICY.md` and `docs/signpath.md` are removed. The direct installer is unsigned
+  (SmartScreen warns); the Microsoft Store package is signed by the Store (D47).
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check
