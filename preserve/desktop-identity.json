@@ -1,0 +1,11 @@
+{
+  "identifier": "lk.cenango.accounting",
+  "productName": "TallyCheck",
+  "updaterPubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE2ODhBMjU0NTA3QjFFQzkKUldUSkhudFFWS0tJcGg2SGgvTmoyeTZ0ekl3UmV6ekJrOTFNNTJJVmlkYnlwcXA5MVJ2d2F0d2wK",
+  "updaterEndpoints": [],
+  "updateFeed": "https://github.com/Sammysam/tallycheck/releases/latest/download/latest.json",
+  "dataDirName": "TallyCheckData",
+  "legacyDataDirName": "CenangoAccounting",
+  "nsisInstallMode": "currentUser",
+  "msixIdentityName": "Cenango.TallyCheck.io"
+}

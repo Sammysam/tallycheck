@@ -8,6 +8,12 @@ All notable changes to TallyCheck. The format follows
 ## [Unreleased]
 
 ### Added
+- Preserve pre-flight on every push and release (Bitbucket and GitHub): blocks a change that would
+  alter a released migration, drop data in a migration, change the app identity, update key or data
+  folder, break the format of encrypted files or lower the version (`docs/preserve.md`).
+- Security audit on every push and weekly (`tools/audit.ps1`): `cargo audit` fails on a known
+  vulnerability in a Rust dependency (reviewed exceptions in `.cargo/audit.toml`) and `npm audit` on
+  high or critical advisories in the shipped packages.
 - US payroll paid before TallyCheck: for a company that starts part-way through the year, enter
   what each employee was already paid (US payroll → Payroll before TallyCheck). It counts towards
   the social security, FUTA and state unemployment limits and is included in Forms 941, 940 and

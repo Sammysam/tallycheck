@@ -31,6 +31,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false # later steps don't push; gh uses GH_TOKEN
+          fetch-depth: 0 # Preserve compares with every earlier release tag
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -53,6 +54,14 @@ jobs:
           if ($env:REF_TYPE -eq "tag" -and $env:REF_NAME -ne "v$v") {
             throw "Tag $env:REF_NAME does not match the app version $v"
           }
+
+      # Preserve (docs/preserve.md): blocks the release before anything is built when installed
+      # copies would lose their books, their update key or their identity.
+      - name: Preserve pre-flight (installed copies stay safe)
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python -I -X utf8 tools/desktop_preflight.py "v$env:VERSION"
 
       # No dependency needs its install script (core-js only prints a message, fsevents is
       # macOS only), so none are run.

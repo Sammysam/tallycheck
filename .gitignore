@@ -41,3 +41,6 @@ graphify-out/
 
 # Python bytecode
 __pycache__/
+
+# Pre-flight reports (Preserve)
+preflight-out/

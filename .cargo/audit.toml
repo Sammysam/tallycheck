@@ -1,0 +1,8 @@
+# cargo audit (tools/audit.ps1): advisories that do not apply to TallyCheck.
+# Every entry needs a reason and is reviewed like code. Remove an entry when its crate leaves Cargo.lock.
+[advisories]
+ignore = [
+    # glib: unsound VariantStrIter. glib comes only through the GTK stack that Tauri uses on Linux;
+    # TallyCheck ships for Windows and macOS (docs/design.md section 10).
+    "RUSTSEC-2024-0429",
+]

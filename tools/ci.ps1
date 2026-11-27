@@ -24,13 +24,22 @@ function Step([string]$Title, [scriptblock]$Command) {
 
 Step 'Rust formatting' { cargo fmt --all --check }
 
+# Preserve (docs/preserve.md): will an installed copy, with real books, still work after this change?
+# Migrations, data formats, app identity and versions. Fast, so a blocked change fails first.
+$py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'python3' }
+Step 'Preserve: tests of the pre-flight' { & $py -I -X utf8 tools/test_desktop_preflight.py }
+Step 'Preserve: migrations, data formats, app identity, versions' { & $py -I -X utf8 tools/desktop_preflight.py --offline }
+
+# Known vulnerabilities in Rust and npm dependencies (tools/audit.ps1; Bitbucket also runs it weekly).
+Write-Host ""
+Write-Host "==> Security audit" -ForegroundColor Cyan
+& "$PSScriptRoot/audit.ps1"
+
 # No dependency needs its install script (as in the release workflow), so none are run.
 Push-Location frontend
 try {
     Step 'Frontend packages' { npm ci --ignore-scripts --no-audit --no-fund }
     Step 'Frontend type check and build' { npm run build }
-    # Known vulnerabilities in the packages the app ships (docs/design.md section 9: run before release).
-    Step 'Frontend security advisories' { npm audit --omit=dev --audit-level=high }
 } finally {
     Pop-Location
 }

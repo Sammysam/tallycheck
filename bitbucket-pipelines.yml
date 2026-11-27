@@ -1,14 +1,26 @@
-# CI on Bitbucket: on every push, run tools/ci.ps1 (formatting, frontend build, npm advisories,
-# clippy, all tests). The app is Windows-only and Bitbucket's own machines are Linux, so the step
-# runs on a self-hosted Windows runner (setup: docs/ci-cd.md). Needs no secrets or variables.
+# Checks on Bitbucket (the only thing that runs here; building, signing and publishing stay on the
+# owner's PC and GitHub). On every push, tools/ci.ps1 runs:
+#   - Preserve (docs/preserve.md): migrations, data formats, app identity, versions
+#   - Security audit (tools/audit.ps1): known vulnerabilities in Rust and npm dependencies
+#   - formatting, frontend build, clippy, all tests
+# The app is Windows-only and Bitbucket's own machines are Linux, so the steps run on a
+# self-hosted Windows runner (setup: docs/ci-cd.md). Needs no secrets or variables.
 #
-# The runner's PC needs: Git, rustup (the toolchain comes from rust-toolchain.toml), Node.js 24,
-# the Visual Studio C++ build tools and the WebView2 runtime. CARGO_TARGET_DIR points outside the
-# clone, which the runner deletes after each build, so later builds reuse compiled dependencies.
+# The runner's PC needs: Git, Python 3, rustup (the toolchain comes from rust-toolchain.toml),
+# Node.js 24, the Visual Studio C++ build tools and the WebView2 runtime. CARGO_TARGET_DIR points
+# outside the clone, which the runner deletes after each build, so later builds reuse compiled
+# dependencies. cargo-audit installs itself on the first run.
+#
+# Also: a tag v<version> runs the release pre-flight (Preserve against every earlier release and
+# the update feed), and the pipeline "audit" is meant for a weekly schedule (docs/ci-cd.md).
 
-pipelines:
-  default:
-    - step:
+# Preserve compares with the earlier release tags, so the clone must be complete.
+clone:
+  depth: full
+
+definitions:
+  steps:
+    - step: &checks
         name: Checks (Windows)
         runs-on:
           - self.hosted
@@ -17,3 +29,35 @@ pipelines:
         script:
           # One line, so the variable is certainly set for the script it starts.
           - $env:CARGO_TARGET_DIR = "$env:USERPROFILE\tallycheck-ci-target"; powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci.ps1; exit $LASTEXITCODE
+        artifacts:
+          - preflight-out/**
+    - step: &preflight-release
+        name: Preserve pre-flight (release)
+        runs-on:
+          - self.hosted
+          - windows
+        max-time: 15
+        script:
+          - python -I -X utf8 tools\desktop_preflight.py $env:BITBUCKET_TAG; exit $LASTEXITCODE
+        artifacts:
+          - preflight-out/**
+    - step: &audit
+        name: Security audit (Windows)
+        runs-on:
+          - self.hosted
+          - windows
+        max-time: 30
+        script:
+          - $env:CARGO_TARGET_DIR = "$env:USERPROFILE\tallycheck-ci-target"; powershell -NoProfile -ExecutionPolicy Bypass -File tools\audit.ps1; exit $LASTEXITCODE
+
+pipelines:
+  default:
+    - step: *checks
+  tags:
+    "v*":
+      - step: *checks
+      - step: *preflight-release
+  custom:
+    # Pipelines -> Schedules -> New schedule: branch main, pipeline "audit", weekly.
+    audit:
+      - step: *audit
