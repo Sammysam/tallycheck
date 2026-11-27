@@ -13,7 +13,7 @@ async fn role_id(db: &Db, name: &str) -> AppResult<String> {
 }
 
 fn create(username: &str, role: Option<String>) -> CreateUser {
-    CreateUser { username: username.into(), password: "password123".into(), role_id: role }
+    CreateUser { username: username.into(), email: None, password: "password123".into(), role_id: role }
 }
 
 #[tokio::test]
@@ -111,10 +111,10 @@ async fn bootstrap_admin_is_idempotent() -> AppResult<()> {
 async fn first_admin_only_while_no_users_exist() -> AppResult<()> {
     let (_d, db) = fresh().await?;
     assert!(!any_users(&db).await?);
-    let u = create_first_admin(&db, "owner", "long-password").await?.ok_or_else(|| AppError::internal("none"))?;
+    let u = create_first_admin(&db, "owner", None, "long-password").await?.ok_or_else(|| AppError::internal("none"))?;
     assert!(u.is_admin());
     assert!(any_users(&db).await?);
-    assert!(create_first_admin(&db, "intruder", "long-password").await?.is_none());
+    assert!(create_first_admin(&db, "intruder", None, "long-password").await?.is_none());
     assert!(get_by_username(&db, "intruder").await?.is_none());
     Ok(())
 }

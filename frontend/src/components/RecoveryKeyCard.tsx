@@ -18,16 +18,17 @@ export default function RecoveryKeyCard({
 }) {
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [savedAs, setSavedAs] = useState('');
 
   const text = [
     'TallyCheck password recovery key',
     '',
-    `Username:      ${username}`,
+    `Sign in as:    ${username}`,
     `Recovery key:  ${recoveryKey}`,
     `Made on:       ${new Date().toLocaleString()}`,
     '',
     'If you forget your password, click "Forgot password?" on the TallyCheck sign-in screen',
-    'and enter your username and this key. Each key works once; TallyCheck then gives you a new one.',
+    'and enter your email (or username) and this key. Each key works once; TallyCheck then gives you a new one.',
     'Keep this somewhere safe and private, away from the computer.',
   ].join('\r\n');
 
@@ -41,13 +42,19 @@ export default function RecoveryKeyCard({
     }
   };
 
+  // The link is put in the page and the file kept for a while: the desktop window (WebView2)
+  // starts saving only after the click, so a file thrown away at once was never saved.
   const download = () => {
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const name = `TallyCheck recovery key - ${username}.txt`.replace(/[\\/:*?"<>|]+/g, ' ');
+    const url = URL.createObjectURL(new Blob(['\ufeff', text], { type: 'text/plain;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `TallyCheck recovery key - ${username}.txt`;
+    a.download = name;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    setSavedAs(name);
   };
 
   const print = () => {
@@ -63,9 +70,9 @@ export default function RecoveryKeyCard({
     const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
     w.document.write(
       `<html><head><title>TallyCheck recovery key</title></head><body style="font-family:Arial,sans-serif;padding:32px">` +
-        `<h2>TallyCheck password recovery key</h2><p>Username: <b>${esc(username)}</b></p>` +
+        `<h2>TallyCheck password recovery key</h2><p>Sign in as: <b>${esc(username)}</b></p>` +
         `<p style="font-family:Consolas,monospace;font-size:22px;letter-spacing:2px;border:2px dashed #ea580c;padding:14px;display:inline-block">${esc(recoveryKey)}</p>` +
-        `<p>If you forget your password, click <b>Forgot password?</b> on the sign-in screen and enter your username and this key.<br/>` +
+        `<p>If you forget your password, click <b>Forgot password?</b> on the sign-in screen and enter your email (or username) and this key.<br/>` +
         `Each key works once; TallyCheck then gives you a new one. Keep this paper somewhere safe and private.</p></body></html>`,
     );
     w.document.close();
@@ -96,6 +103,11 @@ export default function RecoveryKeyCard({
         <button type="button" className={btn} onClick={download}><Download size={13} />Save as file</button>
         <button type="button" className={btn} onClick={print}><Printer size={13} />Print</button>
       </div>
+      {savedAs && (
+        <p className="text-xs text-green-700 mt-2" role="status">
+          Saved in your <b>Downloads</b> folder as “{savedAs}”. Move it somewhere safe, such as a USB stick or a password manager.
+        </p>
+      )}
       <p className="text-xs text-gray-500 mt-3">
         Keep it somewhere safe and private, for example printed in the office safe or in a password manager —
         not on a note stuck to this computer.

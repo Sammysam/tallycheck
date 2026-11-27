@@ -19,7 +19,7 @@ export default function ForgotPassword() {
   const [params] = useSearchParams();
   const [what, setWhat] = useState<What>(params.get('what') === 'username' ? 'username' : 'password');
   const [way, setWay] = useState<Way>('key');
-  const [found, setFound] = useState<{ username: string; role: string | null }[] | null>(null);
+  const [found, setFound] = useState<{ username: string; role: string | null; email?: string | null }[] | null>(null);
   const [windowsOk, setWindowsOk] = useState(false);
   const [username, setUsername] = useState('');
   const [recoveryKey, setRecoveryKey] = useState('');
@@ -42,10 +42,10 @@ export default function ForgotPassword() {
     setLoading(true);
     try {
       if (way === 'key') {
-        const { data } = await api.post<{ username: string }>('/auth/recovery/username/key', { recoveryKey });
-        setFound([{ username: data.username, role: null }]);
+        const { data } = await api.post<{ username: string; email?: string | null }>('/auth/recovery/username/key', { recoveryKey });
+        setFound([{ username: data.username, role: null, email: data.email }]);
       } else {
-        const { data } = await api.post<{ users: { username: string; role: string | null }[] }>('/auth/recovery/username/windows');
+        const { data } = await api.post<{ users: { username: string; role: string | null; email?: string | null }[] }>('/auth/recovery/username/windows');
         setFound(data.users);
       }
     } catch (err) {
@@ -107,13 +107,13 @@ export default function ForgotPassword() {
           <KeyRound size={13} /> Password
         </button>
         <button type="button" role="tab" aria-selected={what === 'username'} className={whatTab('username')} onClick={() => choose('username')} data-testid="forgot-username-tab">
-          <UserRound size={13} /> Username
+          <UserRound size={13} /> Email / username
         </button>
       </div>
       <div className="mb-4">
-        <h1 className="text-lg font-semibold text-gray-900">{what === 'username' ? 'Forgot your username?' : 'Forgot your password?'}</h1>
+        <h1 className="text-lg font-semibold text-gray-900">{what === 'username' ? 'Forgot your email?' : 'Forgot your password?'}</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {what === 'username' ? 'Find the username you sign in with.' : 'Set a new password for your TallyCheck user.'}
+          {what === 'username' ? 'Find the email (or username) you sign in with.' : 'Set a new password for your TallyCheck user.'}
         </p>
       </div>
 
@@ -137,10 +137,11 @@ export default function ForgotPassword() {
             {found.map((u) => (
               <li key={u.username} className="flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 rounded-lg">
                 <span className="text-sm font-medium text-gray-900 select-all">
-                  {u.username}
+                  {u.email || u.username}
+                  {u.email && <span className="ml-2 text-xs font-normal text-gray-500">{u.username}</span>}
                   {u.role && <span className="ml-2 text-xs font-normal text-gray-500">{u.role}</span>}
                 </span>
-                <button type="button" className="text-xs text-orange-700 hover:underline whitespace-nowrap" onClick={() => signInAs(u.username)}>
+                <button type="button" className="text-xs text-orange-700 hover:underline whitespace-nowrap" onClick={() => signInAs(u.email || u.username)}>
                   Sign in as this user
                 </button>
               </li>
@@ -194,7 +195,7 @@ export default function ForgotPassword() {
           </p>
         )}
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1.5">Username</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1.5">Email or username</label>
           <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className={input} autoFocus />
         </div>
         {way === 'key' && (

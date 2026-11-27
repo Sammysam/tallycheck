@@ -14,6 +14,8 @@ use sqlx::{Row, SqliteConnection};
 pub struct User {
     pub id: String,
     pub username: String,
+    /// D84: the email the user signs in with (optional for users made before it existed).
+    pub email: Option<String>,
     pub password_hash: String,
     pub two_factor_secret: Option<String>,
     pub is_two_factor_enabled: bool,
@@ -31,6 +33,7 @@ pub struct User {
 pub struct UserView {
     pub id: String,
     pub username: String,
+    pub email: Option<String>,
     pub is_two_factor_enabled: bool,
     pub role_id: Option<String>,
     pub role: Option<Role>,
@@ -44,6 +47,7 @@ impl From<User> for UserView {
         UserView {
             id: u.id,
             username: u.username,
+            email: u.email,
             is_two_factor_enabled: u.is_two_factor_enabled,
             role_id: u.role_id,
             role: u.role,
@@ -65,12 +69,13 @@ impl User {
     }
 }
 
-const COLUMNS: &str = r#""id","username","passwordHash","twoFactorSecret","isTwoFactorEnabled","roleId","isActive","createdAt","updatedAt""#;
+const COLUMNS: &str = r#""id","username","email","passwordHash","twoFactorSecret","isTwoFactorEnabled","roleId","isActive","createdAt","updatedAt""#;
 
 fn from_row(row: &SqliteRow) -> AppResult<User> {
     Ok(User {
         id: row.try_get("id")?,
         username: row.try_get("username")?,
+        email: row.try_get("email")?,
         password_hash: row.try_get("passwordHash")?,
         two_factor_secret: row.try_get("twoFactorSecret")?,
         is_two_factor_enabled: row.try_get::<i64, _>("isTwoFactorEnabled")? != 0,
@@ -106,6 +111,67 @@ pub async fn find_by_id(conn: &mut SqliteConnection, id: &str) -> AppResult<Opti
 
 pub async fn find_by_username(conn: &mut SqliteConnection, username: &str) -> AppResult<Option<User>> {
     fetch_one_by(conn, "username", username).await
+}
+
+/// D84: the user with this email, whatever its letter case.
+pub async fn find_by_email(conn: &mut SqliteConnection, email: &str) -> AppResult<Option<User>> {
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        r#"SELECT {COLUMNS} FROM "users" WHERE "email" IS NOT NULL AND lower("email") = lower(?1)"#
+    )))
+    .bind(email.trim())
+    .fetch_optional(&mut *conn)
+    .await?;
+    match row {
+        Some(r) => Ok(Some(with_role(conn, from_row(&r)?).await?)),
+        None => Ok(None),
+    }
+}
+
+/// D84: the user someone signs in as — by email or by username (the old way keeps working).
+pub async fn find_for_sign_in(conn: &mut SqliteConnection, identifier: &str) -> AppResult<Option<User>> {
+    let id = identifier.trim();
+    if id.contains('@') {
+        if let Some(u) = find_by_email(conn, id).await? {
+            return Ok(Some(u));
+        }
+    }
+    if let Some(u) = find_by_username(conn, id).await? {
+        return Ok(Some(u));
+    }
+    find_by_email(conn, id).await
+}
+
+pub async fn get_for_sign_in(db: &Db, identifier: &str) -> AppResult<Option<User>> {
+    let mut conn = db.read().acquire().await?;
+    find_for_sign_in(&mut conn, identifier).await
+}
+
+/// D84: a free username made from an email ("anna.perera@example.com" → "anna.perera", then
+/// "anna.perera2", …), for users who give only their email.
+pub async fn username_from_email(conn: &mut SqliteConnection, email: &str) -> AppResult<String> {
+    let local = email.split('@').next().unwrap_or("");
+    let mut base: String =
+        local.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')).collect();
+    if base.chars().count() < 3 {
+        base = format!("user{base}");
+    }
+    let base: String = base.chars().take(60).collect();
+    let mut name = base.clone();
+    let mut n = 2;
+    while find_by_username(conn, &name).await?.is_some() {
+        name = format!("{base}{n}");
+        n += 1;
+    }
+    Ok(name)
+}
+
+async fn email_taken(conn: &mut SqliteConnection, email: &str, except: Option<&str>) -> AppResult<()> {
+    if let Some(u) = find_by_email(conn, email).await? {
+        if Some(u.id.as_str()) != except {
+            return Err(AppError::Conflict(format!("A user with the email {} already exists", email.trim())));
+        }
+    }
+    Ok(())
 }
 
 pub async fn get_by_id(db: &Db, id: &str) -> AppResult<Option<User>> {
@@ -155,17 +221,19 @@ pub async fn burn_equivalent_time(password: &str) -> AppResult<()> {
 async fn insert(
     conn: &mut SqliteConnection,
     username: &str,
+    email: Option<&str>,
     password_hash: &str,
     role_id: Option<&str>,
 ) -> AppResult<String> {
     let id = new_id();
     let now = now_iso();
     sqlx::query(
-        r#"INSERT INTO "users" ("id","username","passwordHash","isTwoFactorEnabled","roleId","isActive","createdAt","updatedAt")
-           VALUES (?1,?2,?3,0,?4,1,?5,?5)"#,
+        r#"INSERT INTO "users" ("id","username","email","passwordHash","isTwoFactorEnabled","roleId","isActive","createdAt","updatedAt")
+           VALUES (?1,?2,?3,?4,0,?5,1,?6,?6)"#,
     )
     .bind(&id)
     .bind(username)
+    .bind(email.map(str::trim))
     .bind(password_hash)
     .bind(role_id)
     .bind(&now)
@@ -175,7 +243,9 @@ async fn insert(
 }
 
 pub struct CreateUser {
+    /// Empty = made from the email (D84).
     pub username: String,
+    pub email: Option<String>,
     pub password: String,
     pub role_id: Option<String>,
 }
@@ -183,13 +253,20 @@ pub struct CreateUser {
 pub async fn create_user(db: &Db, dto: CreateUser) -> AppResult<User> {
     let hash = hash_password(&dto.password).await?;
     let mut tx = db.begin().await?;
-    if find_by_username(&mut tx, &dto.username).await?.is_some() {
-        return Err(AppError::Conflict(format!("User {} already exists", dto.username)));
+    if let Some(email) = &dto.email {
+        email_taken(&mut tx, email, None).await?;
+    }
+    let username = match (dto.username.trim(), &dto.email) {
+        ("", Some(email)) => username_from_email(&mut tx, email).await?,
+        (name, _) => name.to_string(),
+    };
+    if find_by_username(&mut tx, &username).await?.is_some() {
+        return Err(AppError::Conflict(format!("User {username} already exists")));
     }
     if let Some(role_id) = &dto.role_id {
         roles::find_by_id(&mut tx, role_id).await?;
     }
-    let id = insert(&mut tx, &dto.username, &hash, dto.role_id.as_deref()).await?;
+    let id = insert(&mut tx, &username, dto.email.as_deref(), &hash, dto.role_id.as_deref()).await?;
     let user = require(&mut tx, &id).await?;
     tx.commit().await?;
     Ok(user)
@@ -198,6 +275,8 @@ pub async fn create_user(db: &Db, dto: CreateUser) -> AppResult<User> {
 #[derive(Default)]
 pub struct UpdateUser {
     pub username: Option<String>,
+    /// D84: `Some(None)` removes the email.
+    pub email: Option<Option<String>>,
     pub role_id: Option<String>,
     pub is_active: Option<bool>,
 }
@@ -220,6 +299,13 @@ pub async fn update_user(db: &Db, id: &str, dto: UpdateUser) -> AppResult<User> 
         }
         username = new_name;
     }
+    let mut email = user.email.clone();
+    if let Some(new_email) = dto.email {
+        if let Some(e) = &new_email {
+            email_taken(&mut tx, e, Some(id)).await?;
+        }
+        email = new_email.map(|e| e.trim().to_string());
+    }
     let mut role_id = user.role_id.clone();
     if let Some(r) = dto.role_id {
         roles::find_by_id(&mut tx, &r).await?;
@@ -227,15 +313,16 @@ pub async fn update_user(db: &Db, id: &str, dto: UpdateUser) -> AppResult<User> 
     }
     let is_active = dto.is_active.unwrap_or(user.is_active);
 
-    if username != user.username || role_id != user.role_id || is_active != user.is_active {
+    if username != user.username || email != user.email || role_id != user.role_id || is_active != user.is_active {
         sqlx::query(
-            r#"UPDATE "users" SET "username" = ?1, "roleId" = ?2, "isActive" = ?3, "updatedAt" = ?4 WHERE "id" = ?5"#,
+            r#"UPDATE "users" SET "username" = ?1, "roleId" = ?2, "isActive" = ?3, "updatedAt" = ?4, "email" = ?6 WHERE "id" = ?5"#,
         )
         .bind(&username)
         .bind(&role_id)
         .bind(i64::from(is_active))
         .bind(now_iso())
         .bind(id)
+        .bind(&email)
         .execute(&mut *tx)
         .await?;
     }
@@ -355,7 +442,7 @@ pub async fn bootstrap_admin(db: &Db, username: &str, password: &str) -> AppResu
         return Ok(false);
     }
     let admin = roles::find_by_name(&mut tx, app_core::permissions::ADMIN_ROLE).await?;
-    insert(&mut tx, username, &hash, admin.as_ref().map(|r| r.id.as_str())).await?;
+    insert(&mut tx, username, None, &hash, admin.as_ref().map(|r| r.id.as_str())).await?;
     tx.commit().await?;
     Ok(true)
 }
@@ -368,7 +455,12 @@ pub async fn any_users(db: &Db) -> AppResult<bool> {
 /// First-run setup (D17): creates the first user with the Admin role, but only while the
 /// database has no users at all. The check and the insert share the writer transaction, so two
 /// simultaneous requests cannot both succeed. Returns the new user, or `None` if users exist.
-pub async fn create_first_admin(db: &Db, username: &str, password: &str) -> AppResult<Option<User>> {
+pub async fn create_first_admin(
+    db: &Db,
+    username: &str,
+    email: Option<&str>,
+    password: &str,
+) -> AppResult<Option<User>> {
     if any_users(db).await? {
         return Ok(None);
     }
@@ -381,7 +473,11 @@ pub async fn create_first_admin(db: &Db, username: &str, password: &str) -> AppR
     let admin = roles::find_by_name(&mut tx, app_core::permissions::ADMIN_ROLE)
         .await?
         .ok_or_else(|| AppError::internal("Admin role missing"))?;
-    let id = insert(&mut tx, username, &hash, Some(admin.id.as_str())).await?;
+    let username = match (username.trim(), email) {
+        ("", Some(e)) => username_from_email(&mut tx, e).await?,
+        (name, _) => name.to_string(),
+    };
+    let id = insert(&mut tx, &username, email, &hash, Some(admin.id.as_str())).await?;
     let user = require(&mut tx, &id).await?;
     tx.commit().await?;
     Ok(Some(user))

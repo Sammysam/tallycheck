@@ -73,11 +73,15 @@ pub async fn login(
     if username.is_empty() || password.is_empty() || username.chars().count() > MAX_USERNAME_CHARS {
         return Err(AppError::Unauthorized("Invalid credentials".into()));
     }
+    // D84: the box takes an email or a username; attempts count against the account's username
+    // (or the text typed when no account matches), so the two can't be used to double the tries.
+    let found = users::get_for_sign_in(&state.db, &username).await?;
+    let username = found.as_ref().map_or_else(|| username.trim().to_lowercase(), |u| u.username.clone());
     let throttle_key = throttle_key("login", local, &username);
     state.throttle.begin(&throttle_key).map_err(throttled)?;
     let started = tokio::time::Instant::now();
 
-    let Some(user) = users::get_by_username(&state.db, &username).await? else {
+    let Some(user) = found else {
         users::burn_equivalent_time(&password).await?;
         return Err(reject_login(&state, started, None, &username).await);
     };
@@ -284,7 +288,7 @@ pub async fn first_run_create(
         return Err(AppError::Forbidden("The app is already set up. Sign in instead.".into()));
     }
     let dto = crate::validate::create_user(body.object())?;
-    let user = users::create_first_admin(&state.db, &dto.username, &dto.password)
+    let user = users::create_first_admin(&state.db, &dto.username, dto.email.as_deref(), &dto.password)
         .await?
         .ok_or_else(|| AppError::Forbidden("The app is already set up. Sign in instead.".into()))?;
     audit::record(
@@ -354,7 +358,7 @@ pub async fn recover_with_key(
     let obj = body.object();
     let (username, key) = (text(&obj, "username"), text(&obj, "recoveryKey"));
     if username.is_empty() || key.is_empty() {
-        return Err(AppError::bad_request("Enter your username and your recovery key"));
+        return Err(AppError::bad_request("Enter your email (or username) and your recovery key"));
     }
     if username.chars().count() > MAX_USERNAME_CHARS {
         return Err(AppError::bad_request("That username and recovery key don't match. Check both and try again."));
@@ -404,7 +408,7 @@ pub async fn recover_with_windows(
     let obj = body.object();
     let username = text(&obj, "username");
     if username.is_empty() {
-        return Err(AppError::bad_request("Enter the username whose password you want to reset"));
+        return Err(AppError::bad_request("Enter the email (or username) whose password you want to reset"));
     }
     if username.chars().count() > MAX_USERNAME_CHARS {
         return Err(AppError::bad_request("There is no TallyCheck user with that username."));
@@ -477,7 +481,7 @@ pub async fn username_with_key(
                 200,
             )
             .await;
-            Ok(Json(json!({ "username": user.username })))
+            Ok(Json(json!({ "username": user.username, "email": user.email })))
         }
         None => {
             audit_auth(&state, None, "(unknown)", "Failed username lookup", USERNAME_KEY_PATH, 400).await;
@@ -520,7 +524,8 @@ pub async fn usernames_with_windows(
                 200,
             )
             .await;
-            let users: Vec<Value> = rows.into_iter().map(|(u, r)| json!({ "username": u, "role": r })).collect();
+            let users: Vec<Value> =
+                rows.into_iter().map(|(u, r, e)| json!({ "username": u, "role": r, "email": e })).collect();
             Ok(Json(json!({ "users": users })))
         }
         Verification::NotVerified => {
@@ -568,6 +573,7 @@ pub async fn me(current: CurrentUser) -> Json<Value> {
     Json(json!({
         "id": u.id,
         "username": u.username,
+        "email": u.email,
         "isTwoFactorEnabled": u.is_two_factor_enabled,
         "isActive": u.is_active,
         "role": u.role.map(|r| json!({ "id": r.id, "name": r.name, "permissions": r.permissions })),

@@ -1206,6 +1206,20 @@ recommendations without answering each one individually; revisit any of them on 
   payment", …) and these rows. Not covered: prior state disability / paid leave and local tax
   contributions (their yearly caps count TallyCheck runs only), the FUTA credit reduction on prior
   wages, and Form 941 line 1 for prior pay periods.
+- **D84 Sign in with email** (requested 2026-11-27 because people forget their usernames; email
+  or username chosen). Users gain an optional, unique `email` (`users."email"`, unique whatever its
+  letter case). `POST /auth/login` takes an email or a username in `username`: an email finds the
+  user by email, anything else by username and then by email (`users::find_for_sign_in`); the
+  sign-in throttle counts against the account's username, so the two names share one count. The
+  first administrator (`POST /auth/first-run`) and new users (`POST /users`) may give only an email:
+  the username is then made from it ("anna.perera@example.com" → "anna.perera", then
+  "anna.perera2", …). `PATCH /users/:id` changes the email (an empty string removes it); a taken
+  email is a 409. User JSON, `GET /auth/me` and the recovery lookups (D56) include `email`; the
+  recovery-key and Windows password resets (D49) accept the email too. Screens: the sign-in box is
+  "Email" (a username still works), the first-run screen asks for the email, the Users page shows
+  each user's email (or "No email yet") with Add / Change email, and New user asks for the email
+  with an optional username. Existing users keep signing in with their usernames until an email is
+  added.
 
 - **D50 Security review fixes** (full review 2026-11-03; all findings fixed
   after review). Sign-in: the throttle counts an attempt *before* the password check

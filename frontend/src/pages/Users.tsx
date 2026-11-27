@@ -20,7 +20,7 @@ import { permissionLabel } from '../lib/permissions';
 
 interface Role { id: string; name: string; permissions: string[]; isSystem: boolean }
 interface UserRow {
-  id: string; username: string; isActive: boolean; isTwoFactorEnabled: boolean;
+  id: string; username: string; email?: string | null; isActive: boolean; isTwoFactorEnabled: boolean;
   role: Role | null; roleId: string | null; createdAt: string;
 }
 
@@ -50,7 +50,10 @@ export default function Users() {
   const [lastSignIn, setLastSignIn] = useState<Record<string, string>>({});
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ username: '', password: '', again: '', roleId: '' });
+  const [form, setForm] = useState({ email: '', username: '', password: '', again: '', roleId: '' });
+  // D84: changing a user's sign-in email.
+  const [emailing, setEmailing] = useState<UserRow | null>(null);
+  const [newEmail, setNewEmail] = useState('');
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [editRole, setEditRole] = useState('');
   const [resetting, setResetting] = useState<UserRow | null>(null);
@@ -68,13 +71,13 @@ export default function Users() {
   };
   useEffect(() => { load(); }, []);
 
-  const openNew = () => { setForm({ username: '', password: '', again: '', roleId: '' }); setError(''); setCreating(true); };
+  const openNew = () => { setForm({ email: '', username: '', password: '', again: '', roleId: '' }); setError(''); setCreating(true); };
   useCommand('new', openNew);
-  useCommand('close', () => { setCreating(false); setEditing(null); setResetting(null); });
+  useCommand('close', () => { setCreating(false); setEditing(null); setResetting(null); setEmailing(null); });
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? rows.filter((r) => r.username.toLowerCase().includes(q) || (r.role?.name ?? '').toLowerCase().includes(q)) : rows;
+    return q ? rows.filter((r) => r.username.toLowerCase().includes(q) || (r.email ?? '').toLowerCase().includes(q) || (r.role?.name ?? '').toLowerCase().includes(q)) : rows;
   }, [rows, search]);
   const active = rows.filter((r) => r.isActive).length;
   const withTwoFactor = rows.filter((r) => r.isActive && r.isTwoFactorEnabled).length;
@@ -99,8 +102,18 @@ export default function Users() {
   const create = (e: FormEvent) => {
     e.preventDefault();
     if (form.password !== form.again) { setError('The two passwords are different.'); return; }
-    run(() => api.post('/users', { username: form.username.trim(), password: form.password, roleId: form.roleId || undefined }),
-      `User ${form.username.trim()} created.`, () => setCreating(false));
+    // D84: the email is how they sign in; the username is optional (made from the email).
+    run(() => api.post('/users', {
+      email: form.email.trim(), ...(form.username.trim() ? { username: form.username.trim() } : {}),
+      password: form.password, roleId: form.roleId || undefined,
+    }), `User ${form.email.trim()} created. They sign in with that email.`, () => setCreating(false));
+  };
+  const saveEmail = (e: FormEvent) => {
+    e.preventDefault();
+    if (!emailing) return;
+    run(() => api.patch(`/users/${emailing.id}`, { email: newEmail.trim() }),
+      newEmail.trim() ? `${emailing.username} now signs in with ${newEmail.trim()}.` : `Email removed for ${emailing.username}.`,
+      () => setEmailing(null));
   };
   const saveRole = (e: FormEvent) => {
     e.preventDefault();
@@ -154,7 +167,9 @@ export default function Users() {
       <Table data={shown} columns={[
         { header: 'User', accessor: (r) => (
           <span className="font-medium text-gray-900">
-            {r.username}{r.id === me?.id && <span className="ml-2 text-[10px] uppercase tracking-wide bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">You</span>}
+            {r.email || r.username}{r.id === me?.id && <span className="ml-2 text-[10px] uppercase tracking-wide bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">You</span>}
+            {r.email && <span className="block text-xs font-normal text-gray-500">{r.username}</span>}
+            {!r.email && <span className="block text-xs font-normal text-amber-700">No email yet</span>}
           </span>
         ) },
         { header: 'Role', accessor: (r) => r.role ? (
@@ -168,6 +183,7 @@ export default function Users() {
         { header: 'Created', accessor: (r) => when(r.createdAt) },
         { header: '', accessor: (r) => (
           <ActionMenu items={[
+            { label: r.email ? 'Change email…' : 'Add email…', onSelect: () => { setEmailing(r); setNewEmail(r.email ?? ''); setError(''); } },
             { label: 'Change role…', onSelect: () => { setEditing(r); setEditRole(r.role?.id ?? r.roleId ?? ''); setError(''); } },
             { label: 'Reset password…', onSelect: () => { setResetting(r); setResetPwd({ password: '', again: '' }); setError(''); } },
             ...(r.isTwoFactorEnabled ? [{ label: 'Turn off 2FA…', onSelect: () => setConfirm({ kind: '2fa', user: r }) }] : []),
@@ -190,10 +206,14 @@ export default function Users() {
           }
         >
           <form id="new-user" onSubmit={create} className="space-y-3">
-            <label className="block text-xs font-medium text-gray-600">Username
-              <input className="mt-1" required minLength={3} type="text" placeholder="Username" autoFocus value={form.username}
+            <label className="block text-xs font-medium text-gray-600">Email (they sign in with it)
+              <input className="mt-1" required type="email" placeholder="name@company.com" autoFocus value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })} aria-label="Email" />
+            </label>
+            <label className="block text-xs font-medium text-gray-600">Username (optional)
+              <input className="mt-1" minLength={3} type="text" placeholder="Username" value={form.username}
                 onChange={(e) => setForm({ ...form, username: e.target.value })} />
-              <span className="font-normal text-gray-500">At least 3 characters: letters, numbers, dots, dashes or underscores.</span>
+              <span className="font-normal text-gray-500">Left empty, it is made from the email. Letters, numbers, dots, dashes or underscores.</span>
             </label>
             <label className="block text-xs font-medium text-gray-600">Password
               <div className="mt-1"><PasswordInput required placeholder="Password (min 8 chars)" value={form.password} onChange={(v) => setForm({ ...form, password: v })} /></div>
@@ -206,6 +226,31 @@ export default function Users() {
               <select className="mt-1" value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })} aria-label="Role">{roleOptions}</select>
             </label>
             <RoleSummary role={roles.find((r) => r.id === form.roleId)} />
+            {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
+          </form>
+        </Dialog>
+      )}
+
+      {emailing && (
+        <Dialog
+          title={`${emailing.email ? 'Change' : 'Add'} email — ${emailing.username}`}
+          width={460}
+          onClose={() => !busy && setEmailing(null)}
+          buttons={
+            <>
+              <button type="submit" form="edit-email" className="btn btn-primary" disabled={busy}>Save</button>
+              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setEmailing(null)}>Cancel</button>
+            </>
+          }
+        >
+          <form id="edit-email" onSubmit={saveEmail} className="space-y-3">
+            <label className="block text-xs font-medium text-gray-600">Email
+              <input className="mt-1" type="email" autoFocus placeholder="name@company.com" value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)} aria-label="New email" />
+            </label>
+            <p className="text-xs text-gray-500">
+              {emailing.username} signs in with this email from now on (the username keeps working). Leave it empty to remove the email.
+            </p>
             {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
           </form>
         </Dialog>

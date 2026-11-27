@@ -10,7 +10,7 @@ type Status = { needsSetup: boolean; canSetUpHere: boolean };
 /** First run (D17): create the first administrator. Only offered while the app has no users. */
 export default function FirstRunSetup() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
@@ -37,7 +37,7 @@ export default function FirstRunSetup() {
     }
     setLoading(true);
     try {
-      const { data } = await api.post<{ accessToken: string; recoveryKey?: string }>('/auth/first-run', { username, password });
+      const { data } = await api.post<{ accessToken: string; recoveryKey?: string }>('/auth/first-run', { email: email.trim(), password });
       // D49: show the recovery key before going in; sign in only once it has been saved.
       if (data.recoveryKey) {
         setCreated({ token: data.accessToken, key: data.recoveryKey });
@@ -60,7 +60,7 @@ export default function FirstRunSetup() {
       <AuthShell>
         <RecoveryKeyCard
           recoveryKey={created.key}
-          username={username}
+          username={email.trim()}
           onDone={() => {
             completeAuth(created.token);
             navigate('/', { replace: true });
@@ -84,8 +84,9 @@ export default function FirstRunSetup() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label htmlFor="setup-username" className="block text-xs font-medium text-gray-600 mb-1.5">Username</label>
-                <input id="setup-username" autoComplete="username" type="text" required minLength={3} value={username} onChange={(e) => setUsername(e.target.value)} className={input} />
+                {/* D84: people sign in with their email. */}
+                <label htmlFor="setup-email" className="block text-xs font-medium text-gray-600 mb-1.5">Your email (you sign in with it)</label>
+                <input id="setup-email" autoComplete="email" type="email" required placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} className={input} />
               </div>
               <div>
                 <label htmlFor="setup-password" className="block text-xs font-medium text-gray-600 mb-1.5">Password (at least 8 characters)</label>

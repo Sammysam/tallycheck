@@ -12,7 +12,7 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createHmac } from 'node:crypto';
-import { mkdirSync, writeFileSync, mkdtempSync, readdirSync, statSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, mkdtempSync, readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -183,7 +183,8 @@ try {
   });
 
   await check('first-run screen checks the passwords match, then creates the admin', async () => {
-    await type('input[type=text]', 'admin');
+    // D84: the first administrator signs up with an email; the username "admin" is made from it.
+    await type('input[type=email]', 'admin@example.com');
     const pw = (i, v) => evaluate(`(() => { const el = document.querySelectorAll('input[type=password]')[${i}];
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(v)});
       el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
@@ -197,6 +198,16 @@ try {
     await waitFor(`document.body.innerText.includes('Save your recovery key') && /TCRK(-[0-9A-Z]{4}){5}/.test(document.body.innerText)`, 'recovery key');
     await shot('00a-recovery-key');
     recoveryKey = await evaluate(`document.body.innerText.match(/TCRK(-[0-9A-Z]{4}){5}/)[0]`);
+    // "Save as file" really writes the key to disk (it was thrown away before the save started).
+    const keyDir = join(SHOTS, 'downloads');
+    mkdirSync(keyDir, { recursive: true });
+    await send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: keyDir });
+    await clickText('Save as file');
+    await waitFor(`document.body.innerText.includes('Saved in your Downloads folder')`, 'saved message');
+    const keyFile = join(keyDir, 'TallyCheck recovery key - admin@example.com.txt');
+    for (let i = 0; i < 50 && !existsSync(keyFile); i++) await sleep(100);
+    if (!existsSync(keyFile)) throw new Error('recovery key file not saved');
+    if (!readFileSync(keyFile, 'utf8').includes(recoveryKey)) throw new Error('recovery key file has no key');
     await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.trim() === 'Continue'); return b.disabled; })()`)
       .then((disabled) => { if (!disabled) throw new Error('Continue must wait for the tick box'); });
     await evaluate(`document.querySelector('input[type=checkbox]').click()`);
@@ -325,6 +336,7 @@ try {
     await waitFor(`document.body.innerText.includes('admin')`, 'admin row');
     await clickText('+ New User');
     await waitFor(`!!document.querySelector('input[placeholder=Username]')`, 'new user form');
+    await type('input[aria-label=Email]', 'clerk.one@example.com');
     await type('input[placeholder=Username]', 'clerk.one');
     await type('input[placeholder="Password (min 8 chars)"]', 'clerkpass1');
     await type('input[placeholder="Confirm password"]', 'clerkpass1');

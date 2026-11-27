@@ -336,7 +336,8 @@ try {
     await send('Page.navigate', { url: BASE + '/login' });
     await waitFor(`location.pathname === '/setup' && document.querySelectorAll('input[type=password]').length === 2`, 'first-run form');
     await evaluate(HELPERS);
-    await set('input[type=text]', ADMIN.username);
+    // D84: the first administrator signs up with an email; the username is made from it.
+    await set('input[type=email]', `${ADMIN.username}@example.com`);
     await set('input[type=password]', ADMIN.password, 0);
     await set('input[type=password]', ADMIN.password, 1);
     await evaluate(`document.querySelector('button[type=submit]').click()`);

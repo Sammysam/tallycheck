@@ -42,7 +42,7 @@ mod tests {
     async fn tokens_issued_before_the_cutoff_are_refused() -> AppResult<()> {
         let dir = tempfile::tempdir().map_err(AppError::internal)?;
         let db = Db::open(&dir.path().join("t.db")).await?;
-        let user = crate::users::create_first_admin(&db, "owner", "old-password").await?.expect("test value");
+        let user = crate::users::create_first_admin(&db, "owner", None, "old-password").await?.expect("test value");
         let now = u64::try_from(now_secs()).expect("test value");
         assert!(still_valid(&db, &user.id, now - 3600).await?, "no cutoff yet");
         let mut tx = db.begin().await?;

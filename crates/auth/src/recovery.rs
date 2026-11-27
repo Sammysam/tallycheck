@@ -109,9 +109,9 @@ pub async fn user_for_key(db: &Db, input: &str) -> AppResult<Option<crate::User>
 }
 
 /// D56: the active users' names and roles, for the Windows owner's "Forgot username?".
-pub async fn active_usernames(db: &Db) -> AppResult<Vec<(String, Option<String>)>> {
+pub async fn active_usernames(db: &Db) -> AppResult<Vec<(String, Option<String>, Option<String>)>> {
     Ok(sqlx::query_as(
-        r#"SELECT u."username", r."name" FROM "users" u LEFT JOIN "roles" r ON r."id" = u."roleId"
+        r#"SELECT u."username", r."name", u."email" FROM "users" u LEFT JOIN "roles" r ON r."id" = u."roleId"
            WHERE u."isActive" = 1 ORDER BY u."username" COLLATE NOCASE"#,
     )
     .fetch_all(db.read())
@@ -130,7 +130,8 @@ pub async fn reset_with_key(
     // Hash first, whatever happens next, so a wrong username takes as long as a wrong key.
     let hash = crate::users::hash_password(new_password).await?;
     let mut tx = db.begin().await?;
-    let Some(user) = crate::users::find_by_username(&mut tx, username).await? else { return Ok(None) };
+    // D84: the email works as well as the username.
+    let Some(user) = crate::users::find_for_sign_in(&mut tx, username).await? else { return Ok(None) };
     if !matches_in(&mut tx, &user.id, key).await? {
         return Ok(None);
     }
@@ -152,7 +153,8 @@ pub async fn reset_for_windows_owner(
 ) -> AppResult<Option<(crate::User, String)>> {
     let hash = crate::users::hash_password(new_password).await?;
     let mut tx = db.begin().await?;
-    let Some(user) = crate::users::find_by_username(&mut tx, username).await? else { return Ok(None) };
+    // D84: the email works as well as the username.
+    let Some(user) = crate::users::find_for_sign_in(&mut tx, username).await? else { return Ok(None) };
     crate::users::set_password_hash_in(&mut tx, &user.id, &hash).await?;
     crate::sessions::end_all_in(&mut tx, &user.id).await?;
     let next = issue_in(&mut tx, &user.id).await?;
@@ -198,7 +200,7 @@ mod tests {
     async fn fresh() -> AppResult<(tempfile::TempDir, Db, crate::User)> {
         let dir = tempfile::tempdir().map_err(AppError::internal)?;
         let db = Db::open(&dir.path().join("t.db")).await?;
-        let user = crate::users::create_first_admin(&db, "owner", "old-password").await?.expect("test value");
+        let user = crate::users::create_first_admin(&db, "owner", None, "old-password").await?.expect("test value");
         Ok((dir, db, user))
     }
 
@@ -235,7 +237,12 @@ mod tests {
         let (_d, db, user) = fresh().await?;
         let other = crate::users::create_user(
             &db,
-            crate::users::CreateUser { username: "clerk".into(), password: "clerk-pass".into(), role_id: None },
+            crate::users::CreateUser {
+                username: "clerk".into(),
+                email: None,
+                password: "clerk-pass".into(),
+                role_id: None,
+            },
         )
         .await?;
         assert!(reset_with_key(&db, "owner", &generate()?, "x-password").await?.is_none(), "no key issued yet");
@@ -257,7 +264,12 @@ mod tests {
         let (_d, db, owner) = fresh().await?;
         let clerk = crate::users::create_user(
             &db,
-            crate::users::CreateUser { username: "clerk".into(), password: "clerk-pass".into(), role_id: None },
+            crate::users::CreateUser {
+                username: "clerk".into(),
+                email: None,
+                password: "clerk-pass".into(),
+                role_id: None,
+            },
         )
         .await?;
         let key = issue(&db, &clerk.id).await?;
@@ -266,9 +278,9 @@ mod tests {
         assert!(reset_with_key(&db, "clerk", &key, "x-password").await?.is_none(), "key cancelled by the reset");
 
         let key = issue(&db, &clerk.id).await?;
-        let off = crate::users::UpdateUser { username: None, role_id: None, is_active: Some(false) };
+        let off = crate::users::UpdateUser { username: None, email: None, role_id: None, is_active: Some(false) };
         crate::users::update_user(&db, &clerk.id, off).await?;
-        let on = crate::users::UpdateUser { username: None, role_id: None, is_active: Some(true) };
+        let on = crate::users::UpdateUser { username: None, email: None, role_id: None, is_active: Some(true) };
         crate::users::update_user(&db, &clerk.id, on).await?;
         assert!(reset_with_key(&db, "clerk", &key, "x-password").await?.is_none(), "key cancelled when switched off");
         assert!(created_at(&db, &owner.id).await?.is_none());

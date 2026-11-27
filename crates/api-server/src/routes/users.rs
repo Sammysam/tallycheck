@@ -65,7 +65,7 @@ pub async fn create(
     may_give_role(&state, auth.user(), dto.role_id.as_deref()).await?;
     let user = users::create_user(
         &state.db,
-        CreateUser { username: dto.username, password: dto.password, role_id: dto.role_id },
+        CreateUser { username: dto.username, email: dto.email, password: dto.password, role_id: dto.role_id },
     )
     .await?;
     // The reference returns the freshly saved entity, whose eager `role` relation was never
@@ -117,7 +117,7 @@ pub async fn update(
     let user = users::update_user(
         &state.db,
         &id,
-        UpdateUser { username: dto.username, role_id: dto.role_id, is_active: dto.is_active },
+        UpdateUser { username: dto.username, email: dto.email, role_id: dto.role_id, is_active: dto.is_active },
     )
     .await?;
     Ok(Json(user.into()))

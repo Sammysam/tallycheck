@@ -54,9 +54,10 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="login-username" className="block text-xs font-medium text-gray-600">Username</label>
+                {/* D84: the email (or, for users made before, the username). */}
+                <label htmlFor="login-username" className="block text-xs font-medium text-gray-600">Email</label>
                 <button type="button" tabIndex={-1} onClick={() => navigate('/forgot-password?what=username')} className="text-xs text-orange-700 hover:underline">
-                  Forgot username?
+                  Forgot your email?
                 </button>
               </div>
               <input
@@ -67,7 +68,7 @@ export default function Login() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                placeholder="Your username"
+                placeholder="you@company.com (or your username)"
               />
             </div>
 

@@ -90,7 +90,7 @@ impl App {
             .await?;
         auth::users::create_user(
             &self.db,
-            auth::users::CreateUser { username: username.into(), password: "password123".into(), role_id },
+            auth::users::CreateUser { username: username.into(), email: None, password: "password123".into(), role_id },
         )
         .await?;
         let login = self
@@ -4840,6 +4840,71 @@ impl App {
     }
 }
 
+/// D84: people sign in with their email (or, as before, their username).
+#[tokio::test]
+async fn users_sign_in_with_their_email_or_username() -> TestResult {
+    let app = App::new().await?;
+    let login = |who: &str, password: &str| {
+        let (app, body) = (&app, json!({"username": who, "password": password}));
+        async move {
+            let r = app.call(Method::POST, "/api/auth/login", None, Some(body)).await?;
+            Ok::<bool, Box<dyn std::error::Error>>(r.body["accessToken"].is_string())
+        }
+    };
+
+    // The first administrator with only an email: the username is made from it.
+    let body = json!({"email": "Anna.Perera@Example.com", "password": "first-password"});
+    let r = app.call_from("127.0.0.1:50000", HOST, Method::POST, "/api/auth/first-run", None, Some(body)).await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    let token = r.body["accessToken"].as_str().ok_or("token")?.to_string();
+    let key = r.body["recoveryKey"].as_str().ok_or("key")?.to_string();
+    let me = app.call(Method::GET, "/api/auth/me", Some(&token), None).await?;
+    assert_eq!(
+        (me.body["username"].clone(), me.body["email"].clone()),
+        (json!("Anna.Perera"), json!("Anna.Perera@Example.com"))
+    );
+
+    assert!(login("anna.perera@example.com", "first-password").await?, "email, any letter case");
+    assert!(login("Anna.Perera", "first-password").await?, "the username still works");
+    assert!(!login("anna.perera@example.com", "wrong-password").await?);
+
+    // Users made with an email; an email used twice is refused; an email can be changed or removed.
+    let r = app
+        .call(
+            Method::POST,
+            "/api/users",
+            Some(&token),
+            Some(json!({"email": "clerk@example.com", "password": "clerk-password"})),
+        )
+        .await?;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!((r.body["username"].clone(), r.body["email"].clone()), (json!("clerk"), json!("clerk@example.com")));
+    let clerk = id_of(&r.body);
+    let twice = json!({"email": "CLERK@example.com", "password": "other-password"});
+    let r = app.call(Method::POST, "/api/users", Some(&token), Some(twice)).await?;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    let bad = json!({"email": "not an email", "password": "other-password"});
+    assert_eq!(app.call(Method::POST, "/api/users", Some(&token), Some(bad)).await?.status, StatusCode::BAD_REQUEST);
+    let none = json!({"password": "other-password"});
+    assert_eq!(app.call(Method::POST, "/api/users", Some(&token), Some(none)).await?.status, StatusCode::BAD_REQUEST);
+    let r = app
+        .call(Method::PATCH, &format!("/api/users/{clerk}"), Some(&token), Some(json!({"email": "books@example.com"})))
+        .await?;
+    assert_eq!(r.body["email"], json!("books@example.com"), "{}", r.body);
+    assert!(login("books@example.com", "clerk-password").await?);
+    assert!(!login("clerk@example.com", "clerk-password").await?, "the old email no longer signs in");
+    let r = app.call(Method::PATCH, &format!("/api/users/{clerk}"), Some(&token), Some(json!({"email": ""}))).await?;
+    assert_eq!(r.body["email"], Value::Null, "{}", r.body);
+    assert!(login("clerk", "clerk-password").await?);
+
+    // The recovery key works with the email too.
+    let reset = json!({"username": "anna.perera@example.com", "recoveryKey": key, "password": "second-password"});
+    let r = app.call(Method::POST, "/api/auth/recovery/key", None, Some(reset)).await?;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert!(login("anna.perera@example.com", "second-password").await?);
+    Ok(())
+}
+
 #[tokio::test]
 async fn a_forgotten_password_is_reset_with_the_recovery_key() -> TestResult {
     let app = App::new().await?;
@@ -5669,7 +5734,12 @@ async fn a_forgotten_username_is_found_with_the_recovery_key() -> TestResult {
         sqlx::query_scalar(r#"SELECT "id" FROM "roles" WHERE "name" = 'Viewer'"#).fetch_optional(app.db.read()).await?;
     auth::users::create_user(
         &app.db,
-        auth::users::CreateUser { username: "clerk".into(), password: "password123".into(), role_id: role },
+        auth::users::CreateUser {
+            username: "clerk".into(),
+            email: None,
+            password: "password123".into(),
+            role_id: role,
+        },
     )
     .await?;
     let path = "/api/auth/recovery/username/key";
@@ -5678,7 +5748,8 @@ async fn a_forgotten_username_is_found_with_the_recovery_key() -> TestResult {
     let typed = key.to_lowercase().replace('-', " ");
     let found = app.call(Method::POST, path, None, Some(json!({"recoveryKey": typed}))).await?;
     assert_eq!(found.status, StatusCode::OK, "{}", found.body);
-    assert_eq!(found.body, json!({"username": "owner"}), "only the key's own username, nothing else");
+    // D84: the email is a sign-in name too, so it is shown with the username; nothing else is.
+    assert_eq!(found.body, json!({"username": "owner", "email": null}), "only the key's own sign-in names");
 
     // The key is not used up: it still resets the password afterwards.
     let reset = app
@@ -5739,7 +5810,7 @@ async fn the_windows_owner_can_see_the_usernames() -> TestResult {
     assert_eq!(no_peer.status, StatusCode::FORBIDDEN);
     let ok = app.call_from("127.0.0.1:50000", HOST, Method::POST, path, None, None).await?;
     assert_eq!(ok.status, StatusCode::OK, "{}", ok.body);
-    assert_eq!(ok.body, json!({"users": [{"username": "owner", "role": "Admin"}]}));
+    assert_eq!(ok.body, json!({"users": [{"username": "owner", "role": "Admin", "email": null}]}), "D84: emails too");
     let actions: Vec<String> =
         sqlx::query_scalar(r#"SELECT "action" FROM "audit_logs""#).fetch_all(app.db.read()).await?;
     assert!(actions.iter().any(|a| a == "Listed the usernames with Windows sign-in"), "{actions:?}");

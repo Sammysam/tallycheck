@@ -18,9 +18,15 @@ All notable changes to TallyCheck. The format follows
   what each employee was already paid (US payroll → Payroll before TallyCheck). It counts towards
   the social security, FUTA and state unemployment limits and is included in Forms 941, 940 and
   W-2, without touching the ledger (D83).
+- Sign in with your email: the first-run screen and New user ask for an email, the sign-in box
+  takes an email (usernames still work), and administrators can add or change a user's email (D84).
 
 ### Changed
 - The activity log names US pay run actions (posted, paid, tax payment recorded, voided) (D83).
+
+### Fixed
+- "Save as file" on the recovery key screen now really saves the file (in the Downloads folder) and
+  says where it went; before, the desktop app could drop it.
 
 ## [1.1.3] - 2026-11-27
 

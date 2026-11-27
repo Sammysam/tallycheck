@@ -338,23 +338,29 @@ fn string_list(map: &Map<String, Value>, key: &str) -> Option<Vec<String>> {
 }
 
 pub struct CreateUserDto {
+    /// Empty when only an email is given (D84): the username is then made from it.
     pub username: String,
+    pub email: Option<String>,
     pub password: String,
     pub role_id: Option<String>,
 }
 
 pub fn create_user(body: Map<String, Value>) -> Result<CreateUserDto, AppError> {
+    // D84: an email may stand in for the username; without an email the username is required.
+    let has_email = body.get("email").and_then(Value::as_str).is_some_and(|e| !e.trim().is_empty());
     let mut v = Validator::new(body);
     v.field(
         "username",
-        false,
+        has_email,
         &[Rule::IsString, Rule::MinLength(3), Rule::Matches(username_pattern, USERNAME_MESSAGE)],
     )
+    .field("email", true, &[Rule::IsString, Rule::IsEmail, Rule::MaxLength(254)])
     .field("password", false, &[Rule::IsString, Rule::MinLength(8)])
     .field("roleId", true, &[Rule::IsUuid]);
     let m = v.finish()?;
     Ok(CreateUserDto {
         username: opt_string(&m, "username").unwrap_or_default(),
+        email: opt_string(&m, "email").map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
         password: opt_string(&m, "password").unwrap_or_default(),
         role_id: opt_string(&m, "roleId"),
     })
@@ -363,18 +369,26 @@ pub fn create_user(body: Map<String, Value>) -> Result<CreateUserDto, AppError> 
 /// `null` values pass validation (IsOptional) and are treated as "not sent".
 pub struct UpdateUserDto {
     pub username: Option<String>,
+    /// D84: `Some(None)` (an empty string) removes the email.
+    pub email: Option<Option<String>>,
     pub role_id: Option<String>,
     pub is_active: Option<bool>,
 }
 
-pub fn update_user(body: Map<String, Value>) -> Result<UpdateUserDto, AppError> {
+pub fn update_user(mut body: Map<String, Value>) -> Result<UpdateUserDto, AppError> {
+    let email_cleared = body.get("email").and_then(Value::as_str).is_some_and(|e| e.trim().is_empty());
+    if email_cleared {
+        body.remove("email");
+    }
     let mut v = Validator::new(body);
     v.field("username", true, &[Rule::IsString, Rule::MinLength(3), Rule::Matches(username_pattern, USERNAME_MESSAGE)])
+        .field("email", true, &[Rule::IsString, Rule::IsEmail, Rule::MaxLength(254)])
         .field("roleId", true, &[Rule::IsUuid])
         .field("isActive", true, &[Rule::IsBoolean]);
     let m = v.finish()?;
     Ok(UpdateUserDto {
         username: opt_string(&m, "username"),
+        email: if email_cleared { Some(None) } else { opt_string(&m, "email").map(|e| Some(e.trim().to_string())) },
         role_id: opt_string(&m, "roleId"),
         is_active: m.get("isActive").and_then(Value::as_bool),
     })
