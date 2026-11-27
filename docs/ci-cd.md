@@ -60,7 +60,7 @@ developer's PC: builds use a lot of CPU).
 5. Push a commit. Pipelines shows the step **Checks (Windows)** running on the runner.
 
 The first build takes a while (it compiles every dependency). Later builds are quicker because
-`CARGO_TARGET_DIR` is `%USERPROFILE%\tallycheck-ci-target`, outside the clone the runner deletes.
+`CARGO_TARGET_DIR` is `%USERPROFILE%\tallycheck-desktop-ci-target` (its own folder, so it never shares compiled files with another repository's runner on the same PC), outside the clone the runner deletes.
 Delete that folder if it grows too big.
 
 Build minutes on a self-hosted runner do not count against Bitbucket's plan.

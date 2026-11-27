@@ -28,7 +28,7 @@ definitions:
         max-time: 90
         script:
           # One line, so the variable is certainly set for the script it starts.
-          - $env:CARGO_TARGET_DIR = "$env:USERPROFILE\tallycheck-ci-target"; powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci.ps1; exit $LASTEXITCODE
+          - $env:CARGO_TARGET_DIR = "$env:USERPROFILE\tallycheck-desktop-ci-target"; powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci.ps1; exit $LASTEXITCODE
         artifacts:
           - preflight-out/**
     - step: &preflight-release
@@ -48,7 +48,7 @@ definitions:
           - windows
         max-time: 30
         script:
-          - $env:CARGO_TARGET_DIR = "$env:USERPROFILE\tallycheck-ci-target"; powershell -NoProfile -ExecutionPolicy Bypass -File tools\audit.ps1; exit $LASTEXITCODE
+          - $env:CARGO_TARGET_DIR = "$env:USERPROFILE\tallycheck-desktop-ci-target"; powershell -NoProfile -ExecutionPolicy Bypass -File tools\audit.ps1; exit $LASTEXITCODE
 
 pipelines:
   default:
