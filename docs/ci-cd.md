@@ -4,7 +4,7 @@
 |---|---|---|---|
 | **CI**: formatting, frontend build, npm advisories, clippy, all tests | GitHub Actions (Windows and macOS, GitHub's machines) | every push and pull request on GitHub | `.github/workflows/ci.yml` |
 | **CI**: the same checks | Bitbucket Pipelines (Windows, **self-hosted runner**) | every push on Bitbucket | `bitbucket-pipelines.yml` |
-| **CD**: installer (not code-signed) → update signature → draft GitHub release | GitHub Actions | tag `v<version>` or run by hand | `.github/workflows/release.yml` (D77) |
+| **CD**: installer (not code-signed) → update signature → draft GitHub release | GitHub Actions | run by hand only | `.github/workflows/release.yml` (D77) |
 | Microsoft Store MSIX (no secrets: the Store signs it) | GitHub Actions (Windows) or this PC | by hand or tag `v<version>` | `.github/workflows/msix.yml`, `python tools/build_msix.py` (D47, `docs/microsoft-store.md`) |
 | macOS app (.dmg), signed and notarized when the Apple secrets are set | GitHub Actions (Mac) or a Mac | by hand or tag `v<version>` | `.github/workflows/macos.yml`, `tools/build_macos.sh` (D53, `docs/macos.md`) |
 
@@ -53,7 +53,10 @@ Build minutes on a self-hosted runner do not count against Bitbucket's plan.
 
 1. Change the version (`src-tauri/tauri.conf.json`) and commit. CI must be green.
 2. Push the commit and a tag `v<version>` to GitHub: `git tag v1.0.1 && git push github main v1.0.1`.
-3. `release.yml` builds the installer, signs the update and makes a **draft** release (the
-   installer itself is not code-signed, so SmartScreen warns when it is first run). Check it, then publish it: only a published release reaches the app.
-4. For the Microsoft Store, download the .msix from the **Microsoft Store package** run (or build it on
-   this PC) and upload it in Partner Center.
+   The tag builds the Microsoft Store package (`msix.yml`) and the Mac app (`macos.yml`).
+3. For the Microsoft Store, download the .msix from the **Microsoft Store package** run (or build it on
+   this PC) and upload it in Partner Center. The Mac app is submitted from its own run (`docs/macos.md`).
+4. On GitHub, draft a release from the tag with that version's notes (no files) and publish it.
+5. Only if a direct Windows download is wanted: run `release.yml` by hand (Actions → Release → Run
+   workflow). It builds the installer, signs the update (needs the update-key secrets) and makes a
+   **draft** release with the files. The installer is not code-signed, so SmartScreen warns.

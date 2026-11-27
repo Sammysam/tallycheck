@@ -10,9 +10,9 @@
 
 name: Release
 
+# Run by hand only (Actions → Release → Run workflow): TallyCheck is released through the
+# Microsoft Store and the Mac app, so a version tag does not build the direct installer.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       notes:
