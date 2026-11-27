@@ -148,7 +148,7 @@ dependencies = [
  "aes-gcm",
  "axum",
  "chrono",
- "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "libc",
  "security-framework",
  "serde",
